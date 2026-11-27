@@ -429,6 +429,7 @@ final class BrowserModel: ObservableObject {
             newTab()
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
+        case "toggleBlocker": toggleBlocker()
         default: break
         }
     }
