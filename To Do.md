@@ -152,7 +152,7 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Release build zipped and attached to a GitHub release~~ — v0.2.0, `Scripts/release.sh`
 - [x] ~~First launch from the zip works on a clean profile (engine install offered in-app)~~ — script: unzipped copy, signature verified, starts in Chromium with no Gecko runtime, loads a page, quits cleanly
 - [x] ~~Automatic updates from Settings › About & Updates~~ — Ed25519-signed release zips, background download, install at quit or Restart to Update, GitHub token for the private repository; script: a 0.8.0 copy updated itself to 0.9.0 from a local feed and relaunched; tampered and mislabelled downloads refused; token check against the real repository
-- [ ] First real update through GitHub: needs a release made with the new `release.sh` (0.3.0), installed over a copy that has the updater [integrator]
+- [x] ~~First real update through GitHub~~ — script: a copy with the updater (0.2.9) updated itself to the published 0.3.0 from the public repository, no token, and relaunched; installer now waits for Chromium helpers of the old app before swapping (0.3.1)
 - [x] ~~A licence for Mosaic itself~~ — GNU GPL v3 or later (`LICENSE`), required by the bundled uBlock Origin engine; shown in Settings › About & Updates and shipped in the app
 
 ## Deferred on purpose

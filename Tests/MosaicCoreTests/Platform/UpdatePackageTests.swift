@@ -90,4 +90,39 @@ import Testing
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Apps").path)
         #expect(leftovers == ["Mosaic.app"])
     }
+
+    @Test func installerWaitsForHelpersInsideTheOldBundle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mosaic-helpers-\(UUID())")
+        let target = root.appendingPathComponent("Apps/Mosaic.app"), staged = root.appendingPathComponent("Updates/Mosaic.app")
+        let helperDir = target.appendingPathComponent("Contents/Frameworks/Helper")
+        try FileManager.default.createDirectory(at: helperDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // A stand-in for a lingering Chromium helper, run from inside the old bundle: a tiny
+        // program compiled here (copies of system binaries are refused by code signing).
+        let helperBinary = helperDir.appendingPathComponent("helper")
+        let source = root.appendingPathComponent("helper.c")
+        try Data("#include <unistd.h>\nint main(void) { sleep(1); return 0; }\n".utf8).write(to: source)
+        let compiler = Process()
+        compiler.executableURL = URL(fileURLWithPath: "/usr/bin/cc")
+        compiler.arguments = ["-o", helperBinary.path, source.path]
+        try compiler.run()
+        compiler.waitUntilExit()
+        try #require(compiler.terminationStatus == 0)
+        let helper = Process()
+        helper.executableURL = helperBinary
+        try helper.run()
+        let script = root.appendingPathComponent("install.sh")
+        try UpdatePackage.installerScript.write(to: script, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path, "999999", target.path, staged.path, "stay", "open"]
+        process.standardOutput = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        // The swap happened only after the helper had exited on its own.
+        #expect(process.terminationStatus == 0)
+        #expect(!helper.isRunning)
+        #expect(helper.terminationReason == .exit)
+    }
 }

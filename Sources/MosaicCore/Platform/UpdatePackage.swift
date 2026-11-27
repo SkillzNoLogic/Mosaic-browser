@@ -68,7 +68,8 @@ public enum UpdatePackage {
 
     // MARK: Installer script
 
-    /// A shell script, run detached as Mosaic quits, that waits for process `$1` to exit,
+    /// A shell script, run detached as Mosaic quits, that waits for process `$1` (and any
+    /// helper process still running from the old bundle) to exit,
     /// moves the new bundle into place with the old one kept aside until the move succeeds,
     /// and (when `$4` is "relaunch") starts the new Mosaic. Arguments:
     /// `$1` PID, `$2` installed app path, `$3` staged new app path, `$4` relaunch|stay,
@@ -81,6 +82,15 @@ public enum UpdatePackage {
         pid="$1"; target="$2"; staged="$3"; relaunch="$4"; how="$5"; shift 5
         for _ in $(seq 1 600); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
         if kill -0 "$pid" 2>/dev/null; then echo "Mosaic did not quit; update not installed"; exit 1; fi
+        # Chromium's helper processes can outlive the main process for a moment; moving the
+        # bundle out from under them makes them crash. Wait for them, then stop stragglers.
+        helpers() { ps -axo pid=,comm= | grep -F "$target/Contents/" | awk '{print $1}'; }
+        for _ in $(seq 1 100); do [ -z "$(helpers)" ] && break; sleep 0.1; done
+        if [ -n "$(helpers)" ]; then
+            kill -TERM $(helpers) 2>/dev/null
+            for _ in $(seq 1 30); do [ -z "$(helpers)" ] && break; sleep 0.1; done
+            [ -n "$(helpers)" ] && kill -KILL $(helpers) 2>/dev/null && sleep 0.2
+        fi
         backup="${target%.app}.previous-$$.app"
         if ! mv "$target" "$backup"; then echo "could not move the old app aside"; exit 1; fi
         if ! mv "$staged" "$target" 2>/dev/null && ! ditto "$staged" "$target"; then
