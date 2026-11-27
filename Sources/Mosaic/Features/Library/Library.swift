@@ -26,4 +26,7 @@ final class Library: ObservableObject {
 
     /// Adds or removes a bookmark for the page.
     func toggleBookmark(url: String, title: String) {}
+
+    /// Most visited sites, for the new-tab page.
+    func topSites(limit: Int) -> [Suggestion] { [] }
 }

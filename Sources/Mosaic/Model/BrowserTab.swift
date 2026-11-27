@@ -69,6 +69,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
 
     var isStartPage: Bool { url.isEmpty }
 
+    /// Set when the tab shows one of Mosaic's own pages instead of a web page.
+    var internalPage: InternalPage? { InternalPage(url: url) }
+
     var displayTitle: String {
         if isStartPage { return "New Tab" }
         if !title.isEmpty { return title }

@@ -29,7 +29,9 @@ private struct TabContent: View {
     @ObservedObject var gecko: GeckoEngine
 
     var body: some View {
-        if tab.isStartPage {
+        if let page = tab.internalPage {
+            InternalPageView(page: page)
+        } else if tab.isStartPage {
             StartPage()
         } else if let failure = tab.failure {
             EngineMessage(

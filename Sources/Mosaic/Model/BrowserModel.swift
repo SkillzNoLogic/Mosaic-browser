@@ -21,7 +21,9 @@ final class BrowserModel: ObservableObject {
     @Published var showBlocker = false
 
     /// The settings category shown inside the window, or nil when settings are closed.
-    @Published var settingsCategory: SettingsCategory?
+    @Published var settingsCategory: SettingsCategory? {
+        didSet { if (oldValue == nil) != (settingsCategory == nil) { updateDocking() } }
+    }
 
     // Workspaces and groups: shapes in TabOrganization.swift, behaviour owned by the tabs area.
     @Published var workspaces: [Workspace] = [.personal]
@@ -98,6 +100,15 @@ final class BrowserModel: ObservableObject {
 
     func closeSettings() {
         settingsCategory = nil
+    }
+
+    /// Opens one of Mosaic's own pages, reusing a tab that already shows it.
+    func openInternalPage(_ page: InternalPage) {
+        if let existing = tabs.first(where: { $0.internalPage == page }) {
+            select(existing)
+        } else {
+            newTab(url: page.url)
+        }
     }
 
     // MARK: - Tabs
@@ -182,6 +193,16 @@ final class BrowserModel: ObservableObject {
     }
 
     func load(_ url: String, in tab: BrowserTab) {
+        // Mosaic's own pages are drawn by the shell; no engine is involved.
+        if let page = InternalPage(url: url) {
+            tab.url = page.url
+            tab.title = page.title
+            tab.failure = nil
+            tab.isLoading = false
+            tabChanged(tab)
+            updateDocking()
+            return
+        }
         tab.url = url
         tab.title = ""
         tab.failure = nil
@@ -497,7 +518,9 @@ final class BrowserModel: ObservableObject {
     /// True when the selected tab is a live Gecko page, i.e. the content area
     /// is the transparent hole rather than one of Mosaic's own views.
     var showsGeckoPage: Bool {
-        guard let tab = selectedTab else { return false }
+        // Settings and Mosaic's own pages cover the content area, so the Gecko window
+        // behind it must not show through.
+        guard let tab = selectedTab, settingsCategory == nil, tab.internalPage == nil else { return false }
         return tab.engine == .gecko && !tab.isStartPage && tab.failure == nil
             && tab.geckoID != nil && gecko.isRunning
     }
