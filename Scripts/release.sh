@@ -1,9 +1,10 @@
 #!/bin/bash
-# Builds a release of Mosaic and packages it as a zip, ready to attach to a GitHub release.
+# Builds a release of Mosaic and packages it as a disk image (drag-to-install) and a zip,
+# ready to attach to a GitHub release.
 #
 # Usage: Scripts/release.sh <version>        e.g. Scripts/release.sh 0.2.0
 #
-# Output: build/release/Mosaic-<version>-macos-arm64.zip and a .sha256 file next to it.
+# Output: build/release/Mosaic-<version>-macos-arm64.dmg and .zip, each with a .sha256 file.
 # The app is ad-hoc signed (no Developer ID yet), so on another Mac it must be opened with
 # right-click › Open the first time, or have its quarantine attribute removed; the release
 # notes say so.
@@ -36,3 +37,5 @@ ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 (cd "$OUT" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
 echo "Packaged $ZIP ($(du -h "$ZIP" | cut -f1))"
 cat "$ZIP.sha256"
+
+Scripts/make-dmg.sh "$VERSION"

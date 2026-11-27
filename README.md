@@ -29,8 +29,8 @@ macOS 26 or later; older systems get solid materials).
 
 ## Install a release
 
-Download `Mosaic-<version>-macos-arm64.zip` from the GitHub release, unzip it and move
-`Mosaic.app` to Applications. The app is not yet signed with a Developer ID, so macOS
+Download `Mosaic-<version>-macos-arm64.dmg` from the GitHub release, open it and drag
+Mosaic onto the Applications folder (a `.zip` of the same app is attached too). The app is not yet signed with a Developer ID, so macOS
 blocks the first launch: right-click › **Open**, or run
 `xattr -dr com.apple.quarantine /Applications/Mosaic.app`.
 
@@ -48,7 +48,7 @@ the Command Line Tools alone), plus CMake and esbuild once (`brew install cmake 
 Scripts/bootstrap.sh     # once: Chromium (CEF), the private Firefox ESR, the blocker engine
 Scripts/build.sh         # builds build/Mosaic.app
 Scripts/test.sh          # unit tests
-Scripts/release.sh 0.2.0 # tests, release build, zip for a GitHub release
+Scripts/release.sh 0.2.0 # tests, release build, .dmg and .zip for a GitHub release
 ```
 
 | Piece | What `bootstrap.sh` fetches | Where it goes |
