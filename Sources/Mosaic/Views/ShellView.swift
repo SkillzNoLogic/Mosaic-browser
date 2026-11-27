@@ -43,7 +43,8 @@ struct ShellView: View {
             .tint(theme.accent)
             .backgroundPreferenceValue(ContentCardAnchorKey.self) { anchor in
                 GeometryReader { proxy in
-                    BackgroundFill(spec: layout.appearance.background)
+                    // canvas: a workspace may have its own background (Gradient Studio).
+                    BackgroundFill(spec: layout.appearance.background(forWorkspace: model.selectedWorkspaceID.uuidString))
                         .mask {
                             FrameWithHole(hole: anchor.map { proxy[$0] }, radius: layout.appearance.contentCornerRadius)
                                 .fill(style: FillStyle(eoFill: true))

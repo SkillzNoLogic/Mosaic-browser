@@ -397,10 +397,17 @@ struct StartPage: View {
     }
 
     @ViewBuilder private var startBackground: some View {
-        // A whisper of the Mosaic's accent so the new-tab page belongs to the theme.
-        ZStack {
-            ShellColors.page
-            LinearGradient(colors: [theme.accent.opacity(0.07), .clear], startPoint: .top, endPoint: .center)
+        // canvas: the New Tab page's background from Settings › Mosaics (Gradient Studio).
+        let newTab = theme.appearance.newTabBackground
+        switch newTab.mode {
+        case .window: BackgroundFill(spec: theme.appearance.background(forWorkspace: model.selectedWorkspaceID.uuidString))
+        case .custom: BackgroundFill(spec: newTab.custom)
+        case .plain:
+            // A whisper of the Mosaic's accent so the new-tab page belongs to the theme.
+            ZStack {
+                ShellColors.page
+                LinearGradient(colors: [theme.accent.opacity(0.07), .clear], startPoint: .top, endPoint: .center)
+            }
         }
     }
 }

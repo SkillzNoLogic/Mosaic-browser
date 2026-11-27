@@ -135,8 +135,8 @@ struct BackgroundFill: View {
             Color(hex: spec.color, fallback: Color(nsColor: .windowBackgroundColor))
                 .overlay(adaptation(luminance: Self.luminance(of: [spec.color])))
         case .gradient:
-            GradientFill(spec: spec.gradient)
-                .overlay(adaptation(luminance: Self.luminance(of: spec.gradient.normalizedStops.map(\.color))))
+            // canvas: Gradient Studio painting (mesh, strength, grain, Raw), Features/Canvas/GradientRendering.swift.
+            CanvasGradientBackground(spec: spec.gradient)
         }
     }
 
@@ -158,25 +158,8 @@ struct BackgroundFill: View {
 struct GradientFill: View {
     let spec: GradientSpec
 
-    var body: some View {
-        let stops = spec.normalizedStops.map { Gradient.Stop(color: Color(hex: $0.color), location: $0.location) }
-        let gradient = Gradient(stops: stops)
-        let radians = spec.angle * .pi / 180
-        let dx = cos(radians) / 2, dy = sin(radians) / 2
-        switch spec.kind {
-        case .linear:
-            LinearGradient(gradient: gradient,
-                           startPoint: UnitPoint(x: 0.5 - dx, y: 0.5 - dy),
-                           endPoint: UnitPoint(x: 0.5 + dx, y: 0.5 + dy))
-        case .radial:
-            GeometryReader { proxy in
-                RadialGradient(gradient: gradient, center: .center, startRadius: 0,
-                               endRadius: max(proxy.size.width, proxy.size.height) * 0.75)
-            }
-        case .angular:
-            AngularGradient(gradient: gradient, center: .center, angle: .degrees(spec.angle))
-        }
-    }
+    // canvas: every kind, including the Gradient Studio's mesh (Features/Canvas/GradientRendering.swift).
+    var body: some View { CanvasGradientFill(spec: spec) }
 }
 
 // MARK: - Liquid Glass / solid surfaces

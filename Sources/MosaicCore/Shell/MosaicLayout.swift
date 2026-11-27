@@ -301,20 +301,47 @@ public struct GradientStop: Codable, Hashable, Sendable {
     }
 }
 
-/// A minimal gradient description; the Gradient Studio extends it (add fields with defaults
-/// so older files still decode).
+/// A gradient description. The Gradient Studio (canvas) extended it with the free-form
+/// `mesh` kind and its colour `sources`, a centre, grain, strength and Raw; every field
+/// added since has a default, so older files still decode (see `init(from:)`).
 public struct GradientSpec: Codable, Hashable, Sendable {
-    public enum Kind: String, Codable, CaseIterable, Sendable { case linear, radial, angular }
+    /// `mesh` is the Gradient Studio's free-form gradient: colour sources placed anywhere,
+    /// blended in OKLab (see `MeshGradient.swift` in MosaicCore/Canvas).
+    public enum Kind: String, Codable, CaseIterable, Sendable { case linear, radial, angular, mesh }
 
     public var kind: Kind
     /// Degrees; 0 runs left to right, 90 top to bottom.
     public var angle: Double
     public var stops: [GradientStop]
+    // canvas: Gradient Studio fields (defaults keep older files decoding).
+    /// Colour sources of a `mesh` gradient.
+    public var sources: [GradientSource]
+    /// How sharply mesh colours meet: low is soft and hazy, high gives defined pools (1…6).
+    public var sharpness: Double
+    /// Centre of a radial or angular gradient, 0…1 of the window.
+    public var centerX: Double
+    public var centerY: Double
+    /// Film grain over the gradient, 0 (none) … 1.
+    public var noise: Double
+    /// How strongly the gradient covers the system window colour, 0.1 … 1.
+    public var opacity: Double
+    /// Shown exactly as chosen in light and dark mode, instead of being dimmed or lifted
+    /// to keep the chrome legible (Eminence's "Raw").
+    public var raw: Bool
 
-    public init(kind: Kind = .linear, angle: Double = 135, stops: [GradientStop]) {
+    public init(kind: Kind = .linear, angle: Double = 135, stops: [GradientStop],
+                sources: [GradientSource] = [], sharpness: Double = 2.2, centerX: Double = 0.5,
+                centerY: Double = 0.5, noise: Double = 0, opacity: Double = 1, raw: Bool = false) {
         self.kind = kind
         self.angle = angle
         self.stops = stops
+        self.sources = sources
+        self.sharpness = sharpness
+        self.centerX = centerX
+        self.centerY = centerY
+        self.noise = noise
+        self.opacity = opacity
+        self.raw = raw
     }
 
     /// Stops sorted by location, clamped to 0…1, invalid colours removed; at least two.
@@ -332,6 +359,14 @@ public struct GradientSpec: Codable, Hashable, Sendable {
         kind = (try? c.decodeIfPresent(Kind.self, forKey: .kind)) ?? .linear
         angle = (try? c.decodeIfPresent(Double.self, forKey: .angle)) ?? 135
         stops = (try? c.decodeIfPresent([GradientStop].self, forKey: .stops)) ?? []
+        // canvas: Gradient Studio fields.
+        sources = (try? c.decodeIfPresent([GradientSource].self, forKey: .sources)) ?? []
+        sharpness = (try? c.decodeIfPresent(Double.self, forKey: .sharpness)) ?? 2.2
+        centerX = (try? c.decodeIfPresent(Double.self, forKey: .centerX)) ?? 0.5
+        centerY = (try? c.decodeIfPresent(Double.self, forKey: .centerY)) ?? 0.5
+        noise = (try? c.decodeIfPresent(Double.self, forKey: .noise)) ?? 0
+        opacity = (try? c.decodeIfPresent(Double.self, forKey: .opacity)) ?? 1
+        raw = (try? c.decodeIfPresent(Bool.self, forKey: .raw)) ?? false
     }
 }
 
@@ -377,12 +412,18 @@ public struct MosaicAppearance: Codable, Hashable, Sendable {
     public var toolbarSurface: Bool
     /// A soft accent-coloured glow around the page (Opera GX).
     public var glow: Bool
+    // canvas: backgrounds beyond the window's (Gradient Studio targets).
+    /// The New Tab page's background.
+    public var newTabBackground: NewTabBackground
+    /// Window backgrounds for particular workspaces, keyed by workspace ID; others use `background`.
+    public var workspaceBackgrounds: [String: BackgroundSpec]
 
     public init(
         density: ShellDensity = .regular, cornerRadius: Double = 8, contentInset: Double = 0,
         contentCornerRadius: Double = 0, accent: String = HexColor.system,
         colorScheme: ColorSchemePreference = .system, material: ChromeMaterial = .liquidGlass,
-        background: BackgroundSpec = .init(), toolbarSurface: Bool = false, glow: Bool = false
+        background: BackgroundSpec = .init(), toolbarSurface: Bool = false, glow: Bool = false,
+        newTabBackground: NewTabBackground = .init(), workspaceBackgrounds: [String: BackgroundSpec] = [:]
     ) {
         self.density = density
         self.cornerRadius = cornerRadius
@@ -394,6 +435,8 @@ public struct MosaicAppearance: Codable, Hashable, Sendable {
         self.background = background
         self.toolbarSurface = toolbarSurface
         self.glow = glow
+        self.newTabBackground = newTabBackground
+        self.workspaceBackgrounds = workspaceBackgrounds
     }
 
     public init(from decoder: Decoder) throws {
@@ -412,6 +455,8 @@ public struct MosaicAppearance: Codable, Hashable, Sendable {
         background = value(.background, d.background)
         toolbarSurface = value(.toolbarSurface, d.toolbarSurface)
         glow = value(.glow, d.glow)
+        newTabBackground = value(.newTabBackground, d.newTabBackground)  // canvas
+        workspaceBackgrounds = value(.workspaceBackgrounds, d.workspaceBackgrounds)  // canvas
     }
 }
 
@@ -613,6 +658,7 @@ public struct MosaicLayout: Codable, Hashable, Sendable {
         if !HexColor.isValid(a.accent) { a.accent = HexColor.system }
         if HexColor.components(a.background.color) == nil { a.background.color = "#F2F2F7" }
         a.background.gradient.angle = a.background.gradient.angle.isFinite ? a.background.gradient.angle : 135
+        a = a.clampedBackgrounds()  // canvas: Gradient Studio bounds (MosaicCore/Canvas/Backgrounds.swift)
         layout.appearance = a
         return layout
     }

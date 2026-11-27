@@ -10,7 +10,10 @@ enum SettingsSearchIndex {
             ["Preset", "Zen / Arc", "Chrome", "Opera", "Opera GX", "Safari", "Preview", "Restore Defaults",
              "Tab placement", "Vertical tabs", "Sidebar", "Tab style", "Address bar", "Bookmarks bar",
              "Appearance", "Light", "Dark", "Theme", "Accent colour", "Density", "Corner radius",
-             "Page inset", "Liquid Glass", "Background", "Gradient", "Glow", "Layout"]
+             "Page inset", "Liquid Glass", "Background", "Gradient", "Glow", "Layout",
+             // canvas
+             "Customise Layout", "Toolbar buttons", "Drag and drop", "Gradient Studio", "New Tab background",
+             "Workspace background", "Configurations", "Import layout", "Export layout"]
         case .general:
             ["Startup", "Homepage", "Home button", "New tabs open with", "New Tab page"]
         case .accessibility:

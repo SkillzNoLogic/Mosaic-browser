@@ -49,6 +49,7 @@ final class BrowserModel: ObservableObject {
     let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
     private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker)
     lazy var productivity = Productivity(model: self)  // palette, reader, shortcuts, Speed Dial
+    lazy var canvas = CanvasController(model: self)  // canvas: layout editor, Gradient Studio, configurations
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.

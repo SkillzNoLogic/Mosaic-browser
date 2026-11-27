@@ -10,9 +10,22 @@ struct MosaicsSettingsPane: View {
 
     private var store: MosaicStore { model.mosaics }
 
+    // canvas: the page's modes (Features/Canvas): presets (below), layout canvas, Gradient Studio, configurations.
     var body: some View {
+        VStack(spacing: 0) {
+            CanvasModePicker()
+            switch model.canvas.mode {
+            case .presets: presetsForm
+            case .layout: LayoutCanvasEditor()
+            case .gradient: GradientStudioView()
+            case .configurations: ConfigurationsPane()
+            }
+        }
+    }
+
+    private var presetsForm: some View {
         let layout = store.layout
-        Form {
+        return Form {
             Section {
                 if let previewed = store.previewedPreset {
                     PreviewBanner(preset: previewed)
@@ -88,6 +101,13 @@ struct MosaicsSettingsPane: View {
 
             Section("Background") {
                 BackgroundEditor(background: bind(\.appearance.background))
+                // canvas: the full editor, and the New Tab page's background.
+                LabeledContent("Gradient Studio") {
+                    Button("Open Gradient Studio…") { model.canvas.mode = .gradient }
+                }
+                Picker("New Tab page", selection: bind(\.appearance.newTabBackground.mode)) {
+                    ForEach(NewTabBackground.Mode.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
             }
 
             Section {
@@ -324,9 +344,14 @@ private struct BackgroundEditor: View {
                     }
                 }
             }
-            ColorPicker("Start colour", selection: stopBinding(first: true), supportsOpacity: false)
-            ColorPicker("End colour", selection: stopBinding(first: false), supportsOpacity: false)
-            Slider(value: $background.gradient.angle, in: 0...360, step: 5) { Text("Angle") }
+            if background.gradient.kind == .mesh {
+                // canvas: free-form gradients are edited in the Gradient Studio.
+                SettingsNote("A free-form gradient from the Gradient Studio.")
+            } else {
+                ColorPicker("Start colour", selection: stopBinding(first: true), supportsOpacity: false)
+                ColorPicker("End colour", selection: stopBinding(first: false), supportsOpacity: false)
+                Slider(value: $background.gradient.angle, in: 0...360, step: 5) { Text("Angle") }
+            }
         }
     }
 
