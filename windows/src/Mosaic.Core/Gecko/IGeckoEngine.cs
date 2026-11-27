@@ -4,9 +4,12 @@ namespace Mosaic.Core.Gecko;
 
 public enum GeckoStatus { Stopped, Starting, Running, Failed }
 
-/// <summary>One Gecko tab as reported by the agent's <c>state()</c>.</summary>
+/// <summary>
+/// One Gecko tab as reported by the agent's <c>state()</c>. <c>Blocked</c> is the number of requests
+/// the content blocker cancelled since the tab's current page began loading.
+/// </summary>
 public sealed record GeckoTabState(
-    int Id, string Url, string Title, bool Loading, bool CanGoBack, bool CanGoForward, bool Selected);
+    int Id, string Url, string Title, bool Loading, bool CanGoBack, bool CanGoForward, bool Selected, int Blocked = 0);
 
 /// <summary>
 /// The agent's periodic report. <see cref="Events"/> are things that happened inside Gecko that

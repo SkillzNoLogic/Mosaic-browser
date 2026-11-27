@@ -17,6 +17,7 @@ public sealed class BrowserTab : ObservableObject
     private int? geckoId;
     private IChromiumBrowser? chromium;
     private bool isSelected;
+    private int blockedCount;
 
     internal BrowserTab(EngineKind engine) => this.engine = engine;
 
@@ -57,6 +58,9 @@ public sealed class BrowserTab : ObservableObject
     public bool IsLoading { get => isLoading; internal set => Set(ref isLoading, value); }
     public bool CanGoBack { get => canGoBack; internal set => Set(ref canGoBack, value); }
     public bool CanGoForward { get => canGoForward; internal set => Set(ref canGoForward, value); }
+
+    /// <summary>Requests the content blocker stopped since this tab's page began loading.</summary>
+    public int BlockedCount { get => blockedCount; internal set => Set(ref blockedCount, value); }
 
     /// <summary>Why the page cannot be shown; null while it can.</summary>
     public string? Failure { get => failure; internal set => Set(ref failure, value); }

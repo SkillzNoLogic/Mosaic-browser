@@ -10,6 +10,10 @@ WPF for Windows 10 and 11 on x64 and ARM64.
   and Kagi.
 - **Chrome extensions on the Mozilla engine.** Mosaic takes a Chrome extension's `.crx` (from
   a Chrome Web Store link, an extension ID, or a file), converts it, and runs it on Gecko.
+- **Built-in ad and tracker blocker.** uBlock Origin's filtering engine, compiled into the
+  browser from uBO's source (not installed as an extension), with uBO's default filter
+  lists. On by default, in both engines; switch it off globally or per site from the shield
+  in the toolbar.
 
 > **Status: compiled and unit-tested, never run.** As of writing, the Windows app has been
 > built and its engine-independent logic unit-tested on a Mac. **It has not been started on
@@ -23,13 +27,15 @@ not supported.
 
 ## Build and run
 
-Only the [.NET 10 SDK](https://dotnet.microsoft.com/download) is needed. Visual Studio is
-optional. The scripts run in the Windows PowerShell 5.1 that ships with Windows (and in
-PowerShell 7) and need no modules.
+The [.NET 10 SDK](https://dotnet.microsoft.com/download) is needed, and
+[Node.js](https://nodejs.org/) (any current LTS) to build the content blocker: its `npx`
+fetches the pinned esbuild that bundles uBlock Origin's engine. Visual Studio is optional. The
+scripts run in the Windows PowerShell 5.1 that ships with Windows (and in PowerShell 7) and
+need no modules.
 
 ```powershell
 cd windows
-scripts\bootstrap.ps1     # one time: fetches the Gecko engine (~90 MB download), checks for WebView2
+scripts\bootstrap.ps1     # one time: fetches the Gecko engine (~90 MB download), checks for WebView2, builds the blocker
 scripts\build.ps1         # runs the unit tests, then builds publish\win-x64\ (or win-arm64)
 publish\win-x64\Mosaic.exe
 ```
@@ -37,12 +43,17 @@ publish\win-x64\Mosaic.exe
 If PowerShell refuses to run scripts on your machine, start them as
 `powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1`.
 
-`bootstrap.ps1` sets up the two engines:
+`bootstrap.ps1` sets up the two engines and the content blocker:
 
 | Engine | What | Where it comes from |
 | --- | --- | --- |
 | Gecko | Firefox ESR for your architecture, signature-verified | Downloaded from mozilla.org into `%LOCALAPPDATA%\Mosaic\Engines\Firefox\` |
 | Chromium | The WebView2 Evergreen runtime | Part of Windows 11 and of most Windows 10 installations; the script only checks for it and points you to Microsoft's installer if it is missing |
+| Blocker | uBlock Origin 1.77.2 source (checksum-verified), bundled with esbuild 0.28.2, plus a snapshot of uBO's default filter lists | `vendor\ublock\` (git-ignored), copied into the app at build time |
+
+`bootstrap.ps1 -BlockerOnly` builds only the blocker; `-SkipBlocker` leaves it out, for a PC
+without Node.js. `build.ps1` then builds the app without the blocker, with a warning, and the
+shield says so.
 
 The Gecko runtime is a private copy with its own profile. It is extracted, not installed:
 Firefox's installer is only asked to unpack its files (`/ExtractDir`), so nothing is written
@@ -66,9 +77,14 @@ Mosaic for Windows is meant to work like [Mosaic for macOS](../README.md#using-i
 address or a search in the address bar, pick the search engine and the tab's engine from the
 toolbar, install extensions from the Extensions sheet. Shortcuts use Ctrl where macOS uses ⌘.
 
+The content blocker is the shield in the toolbar: it shows how many requests were blocked on
+the page in front, and opens a popover with the global switch, the switch for the site in
+front, and **Update Lists**. Ctrl+Shift+B switches the blocker on or off.
+
 While a Mozilla page has the keyboard, key presses go to Gecko, not to Mosaic. Ctrl+L
 (address bar), Ctrl+T and Ctrl+N (new tab), Ctrl+W (close tab) and Ctrl+Shift+E (switch
-engine) are forwarded to Mosaic from inside Gecko; other shortcuts act on Gecko directly.
+engine) are forwarded to Mosaic from inside Gecko; other shortcuts act on Gecko directly
+(Ctrl+Shift+B among them: click the address bar or the toolbar first).
 
 ## How it works
 
@@ -83,16 +99,19 @@ engine) are forwarded to Mosaic from inside Gecko; other shortcuts act on Gecko 
 │            └────────► GeckoWindowHost: Gecko's window as a child of Mosaic's       │
 │  ExtensionStore: .crx → unpack → ManifestConverter → Gecko (and, experimentally,   │
 │                                                         the original → WebView2)   │
+│  ContentBlocker: ublock-engine.js ─┬─► V8 (ClearScript) ◄─ WebView2 requests       │
+│                                    └─► agent.sys.mjs ─► Gecko requests             │
 └────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The design is the macOS one with three differences, all forced or offered by the platform:
+The design is the macOS one with four differences, all forced or offered by the platform:
 
 | | macOS | Windows |
 | --- | --- | --- |
 | Chromium | Chromium Embedded Framework, bundled in the app (~300 MB) | WebView2, the system's shared and self-updating Chromium runtime; nothing bundled |
 | Gecko in the window | A second window kept over a transparent hole in Mosaic's window | A real child window inside Mosaic's window (with the macOS approach as a fallback) |
 | Talking to Gecko | Remote debugging protocol over a Unix socket only the user can reach | The same protocol over a loopback TCP port (Gecko has no socket-path option on Windows) |
+| Content blocker in Chromium tabs | uBlock Origin's engine in JavaScriptCore, asked by CEF before each request | The same bundle in V8 (ClearScript), asked through WebView2's `WebResourceRequested` |
 
 ### Chromium
 
@@ -144,6 +163,41 @@ internals for a year) is the default runtime. The window embedding additionally 
 how Gecko's Windows widget code reacts to a handful of window messages; that was read from
 the Firefox ESR 153 source.
 
+### Built-in content blocker
+
+The blocker is part of the browser, not an extension, and is the macOS one (see the
+[main README](../README.md#built-in-content-blocker)). `resources/blocker/engine.js` imports
+uBlock Origin's own static network filtering engine (`static-net-filtering.js` and its
+dependencies, the same modules uBO's Node.js build uses) straight from uBO's source;
+`bootstrap.ps1` bundles them into one script, `ublock-engine.js`, with the macOS command line.
+One uBO module is substituted (`publicsuffix-static.js`, which removes a top-level `await` the
+bundle format cannot use), and `polyfills.js` supplies the few web APIs a bare JavaScript
+engine lacks. The three files are byte-for-byte those of the macOS app, so both apps bundle the
+same engine. The bundle then runs in two places, so both rendering engines make identical
+decisions from the same lists:
+
+- **Chromium tabs:** a V8 engine inside Mosaic (`BlockerEngine`, hosted with ClearScript where
+  macOS uses JavaScriptCore). Each tab's WebView2 raises `WebResourceRequested` for every
+  request its page, its iframes and its dedicated workers make, and asks `RequestFilter`; a
+  blocked request is answered with an empty `403` response from Mosaic and never reaches the
+  network. WebView2 raises that event on the UI thread and holds the request until it returns,
+  so the check is kept to a settings test and one call into the engine (a few microseconds).
+- **Mozilla tabs:** a sandbox in Gecko's parent process, loaded by the agent
+  (`configureBlocker`), which cancels matching requests from an `http-on-modify-request`
+  observer. Gecko gets the blocker each time it starts, before extensions load, so the first
+  page is already filtered.
+
+A page's own document is never blocked, and non-web pages (`about:`, `file:`, extension
+pages) are never filtered. The filter lists ship in the app, so blocking works offline from
+the first launch; Mosaic keeps them in `%LOCALAPPDATA%\Mosaic\Blocker\Lists\` and refreshes
+them in the background when they are more than two days old, or on demand with **Update
+Lists**. A download that does not look like a filter list never replaces a working one. The
+switches are saved in `settings.json` (`blockerEnabled`, `blockerAllowlist`); toggling either
+reloads the page in front.
+
+To build without it, run `bootstrap.ps1 -SkipBlocker` (or delete `vendor\ublock`): the app
+then reports the blocker as not included, and Chromium requests are not intercepted at all.
+
 ### Chrome extensions
 
 Conversion for Gecko is the same as on macOS (see the [main README](../README.md#chrome-extensions-on-gecko)):
@@ -163,6 +217,7 @@ Everything Mosaic stores is under `%LOCALAPPDATA%\Mosaic\`:
 | `Gecko\Profile\` | Profile of the Mozilla engine |
 | `Chromium\` | WebView2 user-data folder (profile of the Chromium engine) |
 | `Extensions\` | Installed extensions, original and converted |
+| `Blocker\Lists\` | The content blocker's filter lists, as last refreshed |
 | `Engines\Firefox\` | The private Gecko runtime fetched by `bootstrap.ps1` |
 
 Delete the folder to reset everything. Set `MOSAIC_DATA_DIR` to use a different folder (the
@@ -195,8 +250,9 @@ there. The smoke test does this and uploads the file as `mosaic-trace.log`.
 published app with a throw-away data folder and verifies, through `dump`, that a page loads
 on the Mozilla engine with Gecko's window attached, that the tab can be switched to Chromium,
 that changing the search engine changes where a search goes, that a small Chrome extension
-(built by the script itself) installs and loads, and that `quit` leaves no Mosaic or engine
-process behind. It takes a screenshot at each step and collects them, the state at each
+(built by the script itself) installs and loads, that the content blocker blocks an ad script
+on a page the script serves itself, in both engines, and stops when switched off for the site,
+and that `quit` leaves no Mosaic or engine process behind. It takes a screenshot at each step and collects them, the state at each
 step, Mosaic's output and any crash entries from the Windows event log in
 `artifacts\smoke\`. It exits non-zero on any failure and always stops what it started.
 
@@ -205,8 +261,9 @@ scripts\smoke.ps1                          # default embedding
 scripts\smoke.ps1 -GeckoHostMode owned     # the fallback
 ```
 
-The same sequence runs in CI (`.github/workflows/windows.yml`): one job builds, runs the
-unit tests and packages `win-x64`; a second job, which is allowed to fail, runs the smoke
+The same sequence runs in CI (`.github/workflows/windows.yml`): one job builds the content
+blocker, builds the app, runs the unit tests (with uBlock Origin's real engine, and in the
+runner's Firefox) and packages `win-x64`; a second job, which is allowed to fail, runs the smoke
 test on a Windows runner and uploads its screenshots and logs either way.
 
 **Diagnostics.** The window-hosting code reports everything unusual through
@@ -263,6 +320,25 @@ wrong, most likely first:
   job only covers processes started after Gecko's first process was added to it, so a
   leftover `firefox.exe` is possible in rare start-up races.
 
+**Content blocker**
+
+- Network blocking only. uBO's cosmetic filtering (hiding leftover ad containers) and
+  scriptlet injection (which defeats many anti-adblock scripts and some video ads) need
+  content scripts and are not implemented, so pages can show empty ad slots and some ads
+  still get through. Expect it to block noticeably less than the uBO extension does.
+- uBO's redirect filters (`$redirect`, replacing a blocked script with a harmless stub),
+  `$removeparam`, `$csp` and other modifiers are not applied; matching requests are simply
+  blocked or let through.
+- No per-request logger, element picker, custom filters or list selection yet.
+- Blocking applies to requests a tab makes. Service-worker and shared-worker traffic is let
+  through in both engines (WebView2 does not attribute it to a tab either).
+- In Chromium tabs a blocked request receives an empty `403` response rather than failing as
+  a network error, which is what WebView2 offers; a page script can tell the difference.
+  WebView2 only reports `http`, `https` and `file` requests, so WebSocket connections are
+  probably not filtered there (not yet checked).
+- Ctrl+Shift+B does not reach Mosaic while a Mozilla page has the keyboard (see Using it).
+- Like everything here, the Chromium half has not been run on Windows yet (Status above).
+
 **Extensions**
 
 - Everything in the [macOS list](../README.md#known-limitations) applies: not every Chrome
@@ -290,17 +366,20 @@ windows/
   CONTRACT.md           the working agreement the Windows version was built to
   Mosaic.slnx, Directory.Build.props
   scripts/
-    bootstrap.ps1       fetch the Gecko engine, check for WebView2
+    bootstrap.ps1       fetch the Gecko engine, check for WebView2, build the content blocker
     build.ps1           test, publish, optionally zip
     drive.ps1           send one automation command to a running Mosaic
     smoke.ps1           end-to-end check of a published build
     MosaicAutomation.psm1   the pipe client both of them use
   resources/gecko/agent.sys.mjs   Mosaic's agent inside Gecko
+  resources/blocker/              the content blocker's entry point and shims (same as macOS)
+  vendor/ublock/                  the bundled engine and list snapshot (built, not committed)
   src/
     Mosaic.Core/        engine-independent logic, unit tested, builds on any OS
       Search/           search engines, address-bar parsing
       Extensions/       CRX parsing, manifest conversion, extension library
       Gecko/            remote debugging client, runtime lookup, profile, engine
+      Blocker/          the content blocker: engine host, filter lists, settings
       Browser/          the browser model
     Mosaic.App/         the WPF app
       Hosting/          GeckoWindowHost (Gecko's window inside Mosaic's), ChildProcessJob
@@ -311,6 +390,13 @@ windows/
 ## Third-party software
 
 Mosaic for Windows uses Microsoft Edge WebView2 (the runtime is part of Windows or installed
-separately under Microsoft's terms; the SDK is BSD-licensed) and runs an unmodified Firefox
-ESR (MPL 2.0). Firefox is a trademark of the Mozilla Foundation; Mosaic is not affiliated
+separately under Microsoft's terms; the SDK is BSD-licensed), runs an unmodified Firefox ESR
+(MPL 2.0), and hosts V8 through Microsoft ClearScript (MIT; V8 is BSD-licensed).
+
+The content blocker contains uBlock Origin's filtering engine, Copyright (C) Raymond Hill
+and contributors, licensed under the **GNU GPL v3** (its licence is copied into the app as
+`blocker\LICENSE-uBlock-Origin.txt`). Distributing a Mosaic build that includes it means
+complying with the GPL for that distribution, which in practice means releasing Mosaic's
+own source under a GPL-compatible licence. The filter lists have their own licences (GPL v3,
+CC BY-SA 3.0 and others; see each list's header). Firefox is a trademark of the Mozilla Foundation; Mosaic is not affiliated
 with Mozilla, Google or Microsoft.

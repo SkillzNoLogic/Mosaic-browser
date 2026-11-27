@@ -12,9 +12,12 @@
       3. the search engine can be changed and a search goes to that engine;
       4. a Chrome extension (a minimal MV3 extension this script zips up itself, so the
          Chrome Web Store is not involved) installs and reports loaded;
-      5. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
+      5. the content blocker is ready, and in each engine blocks the ad script a page served by
+         this script asks for (a non-zero "blocked" count), lets it through once switched off
+         for the site (zero after the reload), and blocks it again once switched back on;
+      6. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
 
-    A screenshot is requested after each of steps 1-4. Screenshots, the state at each step,
+    A screenshot is requested after each of steps 1-5. Screenshots, the state at each step,
     Mosaic's output and any crash reports from the Windows event log are collected in the
     output folder. Step 3 needs Internet access; the others do not.
 
@@ -72,8 +75,13 @@ $ExtensionName = 'Mosaic Smoke Fixture'
 $SearchEngineId = 'duckduckgo'
 $SearchHost = 'duckduckgo.com'
 $SearchWord = 'mosaicsmoketest'
+$BlockerPageTitle = 'Mosaic Blocker Page'
+# A script every set of default lists blocks. A blocked request is stopped before any connection
+# is made, so this step needs no Internet access.
+$BlockedScript = 'http://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js'
 
 $script:App = $null             # the Mosaic process this script started
+$script:PageServer = $null      # the web server for the content blocker check
 $script:SoftFailures = @()      # checks that failed without stopping the run
 $script:Utf8 = New-Object System.Text.UTF8Encoding($false)
 
@@ -157,6 +165,83 @@ chrome.runtime.onInstalled.addListener(() => {
     finally { $stream.Dispose() }
 }
 
+function Start-PageServer {
+    # Serves one page at http://127.0.0.1:<port>/ from a background runspace of this process: the
+    # content blocker filters web pages only, so the page cannot be a file: or data: URL. A plain
+    # TcpListener, because HttpListener needs a URL reservation unless run as an administrator.
+    # Hits.Page counts requests for the page, so a check can tell that a reload has happened.
+    param([Parameter(Mandatory = $true)] [string]$Html)
+
+    $listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $hits = [hashtable]::Synchronized(@{ Page = 0 })
+    $runspace = [PowerShell]::Create()
+    $null = $runspace.AddScript({
+            param($Listener, $Body, $Hits)
+            while ($true) {
+                try { $client = $Listener.AcceptTcpClient() }
+                catch { return }   # the listener was stopped
+                try {
+                    # Browsers open connections ahead of need; one that sends nothing is dropped
+                    # after a second instead of holding up the requests queued behind it.
+                    $client.ReceiveTimeout = 1000
+                    $stream = $client.GetStream()
+                    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+                    $requestLine = $reader.ReadLine()
+                    while (-not [string]::IsNullOrEmpty($reader.ReadLine())) { }
+                    if ($requestLine -match '^GET / HTTP/') {
+                        $Hits.Page++
+                        $status = '200 OK'
+                        $content = $Body
+                    }
+                    else {
+                        $status = '404 Not Found'
+                        $content = New-Object byte[] 0
+                    }
+                    $head = [System.Text.Encoding]::ASCII.GetBytes(
+                        "HTTP/1.1 $status`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($content.Length)`r`n" +
+                        "Cache-Control: no-store`r`nConnection: close`r`n`r`n")
+                    $stream.Write($head, 0, $head.Length)
+                    $stream.Write($content, 0, $content.Length)
+                    $stream.Flush()
+                }
+                catch {
+                    # A connection that timed out or was closed by the browser; serve the next one.
+                }
+                finally {
+                    $client.Close()
+                }
+            }
+        }).AddArgument($listener).AddArgument($script:Utf8.GetBytes($Html)).AddArgument($hits)
+    $handle = $runspace.BeginInvoke()
+    [pscustomobject]@{
+        Url      = "http://127.0.0.1:$($listener.LocalEndpoint.Port)/"
+        Hits     = $hits
+        Listener = $listener
+        Runspace = $runspace
+        Handle   = $handle
+    }
+}
+
+function Stop-PageServer {
+    param($Server)
+    if ($null -eq $Server) { return }
+    $Server.Listener.Stop()
+    try { $Server.Runspace.EndInvoke($Server.Handle) } catch { }
+    $Server.Runspace.Dispose()
+}
+
+function Test-BlockerPage {
+    # True when the selected tab shows the blocker page in $Engine, loaded, and the page has been
+    # served more than $After times; $Blocked says whether its ad script must have been blocked.
+    param($State, [string]$Engine, [int]$After, [bool]$Blocked)
+    $tab = Get-SelectedTab $State
+    if (-not $tab -or $script:PageServer.Hits.Page -le $After) { return $false }
+    $count = [int](Get-MosaicProperty $tab 'blocked')
+    (Get-MosaicProperty $tab 'engine') -eq $Engine -and (Get-MosaicProperty $tab 'loading') -eq $false `
+        -and (Get-MosaicProperty $tab 'title') -eq $BlockerPageTitle -and (($count -gt 0) -eq $Blocked)
+}
+
 function Assert-AppRunning {
     if ($null -eq $script:App) { throw 'Mosaic has not been started.' }
     if ($script:App.HasExited) {
@@ -204,9 +289,15 @@ function Format-State {
         "notice='$(Get-MosaicProperty $State 'notice')'",
         "extensionError='$(Get-MosaicProperty $State 'extensionError')'"
     )
+    $blocker = Get-MosaicProperty $State 'blocker'
+    if ($blocker) {
+        $parts += "blocker: status=$(Get-MosaicProperty $blocker 'status') enabled=$(Get-MosaicProperty $blocker 'enabled') " +
+            "filters=$(Get-MosaicProperty $blocker 'filters') error='$(Get-MosaicProperty $blocker 'error')'"
+    }
     if ($tab) {
         $parts += "tab: engine=$(Get-MosaicProperty $tab 'engine') loading=$(Get-MosaicProperty $tab 'loading') " +
-            "title='$(Get-MosaicProperty $tab 'title')' url='$(Get-MosaicProperty $tab 'url')' failure='$(Get-MosaicProperty $tab 'failure')'"
+            "title='$(Get-MosaicProperty $tab 'title')' url='$(Get-MosaicProperty $tab 'url')' failure='$(Get-MosaicProperty $tab 'failure')' " +
+            "blocked=$(Get-MosaicProperty $tab 'blocked')"
     }
     else {
         $parts += 'no selected tab'
@@ -476,7 +567,49 @@ try {
     Save-Screenshot '4-extension'
     Invoke-Mosaic -Do 'showExtensions' -Value 'false' | Out-Null
 
-    Write-Host '==> 5. Quit'
+    Write-Host '==> 5. Content blocker: block an ad script in both engines'
+    $state = Wait-MosaicState -Name '5-blocker-ready' -What 'the content blocker to be ready' -Condition {
+        param($s)
+        $blocker = Get-MosaicProperty $s 'blocker'
+        $status = [string](Get-MosaicProperty $blocker 'status')
+        if ($status -eq 'unavailable') {
+            throw 'The content blocker is not part of this build (blocker.status is "unavailable"). Run scripts\bootstrap.ps1, then build again.'
+        }
+        if ($status -eq 'failed') { throw "The content blocker could not start: $(Get-MosaicProperty $blocker 'error')" }
+        $status -eq 'ready'
+    }
+    $blocker = Get-MosaicProperty $state 'blocker'
+    Write-Host "    $(Get-MosaicProperty $blocker 'filters') filters, uBlock Origin $(Get-MosaicProperty $blocker 'engineVersion')"
+    $script:PageServer = Start-PageServer -Html ("<!doctype html>`n<html><head><meta charset=`"utf-8`"><title>$BlockerPageTitle</title>" +
+        "<script src=`"$BlockedScript`"></script></head>`n<body><h1>$BlockerPageTitle</h1><p>Served by smoke.ps1.</p></body></html>`n")
+    # Chromium first, as the tab is there already; switching it to Mozilla then reloads the page.
+    foreach ($engine in @('chromium', 'gecko')) {
+        $served = $script:PageServer.Hits.Page
+        Invoke-Mosaic -Do 'engine' -Value $engine | Out-Null
+        if ((Get-MosaicProperty (Get-SelectedTab (Get-MosaicState)) 'url') -ne $script:PageServer.Url) {
+            Invoke-Mosaic -Do 'navigate' -Value $script:PageServer.Url | Out-Null
+        }
+        $state = Wait-MosaicState -Name "5-blocker-$engine" -What "the $engine tab to load the blocker page with its ad script blocked (blocked > 0)" -Condition {
+            param($s) Test-BlockerPage $s $engine $served $true
+        }
+        Write-Host "    $engine blocked $(Get-MosaicProperty (Get-SelectedTab $state) 'blocked') request(s)"
+        Save-Screenshot "5-blocker-$engine"
+
+        $served = $script:PageServer.Hits.Page
+        Invoke-Mosaic -Do 'blockerSite' -Value 'off' | Out-Null
+        $state = Wait-MosaicState -Name "5-blocker-$engine-site-off" -What "the $engine tab to reload with the blocker off for the site (blocked = 0)" -Condition {
+            param($s) Test-BlockerPage $s $engine $served $false
+        }
+        Write-Host "    $engine with the site exempted: nothing blocked"
+
+        $served = $script:PageServer.Hits.Page
+        Invoke-Mosaic -Do 'blockerSite' -Value 'on' | Out-Null
+        $state = Wait-MosaicState -Name "5-blocker-$engine-site-on" -What "the $engine tab to reload with the blocker back on (blocked > 0)" -Condition {
+            param($s) Test-BlockerPage $s $engine $served $true
+        }
+    }
+
+    Write-Host '==> 6. Quit'
     $geckoProcessId = 0
     $reported = Get-MosaicProperty $state 'geckoProcessId'
     if ($reported) { $geckoProcessId = [int]$reported }
@@ -512,6 +645,7 @@ finally {
     $env:MOSAIC_DATA_DIR = $savedDataDir
     $env:MOSAIC_GECKO_EXE = $savedGeckoExe
     $env:MOSAIC_TRACE_FILE = $savedTraceFile
+    Stop-PageServer $script:PageServer
     try {
         if ($null -ne $script:App) {
             if ($snapshot.Count -eq 0) {

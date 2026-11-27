@@ -26,4 +26,13 @@ public static class AppPaths
 
     /// <summary>Folder holding <c>agent.sys.mjs</c>, shipped next to the executable.</summary>
     public static string GeckoAgent => Path.Combine(AppContext.BaseDirectory, "gecko");
+
+    /// <summary>The content blocker's filter lists as last refreshed; see <see cref="Blocker.FilterListStore"/>.</summary>
+    public static string BlockerLists => Path.Combine(DataRoot, "Blocker", "Lists");
+
+    /// <summary>
+    /// The content blocker as shipped next to the executable: <c>ublock-engine.js</c>, uBlock Origin's
+    /// licence and <c>lists\</c>, the snapshot of the filter lists taken when the app was built.
+    /// </summary>
+    public static string BlockerResources => Path.Combine(AppContext.BaseDirectory, "blocker");
 }

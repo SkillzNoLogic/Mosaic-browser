@@ -61,7 +61,7 @@ Called through `IGeckoEngine.CallAsync(method, args…)`; every method returns J
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `setup()` | `true` once the browser window exists and its chrome is removed | polled during start |
-| `state()` | `{ready, tabs:[{id,url,title,loading,canGoBack,canGoForward,selected}], events:[{type}]}` | decoded into `GeckoSnapshot` |
+| `state()` | `{ready, tabs:[{id,url,title,loading,canGoBack,canGoForward,selected,blocked}], events:[{type}]}` | decoded into `GeckoSnapshot`; `blocked` is the content blocker's count for the tab's page |
 | `openTab(url, select)` | new tab id (number) | |
 | `closeTab(id)`, `selectTab(id)`, `navigate(id, url)`, `goBack(id)`, `goForward(id)`, `reload(id)`, `stop(id)` | `true` | |
 | `focusContent()` | `true` | |
@@ -71,6 +71,8 @@ Called through `IGeckoEngine.CallAsync(method, args…)`; every method returns J
 | `openExtensionPage(geckoId, "popup" \| "options")` | new tab id, or `null` | |
 | `version()` | `{agent, gecko, app, appVersion, pid, windowHandle}` | `pid` and `windowHandle` are new for Windows |
 | `setRect(x, y, w, h)` | `true` | used by the owned-window fallback only |
+| `configureBlocker(bundlePath, suffixListPath, listPaths[], enabled, allowlist[])` | `{filters, version}` | loads uBlock Origin's engine into Gecko; called after each start (before extensions load) and after the lists change |
+| `setBlockerOptions(enabled, allowlist[])` | `true` | the content blocker's switches |
 
 Keyboard shortcuts forwarded from inside Gecko as snapshot events use **Ctrl** on Windows
 (Ctrl+L `focusAddress`, Ctrl+T / Ctrl+N `newTab`, Ctrl+W `closeTab`, Ctrl+Shift+E `toggleEngine`).
@@ -87,15 +89,18 @@ Reply: `{"ok": true}` or `{"ok": false, "error": "…"}`; `dump` replies `{"ok":
 Commands (same names and meaning as `Sources/Mosaic/App/Automation.swift`): `navigate`, `newTab`,
 `closeTab`, `selectTab`, `engine` (`gecko`/`chromium`), `toggleEngine`, `searchEngine`, `back`,
 `forward`, `reload`, `installExtension`, `installFile`, `removeExtension`, `extensionPage`
-(`<chromeId>:popup|options`), `showExtensions`, `geckoEval` (agent method name; result written to
-`out`), `dump` (state also written to the path in `value` when given), `screenshot` (PNG of the
-Mosaic window written to the path in `value`), `quit`.
+(`<chromeId>:popup|options`), `showExtensions`, `blocker` (`on`/`off`), `blockerSite` (`on`/`off`,
+for the site of the page in front; refused when that is not a web page), `showBlocker`,
+`updateLists`, `geckoEval` (agent method name; result written to `out`), `dump` (state also
+written to the path in `value` when given), `screenshot` (PNG of the Mosaic window written to the
+path in `value`), `quit`.
 
 `dump` state keys: `tabs[]` (`engine`, `url`, `title`, `loading`, `canGoBack`, `canGoForward`,
-`geckoId`, `hasChromiumView`, `failure`, `selected`), `engine`, `searchEngine`, `addressText`,
-`chromiumAvailable`, `geckoStatus`, `geckoProcessId`, `geckoAttached`, `notice`, `extensions[]`
-(`id`, `geckoId`, `name`, `version`, `enabled`, `loaded`, `notes[]`), `extensionError`,
-`extensionsBusy`.
+`geckoId`, `hasChromiumView`, `blocked`, `failure`, `selected`), `engine`, `searchEngine`,
+`addressText`, `chromiumAvailable`, `geckoStatus`, `geckoProcessId`, `geckoAttached`, `notice`,
+`extensions[]` (`id`, `geckoId`, `name`, `version`, `enabled`, `loaded`, `notes[]`), `blocker`
+(`status`: `unavailable`/`loading`/`ready`/`failed`, `enabled`, `allowlist[]`, `engineVersion`,
+`updating`, `filters`, `error`), `extensionError`, `extensionsBusy`.
 
 In automation mode the app must never take keyboard focus on its own.
 

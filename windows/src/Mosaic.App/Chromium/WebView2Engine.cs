@@ -1,6 +1,7 @@
 using System.Windows.Controls;
 using Microsoft.Web.WebView2.Core;
 using Mosaic.Core;
+using Mosaic.Core.Blocker;
 using Mosaic.Core.Browser;
 
 namespace Mosaic.App.Chromium;
@@ -65,6 +66,13 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
     /// part of a window.
     /// </summary>
     public Panel? ViewHost { get; set; }
+
+    /// <summary>
+    /// The content blocker's decision point, consulted for every request of every Chromium tab;
+    /// null when the blocker is not part of this build, in which case requests are not intercepted
+    /// at all. Set before the first tab is created: a browser picks it up when it starts.
+    /// </summary>
+    public RequestFilter? RequestFilter { get; set; }
 
     public IChromiumBrowser CreateBrowser(string url)
     {

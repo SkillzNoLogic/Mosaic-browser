@@ -1016,7 +1016,9 @@ public sealed class GeckoEngine : IGeckoEngine
                 tab.GetProperty("loading").GetBoolean(),
                 tab.GetProperty("canGoBack").GetBoolean(),
                 tab.GetProperty("canGoForward").GetBoolean(),
-                tab.GetProperty("selected").GetBoolean())).ToList();
+                tab.GetProperty("selected").GetBoolean(),
+                // Absent from an agent that has no content blocker loaded yet.
+                tab.TryGetProperty("blocked", out var blocked) ? blocked.GetInt32() : 0)).ToList();
             var events = root.GetProperty("events").EnumerateArray()
                 .Select(entry => entry.GetProperty("type").GetString() ?? "").ToList();
             return new GeckoSnapshot(root.GetProperty("ready").GetBoolean(), tabs, events);

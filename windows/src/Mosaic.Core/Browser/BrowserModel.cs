@@ -20,6 +20,7 @@ public enum BrowserCommand
     ToggleEngine,
     NextSearchEngine,
     ShowExtensions,
+    ToggleBlocker,
 }
 
 /// <summary>What the address box currently holds, for its leading icon.</summary>
@@ -45,6 +46,17 @@ public enum ContentKind
     GeckoStarting,
     /// <summary>Gecko is running but has not created this tab yet.</summary>
     GeckoOpening,
+}
+
+/// <summary>How the content blocker's toolbar button looks.</summary>
+public enum BlockerShield
+{
+    /// <summary>The blocker is switched off, or not part of this build.</summary>
+    Off,
+    /// <summary>On, but not filtering the page in front (a start page, a site the user exempted).</summary>
+    Idle,
+    /// <summary>Filtering the page in front.</summary>
+    Filtering,
 }
 
 /// <summary>The text Mosaic shows in the content area in place of a page.</summary>
@@ -81,6 +93,14 @@ public sealed class BrowserModel : ObservableObject
     private string addressText = "";
     private AddressKind addressKind;
     private bool showExtensions;
+    private bool showBlocker;
+    private BlockerShield blockerShield;
+    private string blockerBadge = "";
+    private string blockerHelp = "";
+    private string? blockerSite;
+    private bool isBlockingSite;
+    private bool isFilteringPage;
+    private string blockedCountText = "";
     private string? notice;
     private int noticeVersion;
     private bool isGeckoAttached;
@@ -113,7 +133,8 @@ public sealed class BrowserModel : ObservableObject
         ExtensionManager extensions,
         BrowserSettings settings,
         BrowserRules? rules = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        ContentBlockerOptions? blocker = null)
     {
         Gecko = gecko;
         Extensions = extensions;
@@ -130,15 +151,25 @@ public sealed class BrowserModel : ObservableObject
         gecko.SnapshotReceived += Reconcile;
         gecko.Stopped += GeckoStopped;
         gecko.StatusChanged += GeckoStatusChanged;
-        gecko.OnStarted = extensions.LoadAllIntoGeckoAsync;
+        Blocker = new ContentBlocker(gecko, settings, blocker, this.time);
+        gecko.OnStarted = async () =>
+        {
+            // The blocker first, so the very first page is already filtered.
+            await Blocker.ConfigureGeckoAsync();
+            await extensions.LoadAllIntoGeckoAsync();
+        };
         // "Add to Mosaic" turns into "Reinstall" once the listing's extension is installed.
         extensions.PropertyChanged += (_, _) => UpdatePresentation();
+        // The shield shows the blocker's state.
+        Blocker.PropertyChanged += (_, _) => UpdatePresentation();
+        Blocker.Start();
 
         NewTab();
     }
 
     public IGeckoEngine Gecko { get; }
     public ExtensionManager Extensions { get; }
+    public ContentBlocker Blocker { get; }
 
     public ObservableCollection<BrowserTab> Tabs { get; } = [];
 
@@ -215,6 +246,51 @@ public sealed class BrowserModel : ObservableObject
     public bool AllowsFocusChanges { get; set; } = true;
 
     public bool ShowExtensions { get => showExtensions; set => Set(ref showExtensions, value); }
+
+    /// <summary>Whether the content blocker's popover is open.</summary>
+    public bool ShowBlocker
+    {
+        get => showBlocker;
+        set
+        {
+            if (!Set(ref showBlocker, value)) return;
+            // "Lists updated 3 hours ago" has aged since the popover was last open.
+            if (value) Blocker.RefreshListsLine();
+        }
+    }
+
+    // The content blocker's toolbar button and popover, for the selected tab.
+    public BlockerShield BlockerShield { get => blockerShield; private set => Set(ref blockerShield, value); }
+
+    /// <summary>The count on the shield: requests blocked on the page in front, empty when none or not filtering.</summary>
+    public string BlockerBadge { get => blockerBadge; private set => Set(ref blockerBadge, value); }
+
+    /// <summary>The shield's tooltip and accessible value.</summary>
+    public string BlockerHelp { get => blockerHelp; private set => Set(ref blockerHelp, value); }
+
+    /// <summary>The site of the page in front, for the per-site switch; null when it is not a web page.</summary>
+    public string? BlockerSite
+    {
+        get => blockerSite;
+        private set
+        {
+            if (!Set(ref blockerSite, value)) return;
+            Notify(nameof(HasBlockerSite));
+            Notify(nameof(BlockerSiteLabel));
+        }
+    }
+
+    public bool HasBlockerSite => blockerSite is not null;
+    public string BlockerSiteLabel => $"On for {blockerSite}";
+
+    /// <summary>The per-site switch: false when the user turned the blocker off for <see cref="BlockerSite"/>.</summary>
+    public bool IsBlockingSite { get => isBlockingSite; private set => Set(ref isBlockingSite, value); }
+
+    /// <summary>Whether requests from the page in front are being filtered right now.</summary>
+    public bool IsFilteringPage { get => isFilteringPage; private set => Set(ref isFilteringPage, value); }
+
+    /// <summary>"3 requests blocked on this page".</summary>
+    public string BlockedCountText { get => blockedCountText; private set => Set(ref blockedCountText, value); }
 
     /// <summary>Short-lived message; clears itself after a few seconds.</summary>
     public string? Notice
@@ -566,6 +642,7 @@ public sealed class BrowserModel : ObservableObject
             case BrowserCommand.ToggleEngine: ToggleEngine(); break;
             case BrowserCommand.NextSearchEngine: CycleSearchEngine(); break;
             case BrowserCommand.ShowExtensions: ShowExtensions = true; break;
+            case BrowserCommand.ToggleBlocker: ToggleBlocker(); break;
         }
     }
 
@@ -592,6 +669,7 @@ public sealed class BrowserModel : ObservableObject
         tab.CanGoForward = false;
         tab.IsLoading = false;
         tab.Failure = null;
+        tab.BlockedCount = 0;
         if (url.Length > 0) Load(url, tab);
         TabChanged(tab);
     }
@@ -667,6 +745,12 @@ public sealed class BrowserModel : ObservableObject
         browser.NewTabRequested += url =>
         {
             if (Current()) NewTab(url, tab.Engine);
+        };
+        browser.BlockedCountChanged += count =>
+        {
+            if (!Current()) return;
+            tab.BlockedCount = count;
+            TabChanged(tab);
         };
         browser.Failed += reason =>
         {
@@ -769,6 +853,7 @@ public sealed class BrowserModel : ObservableObject
         if (!settling || state.Loading) tab.IsLoading = state.Loading;
         tab.CanGoBack = state.CanGoBack;
         tab.CanGoForward = state.CanGoForward;
+        tab.BlockedCount = state.Blocked;
         TabChanged(tab);
     }
 
@@ -867,6 +952,29 @@ public sealed class BrowserModel : ObservableObject
             : null;
         WebStoreExtensionId = listing;
         AddExtensionLabel = listing is not null && Extensions.IsInstalled(listing) ? "Reinstall" : "Add to Mosaic";
+
+        UpdateBlockerPresentation(tab);
+    }
+
+    /// <summary>The shield and the popover, as <c>BlockerButton</c> and <c>BlockerPopover</c> derive them on macOS.</summary>
+    private void UpdateBlockerPresentation(BrowserTab? tab)
+    {
+        var filtering = tab is not null && Blocker.IsFiltering(tab.Url);
+        var count = tab?.BlockedCount ?? 0;
+        var countText = count == 1 ? "1 request blocked on this page" : $"{count} requests blocked on this page";
+
+        IsFilteringPage = filtering;
+        BlockedCountText = countText;
+        BlockerSite = tab is null ? null : ContentBlocker.SiteOfPage(tab.Url);
+        IsBlockingSite = blockerSite is not { } site || !Blocker.Settings.IsAllowlisted(site);
+        BlockerShield = !Blocker.IsAvailable || !Blocker.IsEnabled ? BlockerShield.Off
+            : filtering ? BlockerShield.Filtering : BlockerShield.Idle;
+        BlockerBadge = filtering && count > 0 ? (count > 999 ? "999+" : count.ToString(System.Globalization.CultureInfo.CurrentCulture)) : "";
+        BlockerHelp =
+            !Blocker.IsAvailable ? "Content blocker is not included in this build"
+            : !Blocker.IsEnabled ? "Content blocker is off"
+            : !filtering ? "Content blocker is not active on this page"
+            : countText;
     }
 
     private ContentKind ContentFor(BrowserTab? tab)
@@ -905,6 +1013,26 @@ public sealed class BrowserModel : ObservableObject
         await Task.Delay(NoticeDuration, time);
         // A newer notice has its own timer.
         if (version == noticeVersion) Notice = null;
+    }
+
+    // ---- Content blocker ----
+
+    /// <summary>Master switch. The page in front is reloaded so the change is visible.</summary>
+    public void SetBlockerEnabled(bool enabled)
+    {
+        if (Blocker.IsEnabled == enabled) return;
+        Blocker.SetEnabled(enabled);
+        Notice = enabled ? "Content blocker on" : "Content blocker off";
+        Reload();
+    }
+
+    public void ToggleBlocker() => SetBlockerEnabled(!Blocker.IsEnabled);
+
+    /// <summary>Per-site switch for the site of <paramref name="tab"/>'s page; reloads it if it is in front.</summary>
+    public void SetBlocking(bool blocking, BrowserTab tab)
+    {
+        Blocker.SetBlocking(blocking, tab.Url);
+        if (ReferenceEquals(tab, selectedTab)) Reload();
     }
 
     // ---- Extensions ----
@@ -954,5 +1082,6 @@ public sealed class BrowserModel : ObservableObject
             browser.Close();
         }
         Gecko.StopAndWait(TimeSpan.FromSeconds(3));
+        Blocker.Shutdown();
     }
 }

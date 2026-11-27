@@ -250,7 +250,7 @@ public class AutomationTests
 
         // The key sets are the contract scripts are written against.
         Assert.Equal(
-            ["addressText", "chromiumAvailable", "engine", "extensionError", "extensions", "extensionsBusy",
+            ["addressText", "blocker", "chromiumAvailable", "engine", "extensionError", "extensions", "extensionsBusy",
              "geckoAttached", "geckoProcessId", "geckoStatus", "notice", "searchEngine", "tabs"],
             state.Select(pair => pair.Key).Order());
 
@@ -259,14 +259,14 @@ public class AutomationTests
         foreach (var tab in tabs)
         {
             Assert.Equal(
-                ["canGoBack", "canGoForward", "engine", "failure", "geckoId", "hasChromiumView", "loading",
+                ["blocked", "canGoBack", "canGoForward", "engine", "failure", "geckoId", "hasChromiumView", "loading",
                  "selected", "title", "url"],
                 tab!.AsObject().Select(pair => pair.Key).Order());
         }
 
-        Assert.Equal("""{"engine":"gecko","url":"","title":"","loading":false,"canGoBack":false,"canGoForward":false,"geckoId":-1,"hasChromiumView":false,"failure":"","selected":false}""", tabs[0]!.ToJsonString());
-        Assert.Equal("""{"engine":"gecko","url":"https://example.com/","title":"Example","loading":false,"canGoBack":true,"canGoForward":false,"geckoId":1,"hasChromiumView":false,"failure":"","selected":false}""", tabs[1]!.ToJsonString());
-        Assert.Equal("""{"engine":"chromium","url":"https://example.org/","title":"Example Org","loading":true,"canGoBack":false,"canGoForward":false,"geckoId":-1,"hasChromiumView":true,"failure":"","selected":true}""", tabs[2]!.ToJsonString());
+        Assert.Equal("""{"engine":"gecko","url":"","title":"","loading":false,"canGoBack":false,"canGoForward":false,"geckoId":-1,"hasChromiumView":false,"blocked":0,"failure":"","selected":false}""", tabs[0]!.ToJsonString());
+        Assert.Equal("""{"engine":"gecko","url":"https://example.com/","title":"Example","loading":false,"canGoBack":true,"canGoForward":false,"geckoId":1,"hasChromiumView":false,"blocked":0,"failure":"","selected":false}""", tabs[1]!.ToJsonString());
+        Assert.Equal("""{"engine":"chromium","url":"https://example.org/","title":"Example Org","loading":true,"canGoBack":false,"canGoForward":false,"geckoId":-1,"hasChromiumView":true,"blocked":0,"failure":"","selected":true}""", tabs[2]!.ToJsonString());
 
         Assert.Equal("chromium", (string)state["engine"]!);
         Assert.Equal("google", (string)state["searchEngine"]!);
@@ -278,6 +278,10 @@ public class AutomationTests
         Assert.Equal("Search engine: Google", (string)state["notice"]!);
         Assert.Equal("", (string)state["extensionError"]!);
         Assert.False((bool)state["extensionsBusy"]!);
+        // This fixture ships no blocker; BlockerTests cover a working one.
+        Assert.Equal(
+            """{"status":"unavailable","enabled":true,"allowlist":[],"engineVersion":"","updating":false,"filters":0,"error":""}""",
+            state["blocker"]!.ToJsonString());
 
         var extension = Assert.Single(state["extensions"]!.AsArray())!.AsObject();
         Assert.Equal(
