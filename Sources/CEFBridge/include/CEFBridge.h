@@ -54,6 +54,17 @@ NS_ASSUME_NONNULL_BEGIN
 /// Releases Chromium. Call after `runEventLoop` returns.
 + (void)shutdown;
 
+// Platform area: languages.
+
+/// Sets the languages pages are asked for (`Accept-Language`, `navigator.languages`):
+/// comma-separated BCP 47 tags without spaces, most preferred first. Applies to every
+/// browser, from its next navigation. Returns nil on success, otherwise why it failed.
+/// Main thread, after `start`.
++ (nullable NSString *)setAcceptLanguageList:(NSString *)list;
+
+/// The current `intl.accept_languages` preference, or nil if Chromium is not running.
+@property(class, readonly, copy, nullable) NSString *acceptLanguageList;
+
 @end
 
 @class MCEFBrowserView;
@@ -72,6 +83,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)browserViewDidStartDocumentLoad:(MCEFBrowserView *)view;
 /// `requestFilter` blocked a request made by this browser's page.
 - (void)browserView:(MCEFBrowserView *)view didBlockRequest:(NSString *)url;
+@optional
+/// Platform area: the main frame failed to load (DNS, connection, certificate…). Sent
+/// before Mosaic's error page replaces it. Cancelled loads (ERR_ABORTED) are not reported.
+- (void)browserView:(MCEFBrowserView *)view
+    didFailLoadWithErrorCode:(NSInteger)errorCode
+                   errorText:(NSString *)errorText
+                         url:(NSString *)url;
 @end
 
 /// A view that hosts one Chromium browser. The browser is created the first

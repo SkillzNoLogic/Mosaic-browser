@@ -465,6 +465,14 @@ final class GeckoEngine: ObservableObject {
         }
     }
 
+    // MARK: - Runtime install (owner: platform)
+
+    /// Looks for the Gecko runtime again, after Mosaic installed, updated or removed its
+    /// private copy (Settings › Engine). The next start uses whatever is found.
+    func refreshRuntime() {
+        runtime = Self.locateRuntime()
+    }
+
     /// Makes Gecko the active app so the page receives keyboard input.
     func activate() {
         guard status == .running, isShown else { return }

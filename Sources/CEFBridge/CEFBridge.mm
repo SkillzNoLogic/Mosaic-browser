@@ -9,6 +9,7 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_parser.h"
+#include "include/cef_request_context.h"  // platform: languages
 #include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
@@ -224,6 +225,14 @@ class MosaicClient : public CefClient,
     // ERR_ABORTED is a cancelled load (user pressed stop, download started…).
     if (errorCode == ERR_ABORTED || !frame->IsMain()) {
       return;
+    }
+    // Platform area: safe engine switching needs to know the load failed.
+    MCEFBrowserView* failedView = view_;
+    if ([failedView.delegate respondsToSelector:@selector(browserView:didFailLoadWithErrorCode:errorText:url:)]) {
+      [failedView.delegate browserView:failedView
+              didFailLoadWithErrorCode:static_cast<NSInteger>(errorCode)
+                             errorText:ToNSString(errorText)
+                                   url:ToNSString(failedUrl)];
     }
     std::string html =
         "<!doctype html><meta charset=utf-8><title>Can’t open this page</title>"
@@ -462,6 +471,41 @@ class MosaicClient : public CefClient,
       CefQuitMessageLoop();
     }
   });
+}
+
+// Platform area: languages. intl.accept_languages is a preference of the global request
+// context, which every Mosaic browser uses; Chromium persists it in the profile.
++ (NSString*)setAcceptLanguageList:(NSString*)list {
+  if (!g_running) {
+    return @"Chromium is not running.";
+  }
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (!context || !context->CanSetPreference("intl.accept_languages")) {
+    return @"Chromium does not allow changing its languages.";
+  }
+  CefRefPtr<CefValue> value = CefValue::Create();
+  value->SetString(list.UTF8String);
+  CefString error;
+  // intl.selected_languages is the user's choice, from which Chromium derives
+  // intl.accept_languages; both are set so neither overrides the other.
+  if (context->HasPreference("intl.selected_languages") &&
+      context->CanSetPreference("intl.selected_languages") &&
+      !context->SetPreference("intl.selected_languages", value, error)) {
+    return error.empty() ? @"Chromium refused the language list." : ToNSString(error);
+  }
+  if (!context->SetPreference("intl.accept_languages", value, error)) {
+    return error.empty() ? @"Chromium refused the language list." : ToNSString(error);
+  }
+  return nil;
+}
+
++ (NSString*)acceptLanguageList {
+  if (!g_running) {
+    return nil;
+  }
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  CefRefPtr<CefValue> value = context ? context->GetPreference("intl.accept_languages") : nullptr;
+  return value ? ToNSString(value->GetString()) : nil;
 }
 
 + (void)shutdown {
