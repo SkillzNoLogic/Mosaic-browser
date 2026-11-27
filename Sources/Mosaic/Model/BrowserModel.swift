@@ -39,6 +39,8 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
+    let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.

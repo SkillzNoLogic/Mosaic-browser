@@ -40,6 +40,8 @@ final class Automation {
               let action = command["do"] as? String
         else { return }
         let value = command["value"] as? String ?? ""
+        // shell: Mosaics, settings, sidebar (see ShellAutomation)
+        if ShellAutomation.handle(action, value: value, model: model) { return }
 
         switch action {
         case "navigate": model.navigate(value)
@@ -115,7 +117,7 @@ final class Automation {
 
     private func dump(to path: String) {
         let frame = window?.frame ?? .zero
-        let state: [String: Any] = [
+        var state: [String: Any] = [
             "tabs": model.tabs.map { tab in
                 [
                     "engine": tab.engine.rawValue, "url": tab.url, "title": tab.title,
@@ -153,6 +155,7 @@ final class Automation {
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
         ]
+        state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }

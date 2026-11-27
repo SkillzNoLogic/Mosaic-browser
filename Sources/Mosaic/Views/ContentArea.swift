@@ -3,23 +3,47 @@ import CEFBridge
 import MosaicCore
 import SwiftUI
 
-/// Shows the selected tab: the start page, a Chromium view, or the hole that
-/// the docked Gecko window fills.
-struct ContentArea: View {
+/// The page area of the window: the selected tab (Chromium view, the hole Gecko's window
+/// shows through, Mosaic's own pages, the start page) or Settings.
+///
+/// The card's screen rectangle is reported continuously; that is what keeps the docked
+/// Gecko window exactly behind it in every Mosaic (see `ContentRectRelay`).
+struct ContentCard: View {
     @EnvironmentObject private var model: BrowserModel
+    @Environment(\.shellTheme) private var theme
+    let relay: ContentRectRelay
 
     var body: some View {
+        let radius = theme.appearance.contentCornerRadius
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         ZStack {
-            // Always present, never drawn: tells the model where the content
-            // area is on screen so Gecko's window can be kept exactly there.
-            ContentRectReporter { model.setContentRect($0) }
-            if let tab = model.selectedTab {
-                TabContent(tab: tab, gecko: model.gecko)
+            // Always present, never drawn: tells the model where the page area is on screen.
+            ContentRectReporter(relay: relay)
+            if let category = model.settingsCategory {
+                SettingsView(selection: category)
+                    .transition(.opacity)
+            } else if let tab = model.selectedTab {
+                TabContent(tab: tab, gecko: model.gecko, cornerRadius: radius)
                     .id(tab.id)
             } else {
-                Chrome.background
+                ShellColors.page
             }
         }
+        .clipShape(shape)
+        .overlay(alignment: .top) {
+            // Engine area's find bar, over the top of the page.
+            if model.settingsCategory == nil { FindBar() }
+        }
+        .overlay {
+            if theme.appearance.glow {
+                shape.strokeBorder(theme.accent.opacity(0.85), lineWidth: 1.5)
+                    .shadow(color: theme.accent.opacity(0.7), radius: 9)
+                    .allowsHitTesting(false)
+            }
+        }
+        .shadow(color: .black.opacity(theme.appearance.contentInset > 0 && !theme.appearance.glow ? 0.16 : 0),
+                radius: 5, y: 1)
+        .animation(theme.animation(.easeOut(duration: 0.15)), value: model.settingsCategory)
     }
 }
 
@@ -27,10 +51,13 @@ private struct TabContent: View {
     @EnvironmentObject private var model: BrowserModel
     @ObservedObject var tab: BrowserTab
     @ObservedObject var gecko: GeckoEngine
+    let cornerRadius: CGFloat
 
     var body: some View {
         if let page = tab.internalPage {
             InternalPageView(page: page)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(ShellColors.page)
         } else if tab.isStartPage {
             StartPage()
         } else if let failure = tab.failure {
@@ -41,14 +68,17 @@ private struct TabContent: View {
             switch tab.engine {
             case .chromium:
                 if let view = tab.chromiumView {
-                    ChromiumContainer(browserView: view)
+                    ChromiumContainer(browserView: view, cornerRadius: cornerRadius)
                 } else {
-                    EngineMessage(symbol: "hourglass", title: "Starting Chromium…", detail: nil)
+                    EngineMessage(symbol: "hourglass", title: "Starting Chromium…", detail: nil, showsProgress: true)
                 }
             case .gecko:
-                if gecko.status == .running, tab.geckoID != nil {
-                    // Nothing at all: these pixels stay transparent, so the
-                    // docked Gecko window shows through and receives the clicks.
+                if model.shellGeckoRuntimeMissing {
+                    // Platform area's install offer.
+                    ShellGeckoRuntimeMissingMount(tab: tab)
+                } else if gecko.status == .running, tab.geckoID != nil {
+                    // Nothing at all: these pixels stay transparent, so the docked Gecko
+                    // window shows through and receives the clicks.
                     GeckoHole()
                 } else {
                     EngineMessage(
@@ -86,6 +116,7 @@ struct EngineMessage: View {
                 ProgressView()
             } else {
                 Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
             Text(title).font(.title3.weight(.medium))
             if let detail {
@@ -101,33 +132,61 @@ struct EngineMessage: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .background(ShellColors.page)
+        .accessibilityElement(children: .contain)
     }
 }
 
 // MARK: - Chromium
 
-/// Hosts the selected tab's Chromium view.
+/// Hosts the selected tab's Chromium view. The view belongs to the tab: when the layout
+/// changes, it is moved into the new container, never recreated, so the page keeps running.
 private struct ChromiumContainer: NSViewRepresentable {
     let browserView: MCEFBrowserView
+    let cornerRadius: CGFloat
 
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
         container.autoresizesSubviews = true
+        container.wantsLayer = true
+        container.layer?.masksToBounds = true
         return container
     }
 
     func updateNSView(_ container: NSView, context: Context) {
+        container.layer?.cornerRadius = cornerRadius
+        container.layer?.cornerCurve = .continuous
         guard browserView.superview !== container else { return }
-        container.subviews.forEach { $0.removeFromSuperview() }
+        // Moving an NSView between superviews keeps its browser alive (it is created once,
+        // on first entering a window; see MCEFBrowserView).
+        browserView.removeFromSuperview()
         browserView.frame = container.bounds
         browserView.autoresizingMask = [.width, .height]
         container.addSubview(browserView)
+        Self.refreshSize(of: browserView, in: container)
+    }
+
+    /// Chromium only re-lays out its page for size changes it sees while in a window; one
+    /// made while the view was detached (another tab or another layout was showing) would
+    /// leave the page at its old size. Once the view is back, change its size by a point
+    /// and restore it, in two separate turns, so Chromium gets a fresh resize.
+    private static func refreshSize(of view: MCEFBrowserView, in container: NSView) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak view, weak container] in
+            guard let view, let container, view.superview === container, view.window != nil else { return }
+            var nudged = container.bounds
+            nudged.size.height = max(1, nudged.height - 1)
+            view.frame = nudged
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak view, weak container] in
+                guard let view, let container, view.superview === container else { return }
+                view.frame = container.bounds
+            }
+        }
     }
 
     static func dismantleNSView(_ container: NSView, coordinator: ()) {
-        // The browser view belongs to its tab and outlives this container.
-        container.subviews.forEach { $0.removeFromSuperview() }
+        // The browser view belongs to its tab and outlives this container. Only detach it
+        // if it is still here (it may already have moved to the next container).
+        for view in container.subviews { view.removeFromSuperview() }
     }
 }
 
@@ -155,18 +214,56 @@ private struct GeckoHole: NSViewRepresentable {
     }
 }
 
+// MARK: - Content rectangle
+
+/// Passes the page area's screen rectangle to the model. When the layout changes, the old
+/// reporter goes away and a new one appears in the same turn of the run loop; the relay
+/// waits for that before reporting "no content area", so the Gecko window is re-docked
+/// to the new rectangle instead of being hidden and shown again.
+@MainActor
+final class ContentRectRelay {
+    /// The last rectangle sent, for diagnostics (`dump`).
+    private(set) var lastRect: CGRect?
+    private weak var current: DockAnchorView?
+    private let sink: (CGRect?) -> Void
+
+    init(sink: @escaping (CGRect?) -> Void) {
+        self.sink = sink
+    }
+
+    fileprivate func report(_ rect: CGRect, from view: DockAnchorView) {
+        current = view
+        send(rect)
+    }
+
+    fileprivate func detach(_ view: DockAnchorView) {
+        guard current === view else { return }
+        current = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.current == nil else { return }
+            self.send(nil)
+        }
+    }
+
+    private func send(_ rect: CGRect?) {
+        guard rect != lastRect else { return }
+        lastRect = rect
+        sink(rect)
+    }
+}
+
 /// An invisible view that reports its own rect in screen coordinates.
 private struct ContentRectReporter: NSViewRepresentable {
-    let onRect: (CGRect?) -> Void
+    let relay: ContentRectRelay
 
     func makeNSView(context: Context) -> DockAnchorView {
         let view = DockAnchorView()
-        view.onRect = onRect
+        view.relay = relay
         return view
     }
 
     func updateNSView(_ view: DockAnchorView, context: Context) {
-        view.onRect = onRect
+        view.relay = relay
         view.report()
     }
 
@@ -176,18 +273,18 @@ private struct ContentRectReporter: NSViewRepresentable {
 }
 
 final class DockAnchorView: NSView {
-    var onRect: ((CGRect?) -> Void)?
+    fileprivate weak var relay: ContentRectRelay?
     private var observers: [NSObjectProtocol] = []
-    private var lastReported: CGRect?
-    private var hasReported = false
 
     override var isOpaque: Bool { false }
+    // Never takes clicks: the page (or the Gecko window behind) gets them.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         stopObserving()
         guard let window else {
-            send(nil)
+            relay?.detach(self)
             return
         }
         let center = NotificationCenter.default
@@ -197,9 +294,19 @@ final class DockAnchorView: NSView {
         ]
         observers = names.map { name in
             center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                self?.report()
+                MainActor.assumeIsolated { self?.report() }
             }
         }
+        report()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        report()
+    }
+
+    override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
         report()
     }
 
@@ -209,21 +316,13 @@ final class DockAnchorView: NSView {
     }
 
     func report() {
-        guard let window else { return }
-        send(window.convertToScreen(convert(bounds, to: nil)))
+        guard let window, bounds.width > 0, bounds.height > 0 else { return }
+        relay?.report(window.convertToScreen(convert(bounds, to: nil)), from: self)
     }
 
     func detach() {
         stopObserving()
-        send(nil)
-        onRect = nil
-    }
-
-    private func send(_ rect: CGRect?) {
-        guard !hasReported || rect != lastReported else { return }
-        hasReported = true
-        lastReported = rect
-        onRect?(rect)
+        relay?.detach(self)
     }
 
     private func stopObserving() {
@@ -234,39 +333,69 @@ final class DockAnchorView: NSView {
 
 // MARK: - Start page
 
+/// The New Tab page: a search field, then the productivity area's Speed Dial / shortcuts.
 struct StartPage: View {
     @EnvironmentObject private var model: BrowserModel
-    private var query = State(initialValue: "")
+    @Environment(\.shellTheme) private var theme
+    @Environment(\.shellMetrics) private var metrics
+    @State private var query = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        VStack(spacing: 22) {
-            Spacer()
-            MosaicMark().frame(width: 64, height: 64)
-            Text("Mosaic").font(.system(size: 34, weight: .semibold, design: .rounded))
+        ScrollView {
+            VStack(spacing: 22) {
+                Spacer(minLength: 60)
+                MosaicMark().frame(width: 56, height: 56)
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Search \(model.searchEngine.name) or enter address", text: $query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 16 * metrics.scale))
+                        .focused($focused)
+                        .onSubmit {
+                            let input = query
+                            query = ""
+                            model.navigate(input)
+                        }
+                        .accessibilityLabel("Search or enter address")
+                }
+                .padding(.horizontal, 16)
+                .frame(maxWidth: 560)
+                .frame(height: 46 * metrics.scale)
+                .background(RoundedRectangle(cornerRadius: max(10, theme.cornerRadius + 4), style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: max(10, theme.cornerRadius + 4), style: .continuous)
+                    .strokeBorder(focused ? theme.accent : Color.primary.opacity(0.12), lineWidth: focused ? 2 : 1))
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+                .padding(.horizontal, 24)
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search \(model.searchEngine.name) or enter address", text: query.projectedValue)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15))
-                    .onSubmit { model.navigate(query.wrappedValue) }
-            }
-            .padding(.horizontal, 14)
-            .frame(width: 520, height: 42)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.12)))
+                HStack(spacing: 6) {
+                    Circle().fill(ShellColors.tint(for: model.engine)).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                    Text("New tabs open in \(model.engine.displayName) · searching with \(model.searchEngine.name)")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
 
-            HStack(spacing: 6) {
-                Circle().fill(Chrome.tint(for: model.engine)).frame(width: 8, height: 8)
-                Text("New tabs open in \(model.engine.displayName) · searching with \(model.searchEngine.name)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                // Productivity area's new-tab content (Speed Dial, shortcuts).
+                StartPageContent()
+                    .frame(maxWidth: 900)
+                    .padding(.horizontal, 24)
+                Spacer(minLength: 40)
             }
-            Spacer()
-            Spacer()
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
+        .scrollBounceBehavior(.basedOnSize)
+        .background(startBackground)
+    }
+
+    @ViewBuilder private var startBackground: some View {
+        // A whisper of the Mosaic's accent so the new-tab page belongs to the theme.
+        ZStack {
+            ShellColors.page
+            LinearGradient(colors: [theme.accent.opacity(0.07), .clear], startPoint: .top, endPoint: .center)
+        }
     }
 }
 
@@ -274,21 +403,21 @@ struct StartPage: View {
 struct MosaicMark: View {
     var body: some View {
         GeometryReader { proxy in
-            let gap = proxy.size.width * 0.08
-            let tile = (proxy.size.width - gap) / 2
+            let side = min(proxy.size.width, proxy.size.height)
+            let gap = side * 0.08
+            let tile = (side - gap) / 2
             let radius = tile * 0.24
             VStack(spacing: gap) {
                 HStack(spacing: gap) {
-                    RoundedRectangle(cornerRadius: radius).fill(Chrome.tint(for: .gecko))
-                    RoundedRectangle(cornerRadius: radius).fill(Chrome.tint(for: .chromium).opacity(0.55))
+                    RoundedRectangle(cornerRadius: radius).fill(ShellColors.tint(for: .gecko))
+                    RoundedRectangle(cornerRadius: radius).fill(ShellColors.tint(for: .chromium).opacity(0.55))
                 }
                 HStack(spacing: gap) {
-                    RoundedRectangle(cornerRadius: radius).fill(Chrome.tint(for: .gecko).opacity(0.55))
-                    RoundedRectangle(cornerRadius: radius).fill(Chrome.tint(for: .chromium))
+                    RoundedRectangle(cornerRadius: radius).fill(ShellColors.tint(for: .gecko).opacity(0.55))
+                    RoundedRectangle(cornerRadius: radius).fill(ShellColors.tint(for: .chromium))
                 }
             }
-            .frame(width: proxy.size.width, height: proxy.size.width)
-            .frame(height: tile * 2 + gap)
+            .frame(width: side, height: side)
         }
         .accessibilityHidden(true)
     }
