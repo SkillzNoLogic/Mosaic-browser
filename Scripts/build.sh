@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-release}"
-VERSION="0.1.0"
+VERSION="${MOSAIC_VERSION:-0.1.0}"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 CEF="$ROOT/Vendor/cef"
 APP="$ROOT/build/Mosaic.app"
