@@ -31,7 +31,7 @@ enum SettingsSearchIndex {
         case .shortcuts: ["Keyboard shortcuts", "Command palette", "Gestures"]
         case .languages: ["Languages", "Spelling", "Translate"]
         case .performance: ["Performance", "Memory", "Sleeping tabs", "Unload tabs"]
-        case .about: ["About", "Version", "Updates", "Licences"]
+        case .about: ["About", "Version", "Updates", "Automatic updates", "Install update", "GitHub token", "Licences"]
         }
     }
 

@@ -7,12 +7,23 @@ public enum ReleaseCheck {
         URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
     public static let releasesPageURL = URL(string: "https://github.com/\(repository)/releases")!
 
+    /// Where the latest release is looked up: GitHub, unless a test sets `MOSAIC_UPDATE_API`
+    /// to another feed returning the same JSON (HTTPS, or HTTP to this Mac only).
+    public static func feedURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        if let text = environment["MOSAIC_UPDATE_API"], let url = URL(string: text), isAcceptableFeedOverride(url) {
+            return url
+        }
+        return latestReleaseURL
+    }
+
     public struct Release: Equatable, Sendable {
         public let version: SoftwareVersion
         public let name: String
         public let pageURL: URL?
         public let publishedAt: Date?
         public let notes: String
+        /// Files attached to the release (the update zip and its signature among them).
+        public var assets: [Asset] = []
     }
 
     public enum Outcome: Equatable, Sendable {
@@ -29,7 +40,7 @@ public enum ReleaseCheck {
             case .upToDate(let latest): "Mosaic is up to date (latest release: \(latest.numberString))."
             case .available(let release): "Mosaic \(release.version.numberString) is available."
             case .needsAccess:
-                "Update checks need access to the repository. Mosaic’s releases are not public yet, so GitHub does not show them to anonymous requests."
+                "Mosaic’s repository is private, so GitHub shows its releases only to people with access. Add a GitHub token below to check and update."
             case .rateLimited: "GitHub is limiting requests from your network. Try again in an hour."
             case .failed(let detail): "Could not check for updates: \(detail)"
             }
@@ -59,7 +70,8 @@ public enum ReleaseCheck {
             name: (object["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tag,
             pageURL: (object["html_url"] as? String).flatMap(URL.init(string:)),
             publishedAt: published,
-            notes: object["body"] as? String ?? "")
+            notes: object["body"] as? String ?? "",
+            assets: parseAssets(data))
     }
 }
 

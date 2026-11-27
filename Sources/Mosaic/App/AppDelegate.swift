@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func prepareToQuit() {
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver) }
         model?.productivity.reader.prepareToQuit()  // productivity: releases page-script channels
+        model?.platform.updater.installIfReady()  // platform: a downloaded update installs once Mosaic has exited
         model?.shutdown()
     }
 

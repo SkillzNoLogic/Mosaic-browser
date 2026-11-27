@@ -24,7 +24,7 @@ struct AboutSettingsPane: View {
             }
 
             Section("Updates") {
-                UpdatesSection(updates: model.platform.updates)
+                UpdatesSection(updates: model.platform.updates, updater: model.platform.updater)
             }
 
             Section("Components") {
@@ -63,13 +63,27 @@ struct AboutSettingsPane: View {
 private struct UpdatesSection: View {
     @EnvironmentObject private var model: BrowserModel
     @ObservedObject var updates: UpdateChecker
+    @ObservedObject var updater: MosaicUpdater
+    @State private var tokenText = ""
+    @State private var showsAccess = false
 
     var body: some View {
+        Toggle("Download and install updates automatically", isOn: $updater.automatic)
+            .disabled(updater.locationProblem != nil)
+        SettingsNote("New versions download in the background and install the next time you quit Mosaic. Mosaic installs only downloads signed with its release key; anything else is discarded.")
+        if let problem = updater.locationProblem {
+            Label(problem.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
         Picker("Check for updates", selection: $updates.frequency) {
             Text("Only when I ask").tag(UpdateCheckFrequency.manual)
             Text("Once a day").tag(UpdateCheckFrequency.daily)
         }
-        SettingsNote("A daily check asks GitHub for Mosaic’s latest release and Mozilla for the current Firefox ESR. Nothing else is sent.")
+        .disabled(updater.automatic)
+        SettingsNote(updater.automatic
+            ? "Automatic updates check once a day. A check asks GitHub for Mosaic’s latest release and Mozilla for the current Firefox ESR. Nothing else is sent."
+            : "A daily check asks GitHub for Mosaic’s latest release and Mozilla for the current Firefox ESR. Nothing else is sent.")
         HStack {
             Button {
                 Task { await updates.checkNow() }
@@ -82,30 +96,120 @@ private struct UpdatesSection: View {
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
+
         if let outcome = updates.outcome {
             switch outcome {
             case .available(let release):
-                HStack {
-                    Label(outcome.message, systemImage: "arrow.down.circle.fill").foregroundStyle(.blue)
-                    Spacer()
-                    if let page = release.pageURL {
-                        Button("View Release") { open(page) }
-                    }
-                }
+                availableRow(outcome.message, release: release)
             case .upToDate:
                 Label(outcome.message, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             case .needsAccess:
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(outcome.message, systemImage: "lock.fill").foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("Open Releases Page") { open(ReleaseCheck.releasesPageURL) }
-                        .help("Opens GitHub in a tab; sign in there if you have access")
-                }
+                Label(outcome.message, systemImage: "lock.fill").foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             case .rateLimited, .failed:
                 Label(outcome.message, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        if case .ready(let version) = updater.phase, !isAvailableOutcome {
+            readyRow(version)
+        }
+
+        DisclosureGroup("Repository access", isExpanded: Binding(
+            get: { showsAccess || updates.outcome == .needsAccess },
+            set: { showsAccess = $0 })) {
+            accessSection
+        }
+    }
+
+    private var isAvailableOutcome: Bool {
+        if case .available = updates.outcome { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private func availableRow(_ message: String, release: ReleaseCheck.Release) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(message, systemImage: "arrow.down.circle.fill").foregroundStyle(.blue)
+                Spacer()
+                if let page = release.pageURL {
+                    Button("Release Notes") { open(page) }
+                }
+            }
+            switch updater.phase {
+            case .downloading(_, let fraction):
+                HStack {
+                    if let fraction { ProgressView(value: fraction) } else { ProgressView().controlSize(.small) }
+                    Text(fraction.map { "\(Int($0 * 100))%" } ?? "Downloading…")
+                        .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    Button("Cancel") { updater.cancel() }
+                }
+            case .verifying:
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Checking the release signature…").font(.callout).foregroundStyle(.secondary)
+                }
+            case .ready(let version):
+                readyRow(version)
+            case .failed(let failure):
+                Label(failure, systemImage: "xmark.octagon.fill").foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                downloadButton(release)
+            case .idle:
+                downloadButton(release)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func downloadButton(_ release: ReleaseCheck.Release) -> some View {
+        if updater.locationProblem == nil {
+            Button("Download and Install") { updater.download(release) }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private func readyRow(_ version: String) -> some View {
+        HStack {
+            Label("Mosaic \(version) is ready. It installs when you quit Mosaic.", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Restart to Update") { updater.restartToUpdate() }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    @ViewBuilder
+    private var accessSection: some View {
+        SettingsNote("Only needed if Mosaic’s repository is private: GitHub then shows its releases only to people with access. Create a fine-grained personal access token on GitHub with read-only access to “Contents” of \(ReleaseCheck.repository), and paste it here. It is kept in your Keychain and sent only to api.github.com.")
+        if updater.hasToken {
+            HStack {
+                Label("GitHub token saved in the Keychain", systemImage: "key.fill")
+                Spacer()
+                Button("Remove", role: .destructive) { updater.removeToken() }
+            }
+        } else {
+            HStack {
+                SecureField("GitHub token", text: $tokenText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(saveToken)
+                Button("Save", action: saveToken)
+                    .disabled(tokenText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        if let error = updater.tokenError {
+            Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+        Button("Open Releases Page") { open(ReleaseCheck.releasesPageURL) }
+            .help("Opens GitHub in a tab; sign in there if you have access")
+    }
+
+    private func saveToken() {
+        updater.saveToken(tokenText)
+        tokenText = ""
+        if updater.hasToken { Task { await updates.checkNow() } }
     }
 
     private func open(_ url: URL) {
@@ -146,7 +250,7 @@ private struct PrivacySection: View {
         ("Chrome extensions",
          "clients2.google.com (the Chrome Web Store, which hands the download to Google’s servers) when you install an extension from a link or ID."),
         ("Mosaic update checks",
-         "api.github.com, when you press Check Now or once a day if you chose that."),
+         "api.github.com, when you press Check Now or once a day if you chose that; github.com and GitHub’s download servers when an update is downloaded."),
     ]
 }
 

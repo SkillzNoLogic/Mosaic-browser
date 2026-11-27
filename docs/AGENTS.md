@@ -128,12 +128,12 @@ commands would reach every other engineer's running copy.
 ## Ground rules for this machine
 
 The owner is using this Mac while you work.
-- Work only inside your worktree. Never modify `/Users/aarav/browser/mosaic` (the integration
-  checkout), other worktrees, `~/Library/Application Support/Mosaic`, the user's
+- Work only inside your worktree. Never modify the integration checkout (`mosaic/`, next to the
+  `mosaic-<area>` worktrees), other worktrees, `~/Library/Application Support/Mosaic`, the user's
   preferences, or `/Applications/Mosaic.app` (the owner's other build; leave it running).
-- Read-only references you may consult: `/Users/aarav/mosiac` (the owner's earlier Mosaic,
+- Read-only references you may consult: the owner's earlier Mosaic project (a separate checkout,
   SwiftUI; good design ideas, especially `Mac/Mosaic/Mosaic/Components` and `Shared/`), and the
-  Eminence clone at `/private/tmp/claude-501/-Users-aarav-browser-mosaic/0fa6f291-7b7b-4b85-a312-39e45824b5c9/scratchpad/eminence`.
+  Eminence clone in the session's scratchpad.
 - No git commands that change anything (the integrator commits). No installing software
   (Homebrew, npm globals). Downloads into your worktree or a temp folder are fine.
 - Never kill a process you did not start. Quit every Mosaic and Firefox you start.

@@ -16,6 +16,8 @@ import MosaicCore
 ///     defaultEngine gecko|chromium
 ///     languages en-GB,fr                        set web-content languages (or "system")
 ///     updateCheck / updateFrequency manual|daily
+///     updateDownload (the release the last check found) / updateCancel / updateRestart
+///     updateAuto on|off · updateTokenFile <file with a GitHub token> (empty: remove it)
 ///     openSettings engine|extensions|languages|about|…   (empty value closes settings)
 ///     extensionToolbar <index>                  perform toolbar button <index>
 ///     previewPane <category> / previewScroll 0…1  show a settings page in its own window (screenshots)
@@ -57,6 +59,17 @@ enum PlatformAutomation {
                 platform.languages.edit { $0 = LanguagePreferences(tags: tags) }
             }
         case "updateCheck": Task { await platform.updates.checkNow() }
+        case "updateDownload":
+            if case .available(let release) = platform.updates.outcome { platform.updater.download(release) }
+        case "updateCancel": platform.updater.cancel()
+        case "updateRestart": platform.updater.restartToUpdate()
+        case "updateAuto": platform.updater.automatic = value == "on"
+        case "updateTokenFile":
+            // Reads the token from a file (never sent over the automation channel itself);
+            // an empty value removes the saved token.
+            if value.isEmpty { platform.updater.removeToken() } else if let token = try? String(contentsOfFile: value, encoding: .utf8) {
+                platform.updater.saveToken(token)
+            }
         case "updateFrequency":
             if let frequency = UpdateCheckFrequency(rawValue: value) { platform.updates.frequency = frequency }
         case "openSettings":
@@ -129,6 +142,7 @@ enum PlatformAutomation {
                 "outcome": platform.updates.outcome?.message ?? "",
                 "checking": platform.updates.isChecking,
             ] as [String: Any],
+            "updater": platform.updater.automationState,
             "settingsCategory": model.settingsCategory?.rawValue ?? "",
             "previewWindow": previewWindow?.windowNumber ?? -1,
             "extensionPermissions": Dictionary(uniqueKeysWithValues: model.extensions.extensions.map { ext in

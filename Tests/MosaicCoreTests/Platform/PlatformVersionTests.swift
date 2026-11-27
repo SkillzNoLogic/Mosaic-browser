@@ -79,7 +79,7 @@ import Testing
         let body = Data(#"{"message": "Not Found", "status": "404"}"#.utf8)
         let outcome = ReleaseCheck.outcome(status: 404, body: body, current: SoftwareVersion("0.1.0"))
         #expect(outcome == .needsAccess)
-        #expect(outcome.message.contains("need access to the repository"))
+        #expect(outcome.message.contains("GitHub token"))
     }
 
     @Test func otherAnswers() {

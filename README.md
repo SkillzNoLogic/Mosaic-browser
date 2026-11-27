@@ -39,6 +39,18 @@ Mozilla tab): Mosaic downloads Firefox ESR from Mozilla, checks that it is signe
 Mozilla, and keeps it as a private copy that never touches a Firefox you already have.
 Until then Mosaic browses with Chromium.
 
+**Updates.** Settings › About & Updates checks GitHub for new releases. With **Download and
+install updates automatically** on, a new version downloads in the background and installs
+the next time you quit Mosaic; otherwise press **Download and Install**, then **Restart to
+Update**. Mosaic installs only a download signed with its release key (Ed25519; see
+*Releasing* below), checks the app's code signature, bundle ID and version, and keeps the
+old app until the new one is in place. If the repository is ever private, GitHub shows its
+releases only to people with access: then paste a fine-grained GitHub token with read-only
+*Contents* access under **Repository access** (it is kept in the Keychain and sent only to
+api.github.com). Mosaic must be in a folder you can write to (such as Applications), not
+running from the disk image. Automatic updates start with the first version after 0.2.1:
+earlier releases have no updater and no signed update file.
+
 ## Build from source
 
 Needs **Xcode 27** (SwiftUI's macros and the Liquid Glass APIs ship with Xcode, not with
@@ -48,8 +60,19 @@ the Command Line Tools alone), plus CMake and esbuild once (`brew install cmake 
 Scripts/bootstrap.sh     # once: Chromium (CEF), the private Firefox ESR, the blocker engine
 Scripts/build.sh         # builds build/Mosaic.app
 Scripts/test.sh          # unit tests
-Scripts/release.sh 0.2.0 # tests, release build, .dmg and .zip for a GitHub release
+Scripts/release.sh 0.3.0 # tests, release build, .dmg, .zip and the zip's signature
 ```
+
+### Releasing
+
+`Scripts/release.sh <version>` signs the zip with Mosaic's Ed25519 release key and writes
+`Mosaic-<version>-macos-arm64.zip.sig`. Attach the zip, its `.sig` and the DMG to a GitHub
+release tagged `v<version>`; the updater looks for exactly those names. The private key is
+in the login Keychain of the machine that ran `swift Scripts/sign-update.swift --generate`
+(service `dev.mosaic.release-signing`); its public half is compiled into the app
+(`UpdatePackage.signingPublicKey`). To release from another Mac, move the key with
+`--export` and set `MOSAIC_UPDATE_KEY_FILE` there. **If the key is lost, installed copies can
+no longer update themselves**; keep a backup somewhere safe.
 
 | Piece | What `bootstrap.sh` fetches | Where it goes |
 | --- | --- | --- |
@@ -207,6 +230,11 @@ swift Scripts/drive.swift mosaic chrome
 swift Scripts/drive.swift dump /tmp/mosaic-state.json
 swift Scripts/drive.swift quit
 ```
+
+To try an update without publishing one, serve a release JSON and a signed zip from this
+Mac and point a test copy at it with `MOSAIC_UPDATE_API=http://127.0.0.1:<port>/latest`
+(only HTTPS or local HTTP is accepted, and the signature is still required); then
+`drive updateCheck`, `updateDownload`, `updateRestart`.
 
 Each feature area adds its own commands and `dump` fields (see `Sources/Mosaic/App/Automation.swift`
 and the `*Automation.swift` files).

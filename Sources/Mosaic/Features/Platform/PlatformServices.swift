@@ -11,6 +11,7 @@ final class PlatformServices {
     let rules = EngineRuleStore()
     let languages = LanguageSettings()
     let updates = UpdateChecker()
+    let updater = MosaicUpdater()
     let switches = EngineSwitchTracker()
 
     private(set) weak var model: BrowserModel?
@@ -20,6 +21,8 @@ final class PlatformServices {
         runtime.model = model
         languages.model = model
         updates.runtime = runtime
+        updates.updater = updater
+        updater.checker = updates
 
         // Languages go into Gecko each time it starts, before its first page loads.
         let previous = model.gecko.onStarted
@@ -189,6 +192,7 @@ final class UpdateChecker: ObservableObject {
     @Published private(set) var lastCheck: Date?
 
     weak var runtime: GeckoRuntimeInstaller?
+    weak var updater: MosaicUpdater?
     private var timer: Timer?
 
     private enum Keys {
@@ -235,14 +239,16 @@ final class UpdateChecker: ObservableObject {
         guard !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
-        var request = URLRequest(url: ReleaseCheck.latestReleaseURL)
+        var request = URLRequest(url: ReleaseCheck.feedURL())
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        updater?.authorize(&request)
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             outcome = ReleaseCheck.outcome(status: status, body: data, current: SoftwareVersion(Self.currentVersion))
+            if case .available(let release) = outcome { updater?.releaseFound(release) }
         } catch {
             outcome = .failed(error.localizedDescription)
         }
