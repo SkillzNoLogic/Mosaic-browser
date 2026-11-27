@@ -1,0 +1,11 @@
+# Build output
+.build/
+build/
+*.xcodeproj
+.swiftpm/
+
+# Engines fetched by Scripts/bootstrap.sh
+Vendor/
+
+# macOS
+.DS_Store
