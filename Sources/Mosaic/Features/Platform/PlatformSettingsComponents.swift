@@ -62,19 +62,6 @@ struct CapabilityRow: View {
     }
 }
 
-/// Explanatory text under a settings row.
-struct SettingsNote: View {
-    let text: String
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
 
 /// A scrollable block of licence or other long text, selectable.
 struct LongTextView: View {

@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         model = BrowserModel(chromiumAvailable: chromiumAvailable)
         NSApp.mainMenu = makeMainMenu()
         window = makeWindow()
+        model.applyStartupPage()
         // No explicit activation: Launch Services decides whether Mosaic comes
         // to the front (it does for a normal launch, not for `open -g`).
         window.makeKeyAndOrderFront(nil)
@@ -48,12 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // Gecko window show through, and receive clicks, in the content area.
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.minSize = NSSize(width: 720, height: 420)
+        window.minSize = NSSize(width: 760, height: 460)
+        window.titlebarSeparatorStyle = .none
         // A full-screen Space cannot host the companion Gecko window.
         window.collectionBehavior = [.fullScreenNone, .managed]
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.contentView = NSHostingView(rootView: BrowserView().environmentObject(model))
+        window.contentView = NSHostingView(rootView: ShellView(model: model).environmentObject(model))
         window.center()
         window.setFrameAutosaveName("MosaicMainWindow")
         return window
@@ -117,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     // MARK: - Menu
+    //
+    // Structure (shell): Mosaic, File, Edit, View, History, Bookmarks, Window, Help, laid out
+    // like Safari's and Chrome's. Each feature area adds its items in the section marked
+    // with its name, keeping these sections in place.
 
     private func makeMainMenu() -> NSMenu {
         let main = NSMenu()
@@ -124,19 +130,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let app = NSMenu()
         app.addItem(withTitle: "About Mosaic", action: #selector(showAbout), keyEquivalent: "").target = self
         app.addItem(.separator())
+        app.addItem(item("Settings…", #selector(showSettings), ","))
+        app.addItem(.separator())
         app.addItem(withTitle: "Hide Mosaic", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = app.addItem(
             withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
+        app.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         app.addItem(.separator())
         app.addItem(withTitle: "Quit Mosaic", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         main.addItem(submenu: app, title: "Mosaic")
 
         let file = NSMenu(title: "File")
         file.addItem(item("New Tab", #selector(newTab), "t"))
+        // [tabs] New Window, New Private Window (privacy)
         file.addItem(item("Open Location…", #selector(focusAddress), "l"))
         file.addItem(.separator())
         file.addItem(item("Close Tab", #selector(closeTab), "w"))
+        // [tabs] Reopen Closed Tab, Close Window
+        // [engine] Save Page As…, Print…
         main.addItem(submenu: file, title: "File")
 
         let edit = NSMenu(title: "Edit")
@@ -148,9 +160,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(.separator())
+        // [engine] Find…, Find Next, Find Previous
+        // [productivity] Command Palette
         main.addItem(submenu: edit, title: "Edit")
 
         let view = NSMenu(title: "View")
+        let mosaics = NSMenu(title: "Mosaic")
+        for (index, preset) in MosaicPresetID.allCases.enumerated() {
+            let entry = item(preset.title, #selector(applyMosaicFromMenu(_:)), "\(index + 1)", [.command, .control])
+            entry.representedObject = preset.rawValue
+            mosaics.addItem(entry)
+        }
+        mosaics.addItem(.separator())
+        mosaics.addItem(item("Customise Mosaics…", #selector(showMosaicsSettings), ""))
+        view.addItem(submenu: mosaics, title: "Mosaic")
+        view.addItem(item("Show Sidebar", #selector(toggleSidebar), "l", [.command, .shift]))
+        // [library] Show Bookmarks Bar (⇧⌘B) is in the library's Bookmarks menu.
+        view.addItem(.separator())
         view.addItem(item("Reload Page", #selector(reload), "r"))
         view.addItem(item("Stop", #selector(stopLoading), "."))
         view.addItem(.separator())
@@ -159,12 +186,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // ⇧⌘B is the bookmarks bar (as in Safari and Chrome); the blocker takes ⌥⇧⌘B.
         view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift, .option]))
         view.addItem(.separator())
-        view.addItem(item("Extensions…", #selector(showExtensions), "x", [.command, .shift]))
+        // [engine] Zoom In, Zoom Out, Actual Size, Developer Tools
+        // [productivity] Reader Mode
         main.addItem(submenu: view, title: "View")
 
         let history = NSMenu(title: "History")
         history.addItem(item("Back", #selector(goBack), "["))
         history.addItem(item("Forward", #selector(goForward), "]"))
+        history.addItem(item("Home", #selector(goHome), "h", [.command, .shift]))
+        history.addItem(.separator())
         // Tabs area: Reopen Closed Tab (⌘⇧T), Recently Closed, Reopen All Tabs from Last Session.
         let tabsMenu = TabsMenuController(model: model)
         self.tabsMenu = tabsMenu
@@ -185,10 +215,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         windowMenu.addItem(.separator())
         windowMenu.addItem(item("Show Next Tab", #selector(nextTab), "}", [.command]))
         windowMenu.addItem(item("Show Previous Tab", #selector(previousTab), "{", [.command]))
-        windowMenu.addItem(.separator()) // downloads area
-        windowMenu.addItem(item("Downloads", #selector(showDownloads), "l", [.command, .option]))
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(item("Extensions", #selector(showExtensions), "x", [.command, .shift]))
+        windowMenu.addItem(item("Downloads", #selector(showDownloads), "l", [.command, .option]))  // downloads area
         main.addItem(submenu: windowMenu, title: "Window")
         NSApp.windowsMenu = windowMenu
+
+        let help = NSMenu(title: "Help")
+        help.addItem(item("Keyboard Shortcuts", #selector(showShortcuts), ""))
+        main.addItem(submenu: help, title: "Help")
+        NSApp.helpMenu = help
 
         return main
     }
@@ -202,25 +238,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         return item
     }
 
-    @objc private func newTab() { model.newTab() }
+    @objc private func newTab() { model.openNewTabFromShell() }
     @objc private func closeTab() { model.closeSelectedTab() }
     @objc private func focusAddress() { model.focusAddressBar() }
     @objc private func reload() { model.reload() }
     @objc private func stopLoading() { model.stopLoading() }
     @objc private func goBack() { model.goBack() }
     @objc private func goForward() { model.goForward() }
+    @objc private func goHome() { model.goHome() }
     @objc private func toggleEngine() { model.toggleEngine() }
     @objc private func cycleSearchEngine() { model.cycleSearchEngine() }
     @objc private func toggleBlocker() { model.toggleBlocker() }
+    @objc private func showSettings() { model.toggleSettings() }
+    @objc private func showMosaicsSettings() { model.showSettings(.mosaics) }
+    @objc private func showShortcuts() { model.showSettings(.shortcuts) }
+    @objc private func toggleSidebar() { model.toggleSidebar() }
+
+    @objc private func applyMosaicFromMenu(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let preset = MosaicPresetID(rawValue: raw) else { return }
+        model.applyMosaic(preset)
+    }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(toggleBlocker) {
+        switch menuItem.action {
+        case #selector(toggleBlocker):
             menuItem.state = model.blocker.isEnabled ? .on : .off
             return model.blocker.status != .unavailable
+        case #selector(applyMosaicFromMenu(_:)):
+            menuItem.state = (menuItem.representedObject as? String) == model.mosaics.activePreset.rawValue ? .on : .off
+            return true
+        case #selector(toggleSidebar):
+            menuItem.title = model.isSidebarVisible ? "Hide Sidebar" : "Show Sidebar"
+            let layout = model.mosaics.effectiveLayout
+            return layout.hasSidebar && !(layout.tabPlacement.isVertical && layout.sidebar == .shown)
+        case #selector(goBack): return model.selectedTab?.canGoBack ?? false
+        case #selector(goForward): return model.selectedTab?.canGoForward ?? false
+        case #selector(showSettings):
+            menuItem.title = model.settingsCategory == nil ? "Settings…" : "Close Settings"
+            return true
+        default:
+            return true
         }
-        return true
     }
-    @objc private func showExtensions() { model.showExtensions = true }
+    @objc private func showExtensions() { model.openSettings(.extensions) }
     @objc private func nextTab() { model.selectAdjacentTab(offset: 1) }
     @objc private func previousTab() { model.selectAdjacentTab(offset: -1) }
     @objc private func showDownloads() { model.downloads.openDownloadsPage() } // downloads area

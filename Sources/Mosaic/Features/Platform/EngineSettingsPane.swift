@@ -67,9 +67,9 @@ private struct EngineCardLayout<Status: View, Capabilities: View>: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: kind.settingsSymbol)
                     .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Chrome.tint(for: kind))
+                    .foregroundStyle(ShellColors.tint(for: kind))
                     .frame(width: 32, height: 32)
-                    .background(Circle().fill(Chrome.tint(for: kind).opacity(0.12)))
+                    .background(Circle().fill(ShellColors.tint(for: kind).opacity(0.12)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.headline)

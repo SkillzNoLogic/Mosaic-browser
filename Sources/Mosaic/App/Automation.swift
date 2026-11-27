@@ -41,6 +41,8 @@ final class Automation {
         else { return }
         let value = command["value"] as? String ?? ""
         if PlatformAutomation.handle(action, command, model: model) { return }  // platform: see PlatformAutomation.swift
+        // shell: Mosaics, settings, sidebar (see ShellAutomation)
+        if ShellAutomation.handle(action, value: value, model: model) { return }
 
         switch action {
         case "navigate": model.navigate(value)
@@ -167,6 +169,7 @@ final class Automation {
             "downloads": model.downloads.automationState(), // downloads area
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
+        state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }

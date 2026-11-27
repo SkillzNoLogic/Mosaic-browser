@@ -23,7 +23,7 @@ private struct RuntimeMissingContent: View {
         VStack(spacing: 14) {
             Image(systemName: EngineKind.gecko.settingsSymbol)
                 .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(Chrome.tint(for: .gecko))
+                .foregroundStyle(ShellColors.tint(for: .gecko))
                 .accessibilityHidden(true)
             Text("The Mozilla engine isn’t installed").font(.title3.weight(.medium))
             Text("""

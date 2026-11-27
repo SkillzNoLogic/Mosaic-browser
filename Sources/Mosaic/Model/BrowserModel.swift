@@ -44,6 +44,8 @@ final class BrowserModel: ObservableObject {
     let tabsFeature = TabsFeature()  // tabs: sessions, recently closed, sleeping tabs, settings
     let platform = PlatformServices()  // platform: Gecko runtime installer, engine rules, languages, updates
     lazy var downloads = DownloadManager(model: self) // downloads area; created at the end of init
+    let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
+    let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
