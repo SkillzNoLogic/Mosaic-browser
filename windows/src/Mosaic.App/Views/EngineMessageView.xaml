@@ -1,0 +1,71 @@
+<UserControl x:Class="Mosaic.App.Views.EngineMessageView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{DynamicResource LayerFillColorDefaultBrush}">
+    <!-- Shown in place of a page that cannot be shown, or is not there yet.
+         DataContext: BrowserModel; everything here reads its Message. -->
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480">
+
+        <!-- Exactly one of these three: working, failed, or simply waiting. -->
+        <Control Style="{StaticResource SpinnerStyle}"
+                 Width="28" Height="28"
+                 Visibility="{Binding Message.ShowsProgress, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+        <TextBlock Style="{StaticResource GlyphStyle}"
+                   Text="&#xE7BA;" FontSize="30"
+                   HorizontalAlignment="Center"
+                   Visibility="{Binding Message.IsFailure, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+        <TextBlock Text="&#xE823;" FontSize="30" HorizontalAlignment="Center">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource GlyphStyle}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding Message.ShowsProgress}" Value="False" />
+                                <Condition Binding="{Binding Message.IsFailure}" Value="False" />
+                            </MultiDataTrigger.Conditions>
+                            <Setter Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <TextBlock Text="{Binding Message.Title}"
+                   Margin="0,12,0,0"
+                   HorizontalAlignment="Center"
+                   FontSize="18"
+                   FontWeight="Medium"
+                   TextWrapping="Wrap"
+                   TextAlignment="Center" />
+
+        <!-- A read-only text box rather than a text block, so an error can be selected and copied. -->
+        <TextBox Text="{Binding Message.Detail, Mode=OneWay}"
+                 Margin="0,10,0,0"
+                 MaxWidth="440"
+                 HorizontalAlignment="Center"
+                 IsReadOnly="True"
+                 IsTabStop="False"
+                 TextWrapping="Wrap"
+                 TextAlignment="Center"
+                 AutomationProperties.Name="Details">
+            <TextBox.Style>
+                <Style TargetType="TextBox" BasedOn="{StaticResource BareTextBoxStyle}">
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Message.Detail}" Value="{x:Null}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBox.Style>
+        </TextBox>
+
+        <Button Content="Reload"
+                Margin="0,16,0,0"
+                MinWidth="96"
+                HorizontalAlignment="Center"
+                Click="Reload_Click"
+                Visibility="{Binding Message.IsFailure, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+    </StackPanel>
+</UserControl>
