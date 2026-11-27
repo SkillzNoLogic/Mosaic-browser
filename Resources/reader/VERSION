@@ -1,0 +1,9 @@
+Readability.js and Readability-readerable.js: Mozilla Readability 0.6.0, unmodified.
+Source: npm package @mozilla/readability 0.6.0
+  https://registry.npmjs.org/@mozilla/readability/-/readability-0.6.0.tgz
+  tarball sha1 134e3ce3ff1676716e550de0b8de957bcc59208b (matches the registry's shasum)
+  Readability.js            sha256 34dcab3d0832d0019f02990eed6b6124e029e8c32b9f0c6f2550544ff8dff174
+  Readability-readerable.js sha256 a98d28805804c1986ceed470678a3f409f150ee7f1d227f8c8239c005d21de65
+Licence: Apache License 2.0, Copyright (c) 2010 Arc90 Inc (LICENSE-Readability.txt).
+
+reader-view.js is Mosaic's own (the Chromium reader page); it is not part of Readability.

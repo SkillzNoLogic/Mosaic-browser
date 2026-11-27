@@ -7,6 +7,7 @@ public enum AddressResolver {
     private static let passthroughSchemes: Set<String> = [
         "http", "https", "file", "about", "data", "blob", "view-source",
         "chrome", "chrome-extension", "moz-extension", "ftp", "mailto",
+        "mosaic",  // Mosaic's own pages (bookmarks, history, downloads…)
     ]
 
     public static func resolve(_ input: String, searchEngine: SearchEngine) -> URL? {

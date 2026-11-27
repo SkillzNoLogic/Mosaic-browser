@@ -7,24 +7,51 @@ import MosaicCore
 /// and the glue between Mosaic's UI and the two engines.
 @MainActor
 final class BrowserModel: ObservableObject {
-    @Published private(set) var tabs: [BrowserTab] = []
+    /// Every tab of every workspace, in tab-strip order (see `visibleTabs` for the selected
+    /// workspace's). Reordered by the tabs area (Features/Tabs), which keeps its rules.
+    @Published var tabs: [BrowserTab] = []
     @Published private(set) var selectedTabID: UUID?
     /// Engine used for new tabs. Mirrors the selected tab's engine.
     @Published private(set) var engine: EngineKind
     @Published var searchEngine: SearchEngine {
-        didSet { UserDefaults.standard.set(searchEngine.id, forKey: Keys.searchEngine) }
+        didSet { AppPaths.defaults.set(searchEngine.id, forKey: Keys.searchEngine) }
     }
     @Published var addressText = ""
     /// Incremented to ask the toolbar to focus the address field.
     @Published private(set) var addressFocusRequest = 0
     @Published var showExtensions = false
     @Published var showBlocker = false
+
+    /// The settings category shown inside the window, or nil when settings are closed.
+    @Published var settingsCategory: SettingsCategory? {
+        didSet { if (oldValue == nil) != (settingsCategory == nil) { updateDocking() } }
+    }
+
+    // Workspaces and groups: shapes in TabOrganization.swift, behaviour owned by the tabs area.
+    @Published var workspaces: [Workspace] = [.personal]
+    @Published var selectedWorkspaceID: UUID = Workspace.personal.id
+    @Published var groups: [TabGroup] = []
     @Published var notice: String?
 
     let gecko = GeckoEngine()
     let extensions: ExtensionManager
     let blocker: ContentBlocker
+    let library = Library()
     let chromiumAvailable: Bool
+
+    // MARK: Feature services
+    // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    let tabsFeature = TabsFeature()  // tabs: sessions, recently closed, sleeping tabs, settings
+    let platform = PlatformServices()  // platform: Gecko runtime installer, engine rules, languages, updates
+    lazy var downloads = DownloadManager(model: self) // downloads area; created at the end of init
+    let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
+    let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
+    let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
+    private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker, sitePermissions: sitePermissions)
+    lazy var productivity = Productivity(model: self)  // palette, reader, shortcuts, Speed Dial
+    lazy var canvas = CanvasController(model: self)  // canvas: layout editor, Gradient Studio, configurations
+    let sitePermissions = SitePermissionStore(fileURL: AppPaths.sitePermissions)  // engine (privacy edits it)
+    lazy var pageFeatures = PageFeatures(model: self)  // engine: find, zoom, print, permissions, pop-ups…
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -54,7 +81,7 @@ final class BrowserModel: ObservableObject {
 
     init(chromiumAvailable: Bool) {
         self.chromiumAvailable = chromiumAvailable
-        let defaults = UserDefaults.standard
+        let defaults = AppPaths.defaults
         searchEngine = defaults.string(forKey: Keys.searchEngine).flatMap(SearchEngine.named) ?? .default
         // Mozilla is the default engine.
         let saved = defaults.string(forKey: Keys.engine).flatMap(EngineKind.init(rawValue:)) ?? .gecko
@@ -67,28 +94,54 @@ final class BrowserModel: ObservableObject {
         gecko.onStarted = { [weak self] in
             // The blocker first, so the very first page is already filtered.
             await self?.blocker.configureGecko()
+            await self?.privacy.configureGecko()  // privacy area
             await self?.extensions.loadAllIntoGecko()
         }
         // Re-render dependents when the engine's or the blocker's status changes.
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
+        platform.attach(to: self)  // platform: before the first tab, which may pick Chromium if Gecko is missing
+        _ = downloads // downloads area: starts receiving both engines' downloads
+        passwords.attach(to: self)  // passwords: connects to both engines
+        privacy.start { [weak self] in self?.tabs.filter { !$0.isPrivate }.map(\.url) ?? [] }  // privacy area
+        // Integration: private tabs stay out of history and password saving; Mosaic's own
+        // history and downloads lists take part in Clear Browsing Data.
+        library.isPrivateTab = { $0.isPrivate }
+        PasswordManager.isPrivateTab = { $0.isPrivate }
+        BrowsingDataRegistry.shared.register(library)
+        BrowsingDataRegistry.shared.register(downloads)
 
-        newTab()
+        startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
 
     var selectedTab: BrowserTab? { tabs.first { $0.id == selectedTabID } }
+
+    /// Shows settings inside the window, at `category`.
+    func openSettings(_ category: SettingsCategory = .general) {
+        settingsCategory = category
+    }
+
+    func closeSettings() {
+        settingsCategory = nil
+    }
+
+    /// Opens one of Mosaic's own pages, reusing a tab that already shows it.
+    func openInternalPage(_ page: InternalPage) {
+        if let existing = tabs.first(where: { $0.internalPage == page }) {
+            select(existing)
+        } else {
+            newTab(url: page.url)
+        }
+    }
 
     // MARK: - Tabs
 
     @discardableResult
     func newTab(url: String = "", engine requested: EngineKind? = nil, select: Bool = true) -> BrowserTab {
+        let requested = requested ?? engineRule(forNewTabURL: url)  // platform: per-site engine rules
         let tab = makeTab(engine: requested ?? engine)
-        if let current = selectedTab, let index = tabs.firstIndex(of: current) {
-            tabs.insert(tab, at: index + 1)
-        } else {
-            tabs.append(tab)
-        }
+        insertTab(tab, after: selectedTab, linked: false)  // tabs: workspace, pins, groups
         if select { self.select(tab) }
         if url.isEmpty {
             if select { focusAddressBar() }
@@ -98,10 +151,17 @@ final class BrowserModel: ObservableObject {
         return tab
     }
 
-    private func makeTab(engine: EngineKind) -> BrowserTab {
+    func makeTab(engine: EngineKind) -> BrowserTab {
         let tab = BrowserTab(engine: engine)
+        tab.workspaceID = selectedWorkspaceID  // tabs: new tabs open in the current workspace
         tab.onChange = { [weak self] in self?.tabChanged($0) }
         tab.onNewTabRequest = { [weak self] source, url in
+            self?.openLinkedTab(url: url, from: source)  // tabs: next to its opener, in its group
+            // privacy area: a private tab's links open in private tabs.
+            if source.isPrivate {
+                self?.newPrivateTab(url: url)
+                return
+            }
             self?.newTab(url: url, engine: source.engine)
         }
         return tab
@@ -109,8 +169,10 @@ final class BrowserModel: ObservableObject {
 
     func select(_ tab: BrowserTab) {
         guard tabs.contains(tab) else { return }
+        let previous = selectedTab
         selectedTabID = tab.id
         lastLocalSelection = Date()
+        tabSelected(tab, previous: previous)  // tabs: workspace, wakes a sleeping tab
         setEnginePreference(tab.engine)
         isEditingAddress = false
         addressText = tab.url
@@ -120,27 +182,33 @@ final class BrowserModel: ObservableObject {
         updateDocking()
     }
 
+    /// Closes `tab` unconditionally (a deliberate action); see `closeSelectedTab` for ⌘W.
     func close(_ tab: BrowserTab) {
         guard let index = tabs.firstIndex(of: tab) else { return }
+        recordClosed(tab)  // tabs: Recently Closed
+        let successor = successorAfterClosing(tab)  // tabs: a neighbour in the same workspace
         detachFromEngine(tab)
         tabs.remove(at: index)
-        if tabs.isEmpty {
-            newTab()
-        } else if selectedTabID == tab.id {
-            select(tabs[min(index, tabs.count - 1)])
+        tabRemoved(tab)  // tabs: empty groups, remembered selection
+        if selectedTabID == tab.id {
+            if let successor { select(successor) } else { newTab() }
         }
     }
 
+    /// ⌘W. A pinned tab only closes on a second press (tabs: Features/Tabs).
     func closeSelectedTab() {
-        if let tab = selectedTab { close(tab) }
+        if let tab = selectedTab, confirmsClose(tab) { close(tab) }
     }
 
+    /// Next/previous tab of the current workspace, skipping collapsed groups.
     func selectAdjacentTab(offset: Int) {
-        guard let tab = selectedTab, let index = tabs.firstIndex(of: tab), tabs.count > 1 else { return }
-        select(tabs[(index + offset + tabs.count) % tabs.count])
+        let order = navigableTabs  // tabs
+        guard let tab = selectedTab, let index = order.firstIndex(of: tab), order.count > 1 else { return }
+        select(order[(index + offset + order.count) % order.count])
     }
 
     private func tabChanged(_ tab: BrowserTab) {
+        library.tabDidChange(tab, in: self)  // library: history from every tab, both engines (HistoryRecorder)
         guard tab.id == selectedTabID else { return }
         // The toolbar reads the selected tab's state through the model.
         objectWillChange.send()
@@ -153,14 +221,33 @@ final class BrowserModel: ObservableObject {
 
     /// Handles whatever was submitted in the address bar or the start page.
     func navigate(_ input: String) {
-        guard let url = AddressResolver.resolve(input, searchEngine: searchEngine) else { return }
+        // library: resolve() adds search keywords ("w swift") to AddressResolver.
+        guard let url = library.resolve(input, searchEngine: searchEngine) else { return }
         let tab = selectedTab ?? newTab()
+        let wasStartPage = tab.isStartPage
         isEditingAddress = false
+        applyEngineRule(for: url, to: tab)  // platform: per-site engine rules
         load(url.absoluteString, in: tab)
+        offerSwitchIfAlreadyOpen(tab, wasStartPage: wasStartPage)  // tabs: duplicate detection
+        library.noteTypedNavigation(in: tab)  // library: typed visits rank higher
         focusContent()
     }
 
     func load(_ url: String, in tab: BrowserTab) {
+        // Mosaic's own pages are drawn by the shell; no engine is involved.
+        if let page = InternalPage(url: url) {
+            // Otherwise the engine's next report would put the old page's address back.
+            detachFromEngine(tab)
+            tab.canGoBack = false
+            tab.canGoForward = false
+            tab.url = page.url
+            tab.title = page.title
+            tab.failure = nil
+            tab.isLoading = false
+            tabChanged(tab)
+            updateDocking()
+            return
+        }
         tab.url = url
         tab.title = ""
         tab.failure = nil
@@ -179,6 +266,7 @@ final class BrowserModel: ObservableObject {
                 view.loadURL(url)
             } else {
                 let view = MCEFBrowserView(url: url)
+                view.isPrivate = tab.isPrivate  // privacy area: in-memory profile
                 view.delegate = tab
                 tab.chromiumView = view
                 objectWillChange.send()
@@ -292,6 +380,12 @@ final class BrowserModel: ObservableObject {
             notice = "The Chromium engine is not bundled in this build. Run Scripts/bootstrap.sh and rebuild."
             return
         }
+        if beginSafeEngineSwitch(to: kind) { return }  // platform: keeps the page until the other engine has loaded it
+        // privacy area: private tabs exist only in Chromium.
+        if kind == .gecko, selectedTab?.isPrivate == true {
+            notice = PrivacyController.geckoPrivateNotice
+            return
+        }
         setEnginePreference(kind, remember: true)
         guard let tab = selectedTab, tab.engine != kind else { return }
         let url = tab.url
@@ -315,7 +409,7 @@ final class BrowserModel: ObservableObject {
     /// Mosaic starts with next time.
     private func setEnginePreference(_ kind: EngineKind, remember: Bool = false) {
         if engine != kind { engine = kind }
-        if remember { UserDefaults.standard.set(kind.rawValue, forKey: Keys.engine) }
+        if remember { AppPaths.defaults.set(kind.rawValue, forKey: Keys.engine) }
     }
 
     func cycleSearchEngine() {
@@ -324,7 +418,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// Releases whatever the tab holds in its current engine.
-    private func detachFromEngine(_ tab: BrowserTab) {
+    func detachFromEngine(_ tab: BrowserTab) {
         if let view = tab.chromiumView {
             view.closeBrowser()
             tab.chromiumView = nil
@@ -352,16 +446,13 @@ final class BrowserModel: ObservableObject {
 
         for state in snapshot.tabs where !closedGeckoIDs.contains(state.id) {
             if let tab = byGeckoID[state.id] {
-                apply(state, to: tab)
+                // tabs: a discarded tab reports placeholder state until it is selected again.
+                if !tab.isAsleep { apply(state, to: tab) }
             } else if pendingGeckoOpens == 0 {
                 let tab = makeTab(engine: .gecko)
                 tab.geckoID = state.id
                 apply(state, to: tab)
-                if let current = selectedTab, let index = tabs.firstIndex(of: current) {
-                    tabs.insert(tab, at: index + 1)
-                } else {
-                    tabs.append(tab)
-                }
+                insertTab(tab, after: selectedTab, linked: true)  // tabs: next to its opener
                 byGeckoID[state.id] = tab
                 // Show it if the user is on a Gecko page (they clicked a link
                 // that opens a tab) or asked for it; a tab Gecko opens on its
@@ -414,7 +505,9 @@ final class BrowserModel: ObservableObject {
 
     /// Selects a tab Gecko already made current (no command sent back).
     private func selectLocally(_ tab: BrowserTab) {
+        let previous = selectedTab
         selectedTabID = tab.id
+        tabSelected(tab, previous: previous)  // tabs
         setEnginePreference(tab.engine)
         isEditingAddress = false
         addressText = tab.url
@@ -430,6 +523,12 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        case "toggleBookmarksBar": library.showsBookmarksBar.toggle()  // ⇧⌘B pressed inside a Gecko page
+        case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
+        case "passwords": if let message = event.passwords { passwords.handleGecko(message) }  // passwords
+        case "newPrivateTab": newPrivateTab()  // privacy area
+        // productivity: customised shortcuts pressed in a Gecko page.
+        case let type where type.hasPrefix("productivity."): productivity.handleGeckoEvent(type)
         default: break
         }
     }
@@ -460,7 +559,7 @@ final class BrowserModel: ObservableObject {
         updateDocking()
     }
 
-    private func updateDocking() {
+    func updateDocking() {
         var rect: GeckoRect?
         if let area = contentRect, area.width >= 50, area.height >= 50, let primary = NSScreen.screens.first {
             // AppKit measures from the bottom-left of the primary display, Gecko from its top-left.
@@ -476,7 +575,9 @@ final class BrowserModel: ObservableObject {
     /// True when the selected tab is a live Gecko page, i.e. the content area
     /// is the transparent hole rather than one of Mosaic's own views.
     var showsGeckoPage: Bool {
-        guard let tab = selectedTab else { return false }
+        // Settings and Mosaic's own pages cover the content area, so the Gecko window
+        // behind it must not show through.
+        guard let tab = selectedTab, settingsCategory == nil, tab.internalPage == nil else { return false }
         return tab.engine == .gecko && !tab.isStartPage && tab.failure == nil
             && tab.geckoID != nil && gecko.isRunning
     }
@@ -534,7 +635,26 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    // MARK: - Platform hooks (owner: platform; logic in Features/Platform/BrowserModel+Platform.swift)
+    // Narrow access to private state for safe engine switching and per-site rules.
+
+    func platformReleaseEngine(of tab: BrowserTab) { detachFromEngine(tab) }
+    func platformRefreshDocking() { updateDocking() }
+    func platformFollowEngine(_ kind: EngineKind, remember: Bool) { setEnginePreference(kind, remember: remember) }
+    /// Hides a Gecko tab from mirroring (a page being loaded in the background), or shows it again.
+    func platformHideGeckoTab(_ id: Int, _ hidden: Bool) {
+        if hidden { closedGeckoIDs.insert(id) } else { closedGeckoIDs.remove(id) }
+    }
+    /// Runs `body` (which opens a Gecko tab) without that tab being adopted as a new Mosaic tab.
+    func platformOpeningGeckoTab<T>(_ body: () async throws -> T) async rethrows -> T {
+        pendingGeckoOpens += 1
+        defer { pendingGeckoOpens -= 1 }
+        return try await body()
+    }
+
     func shutdown() {
+        finishTabs()  // tabs: final session save, clean-exit marker
+        library.flushPendingVisits()  // library: record visits still waiting for their title
         gecko.stopAndWait()
     }
 }

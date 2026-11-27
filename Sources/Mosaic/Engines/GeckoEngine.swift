@@ -1,17 +1,43 @@
 import AppKit
+import CryptoKit
 import MosaicCore
 
 /// Where Mosaic keeps its data.
 enum AppPaths {
-    static let support: URL = FileManager.default
+    /// The user's real Mosaic folder in Application Support.
+    static let standardSupport: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Mosaic", isDirectory: true)
+
+    /// Where this instance keeps its data. `MOSAIC_DATA_DIR` points it at another folder:
+    /// an isolated profile for testing, used by the automated checks so that several copies
+    /// can run at once without touching the user's real profile.
+    static let support: URL = ProcessInfo.processInfo.environment["MOSAIC_DATA_DIR"]
+        .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? standardSupport
+
+    /// True when running on an isolated profile (see `support`).
+    static var isIsolatedProfile: Bool { support != standardSupport }
+
+    /// Preferences for this instance. An isolated profile keeps its own, so a test run
+    /// never changes the user's settings. Always use this, never `UserDefaults.standard`.
+    static let defaults: UserDefaults = {
+        guard isIsolatedProfile else { return .standard }
+        // Named after the folder (a stable digest; `hashValue` changes between launches).
+        let digest = SHA256.hash(data: Data(support.standardizedFileURL.path.utf8))
+        let suite = "dev.mosaic.browser.isolated." + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return UserDefaults(suiteName: suite) ?? .standard
+    }()
 
     static var geckoProfile: URL { support.appendingPathComponent("Gecko/Profile", isDirectory: true) }
     static var chromiumData: URL { support.appendingPathComponent("Chromium", isDirectory: true) }
     static var extensions: URL { support.appendingPathComponent("Extensions", isDirectory: true) }
     /// Filter lists of the built-in content blocker.
     static var blockerLists: URL { support.appendingPathComponent("Blocker/lists", isDirectory: true) }
+
+    // Engine area: per-site decisions and zoom, shared by both engines.
+    static var sitePermissions: URL { support.appendingPathComponent("SitePermissions.json") }
+    static var siteZoom: URL { support.appendingPathComponent("SiteZoom.json") }
 
     /// Folder inside the app bundle holding `agent.sys.mjs`.
     static var geckoAgent: URL? { Bundle.main.resourceURL?.appendingPathComponent("gecko", isDirectory: true) }
@@ -67,6 +93,11 @@ final class GeckoEngine: ObservableObject {
 
     struct Event: Decodable, Equatable {
         let type: String
+        /// passwords: payload of "passwords" events (decoding never fails; see PasswordPageMessage).
+        var passwords: PasswordPageMessage? = nil
+        // Engine area: the agent tab the event concerns, and its payload as a JSON string.
+        var tab: Int?
+        var detail: String?
     }
 
     struct Snapshot: Decodable {
@@ -85,6 +116,14 @@ final class GeckoEngine: ObservableObject {
     /// Gecko finished starting; the place to re-install extensions.
     var onStarted: (() async -> Void)?
 
+    // MARK: Feature hooks (engine area)
+    // Feature areas watch Gecko here without touching BrowserModel: every snapshot (tab
+    // state and events) after the model has applied it, and every start.
+    private var snapshotObservers: [(Snapshot) -> Void] = []
+    private var startObservers: [() async -> Void] = []
+    func addSnapshotObserver(_ observer: @escaping (Snapshot) -> Void) { snapshotObservers.append(observer) }
+    func addStartObserver(_ observer: @escaping () async -> Void) { startObservers.append(observer) }
+
     private var client: RDPClient?
     private var app: NSRunningApplication?
     private var startTask: Task<Void, Error>?
@@ -102,7 +141,25 @@ final class GeckoEngine: ObservableObject {
     var processIdentifier: pid_t? { app?.processIdentifier }
 
     init() {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
+    }
+
+    /// An isolated profile has no engine of its own installed, so the user's private copy
+    /// (in the standard Mosaic folder) is used as well, read-only.
+    private static func locateRuntime() -> GeckoRuntime? {
+        // An isolated profile prefers its own private runtime, then the user's private Firefox
+        // ESR, and only then a Gecko browser found in /Applications. Checking /Applications
+        // first would run whichever browser happens to be installed (Zen, Nightly…), whose newer
+        // Gecko marks the test profile as too new for ESR.
+        if AppPaths.isIsolatedProfile, ProcessInfo.processInfo.environment["MOSAIC_GECKO_PRIVATE_ONLY"] != "1" {
+            for support in [AppPaths.support, AppPaths.standardSupport] {
+                let managed = GeckoRuntime.managedAppURL(applicationSupport: support)
+                if let runtime = GeckoRuntime(appURL: managed, isManaged: support == AppPaths.support) {
+                    return runtime
+                }
+            }
+        }
+        return GeckoRuntime.locate(applicationSupport: AppPaths.support)
     }
 
     // MARK: - Lifecycle
@@ -128,7 +185,7 @@ final class GeckoEngine: ObservableObject {
     }
 
     private func launch() async throws {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
         guard let runtime, let agentDirectory = AppPaths.geckoAgent else { throw GeckoError.noRuntime }
         status = .starting
         generation += 1
@@ -189,6 +246,7 @@ final class GeckoEngine: ObservableObject {
         applyDock()
         startPolling(generation: launchGeneration)
         await onStarted?()
+        for observer in startObservers { await observer() }  // engine area
     }
 
     /// Polls `attempt` until it returns a value.
@@ -374,6 +432,16 @@ final class GeckoEngine: ObservableObject {
         return value is NSNull ? nil : value
     }
 
+    /// `call` with the arguments as an array (engine area: scripted checks).
+    @discardableResult
+    func callWithArguments(_ method: String, _ arguments: [Any]) async throws -> Any? {
+        guard status == .running, let client else { throw GeckoError.notRunning }
+        let result = try await client.evaluate(Self.agentCall(method, arguments))
+        guard let text = try Self.unwrapAgentResult(result), let data = text.data(using: .utf8) else { return nil }
+        let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        return value is NSNull ? nil : value
+    }
+
     /// Fire-and-forget variant for UI actions.
     func send(_ method: String, _ arguments: Any...) {
         guard status == .running, let client else { return }
@@ -393,6 +461,7 @@ final class GeckoEngine: ObservableObject {
                    self.generation == polled, snapshot.ready
                 {
                     self.onSnapshot?(snapshot)
+                    for observer in self.snapshotObservers { observer(snapshot) }  // engine area
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -434,6 +503,14 @@ final class GeckoEngine: ObservableObject {
             rectInFlight = false
             pushRect()
         }
+    }
+
+    // MARK: - Runtime install (owner: platform)
+
+    /// Looks for the Gecko runtime again, after Mosaic installed, updated or removed its
+    /// private copy (Settings › Engine). The next start uses whatever is found.
+    func refreshRuntime() {
+        runtime = Self.locateRuntime()
     }
 
     /// Makes Gecko the active app so the page receives keyboard input.

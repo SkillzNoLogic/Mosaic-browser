@@ -46,6 +46,10 @@ final class FakeGecko: @unchecked Sendable {
     private func serve() {
         connection = accept(listener, nil, nil)
         guard connection >= 0 else { return }
+        // Tests close the client while this server may still be writing; without this the
+        // write raises SIGPIPE and takes the whole test process down.
+        var noSigPipe: Int32 = 1
+        setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
         var greeted = false
         let greeting: [String: Any] = ["from": "root", "applicationType": "browser", "traits": [:] as [String: Any]]
         if !greetLate {

@@ -1,19 +1,17 @@
 #!/bin/bash
-# Runs the unit tests. Use this rather than a bare `swift test`.
-#
-# With only the Command Line Tools installed, SwiftPM does not always pass the
-# compiler the location of Swift Testing's macro plug-in, and the build then
-# fails with "plugin for module 'TestingMacros' not found". Naming the plug-in
-# directory explicitly makes it reliable. With full Xcode selected nothing
-# extra is needed.
+# Runs the unit tests on Xcode's toolchain. Extra arguments go to `swift test`
+# (for example: Scripts/test.sh --filter BlockerTests).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-extra=()
-developer_dir="$(xcode-select -p 2>/dev/null || true)"
-plugins="$developer_dir/usr/lib/swift/host/plugins/testing"
-if [[ "$developer_dir" == */CommandLineTools && -d "$plugins" ]]; then
-  extra=(-Xswiftc -plugin-path -Xswiftc "$plugins")
+# Xcode's toolchain: SwiftUI's macros (@State, @Observable, #Preview) and the Liquid Glass
+# APIs need it; the Command Line Tools alone do not ship the macro plug-ins.
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+if [[ "${DEVELOPER_DIR:-$(xcode-select -p)}" == */CommandLineTools ]]; then
+  echo "Mosaic needs Xcode (27 or later), not just the Command Line Tools: install Xcode, or set DEVELOPER_DIR." >&2
+  exit 1
 fi
 
-swift test "${extra[@]}" "$@"
+swift test "$@"

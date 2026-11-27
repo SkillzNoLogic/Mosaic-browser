@@ -57,6 +57,7 @@ import Testing
         ("about:blank", "about:blank"),
         ("file:///tmp/x.html", "file:///tmp/x.html"),
         ("moz-extension://abc/popup.html", "moz-extension://abc/popup.html"),
+        ("mosaic://history", "mosaic://history"),
     ])
     func treatsAsAddress(input: String, expected: String) {
         #expect(resolve(input) == expected)
