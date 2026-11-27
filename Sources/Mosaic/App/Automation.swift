@@ -43,6 +43,8 @@ final class Automation {
         if PlatformAutomation.handle(action, command, model: model) { return }  // platform: see PlatformAutomation.swift
         // shell: Mosaics, settings, sidebar (see ShellAutomation)
         if ShellAutomation.handle(action, value: value, model: model) { return }
+        // canvas: layout editor, Gradient Studio, configurations (Features/Canvas/CanvasAutomation.swift)
+        if CanvasAutomation.handle(action, command, model: model) { return }
 
         switch action {
         case "navigate": model.navigate(value)
@@ -167,6 +169,7 @@ final class Automation {
             "platform": PlatformAutomation.dump(model),  // platform
             "library": LibraryAutomation.dumpFields(model),  // library
             "downloads": model.downloads.automationState(), // downloads area
+            "canvas": CanvasAutomation.dumpFields(model: model),  // canvas
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell
