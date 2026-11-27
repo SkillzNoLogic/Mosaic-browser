@@ -325,6 +325,52 @@ namespace MosaicSmoke {
     }
 }
 
+function Save-ScreenCapture {
+    # What is really on the screen where Mosaic's window is, as opposed to the screenshot
+    # command's PrintWindow capture, which asks the compositor for the window's own content.
+    # When the two disagree, the difference is a capture artefact, not something a user sees.
+    param([Parameter(Mandatory = $true)] [string] $Name)
+    try {
+        Add-Type -AssemblyName System.Drawing
+        Add-Type -AssemblyName System.Windows.Forms
+        $process = Get-Process -Id $script:App.Id
+        $process.Refresh()
+        if (-not ('MosaicSmoke.Bounds' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace MosaicSmoke {
+    public static class Bounds {
+        [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    }
+}
+'@
+        }
+        $rect = New-Object MosaicSmoke.Bounds+RECT
+        [void][MosaicSmoke.Bounds]::GetWindowRect($process.MainWindowHandle, [ref]$rect)
+        $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        $left = [Math]::Max($rect.Left, $screen.Left); $top = [Math]::Max($rect.Top, $screen.Top)
+        $right = [Math]::Min($rect.Right, $screen.Right); $bottom = [Math]::Min($rect.Bottom, $screen.Bottom)
+        if ($right -le $left -or $bottom -le $top) { throw 'the window is not on the screen' }
+        $bitmap = New-Object System.Drawing.Bitmap ($right - $left), ($bottom - $top)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)
+            $path = Join-Path $OutputDirectory "$Name-screen.png"
+            $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-Host "    screen capture: $path (window at $($rect.Left),$($rect.Top), screen $($screen.Width)x$($screen.Height))"
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    }
+    catch {
+        Write-Host "    screen capture '$Name' FAILED: $($_.Exception.Message)"
+    }
+}
+
 function Get-ProcessSnapshot {
     # Every process that belongs to this run: Mosaic's process tree, Gecko's process tree
     # (Firefox's launcher process may have exited, which cuts the browser off from Mosaic's
@@ -491,6 +537,7 @@ try {
     Write-Host "    loaded; Gecko process $(Get-MosaicProperty $state 'geckoProcessId'), window attached"
     Save-Screenshot '1-gecko'
     Save-WindowTree '1-gecko'
+    Save-ScreenCapture '1-gecko'
 
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {

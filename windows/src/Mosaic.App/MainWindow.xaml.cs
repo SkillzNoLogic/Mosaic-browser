@@ -25,10 +25,24 @@ public partial class MainWindow : Window
     private nint attachedGeckoWindow;
     private bool isShutDown;
 
+    /// <summary>
+    /// The default size (set in XAML) is bigger than small screens: on a 1366×768 laptop, or a
+    /// 1024×768 virtual machine, a centred 1240×800 window would hang off the top and sides.
+    /// Shrinks the starting size to the primary work area, keeping a small margin.
+    /// </summary>
+    private void FitToWorkArea()
+    {
+        const double margin = 24;
+        var area = SystemParameters.WorkArea;
+        Width = Math.Max(MinWidth, Math.Min(Width, area.Width - 2 * margin));
+        Height = Math.Max(MinHeight, Math.Min(Height, area.Height - 2 * margin));
+    }
+
     internal MainWindow(BrowserModel model, WebView2Engine chromium)
     {
         this.model = model;
         InitializeComponent();
+        FitToWorkArea();
         DataContext = model;
 
         chromium.ViewHost = ChromiumLayer;
