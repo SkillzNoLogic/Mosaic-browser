@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import MosaicCore
 
 /// Where Mosaic keeps its data.
@@ -17,6 +18,16 @@ enum AppPaths {
 
     /// True when running on an isolated profile (see `support`).
     static var isIsolatedProfile: Bool { support != standardSupport }
+
+    /// Preferences for this instance. An isolated profile keeps its own, so a test run
+    /// never changes the user's settings. Always use this, never `UserDefaults.standard`.
+    static let defaults: UserDefaults = {
+        guard isIsolatedProfile else { return .standard }
+        // Named after the folder (a stable digest; `hashValue` changes between launches).
+        let digest = SHA256.hash(data: Data(support.standardizedFileURL.path.utf8))
+        let suite = "dev.mosaic.browser.isolated." + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return UserDefaults(suiteName: suite) ?? .standard
+    }()
 
     static var geckoProfile: URL { support.appendingPathComponent("Gecko/Profile", isDirectory: true) }
     static var chromiumData: URL { support.appendingPathComponent("Chromium", isDirectory: true) }

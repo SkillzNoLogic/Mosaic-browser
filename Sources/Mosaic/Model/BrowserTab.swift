@@ -43,6 +43,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     /// Requests the content blocker stopped since this tab's page began loading.
     @Published var blockedCount = 0
 
+    // Organisation (behaviour owned by the tabs area; mute is applied by the engine area).
+    @Published var isPinned = false
+    @Published var isMuted = false
+    @Published var workspaceID: UUID?
+    @Published var groupID: UUID?
+
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
     /// Gecko: the agent's ID for this tab, once Gecko has created it.

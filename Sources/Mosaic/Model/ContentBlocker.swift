@@ -57,7 +57,7 @@ final class ContentBlocker: ObservableObject {
 
     init(gecko: GeckoEngine) {
         self.gecko = gecko
-        let defaults = UserDefaults.standard
+        let defaults = AppPaths.defaults
         settings = BlockerSettings(
             isEnabled: defaults.object(forKey: Keys.enabled) as? Bool ?? true,
             allowlist: defaults.stringArray(forKey: Keys.allowlist) ?? [])
@@ -180,7 +180,7 @@ final class ContentBlocker: ObservableObject {
     }
 
     private func settingsChanged() {
-        let defaults = UserDefaults.standard
+        let defaults = AppPaths.defaults
         defaults.set(settings.isEnabled, forKey: Keys.enabled)
         defaults.set(settings.allowlist.sorted(), forKey: Keys.allowlist)
         filter.use(settings: settings)

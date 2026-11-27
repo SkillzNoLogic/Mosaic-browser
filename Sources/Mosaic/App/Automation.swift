@@ -12,7 +12,11 @@ import MosaicCore
 @MainActor
 final class Automation {
     static let flag = "--mosaic-automation"
-    static let notification = Notification.Name("dev.mosaic.browser.automation")
+    /// Every running copy would hear a shared name, so `MOSAIC_AUTOMATION_ID` (also read by
+    /// Scripts/drive.swift) gives each copy its own channel.
+    static let notification = Notification.Name(
+        "dev.mosaic.browser.automation"
+            + (ProcessInfo.processInfo.environment["MOSAIC_AUTOMATION_ID"].map { $0.isEmpty ? "" : ".\($0)" } ?? ""))
 
     private let model: BrowserModel
     private weak var window: NSWindow?

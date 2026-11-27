@@ -12,19 +12,31 @@ final class BrowserModel: ObservableObject {
     /// Engine used for new tabs. Mirrors the selected tab's engine.
     @Published private(set) var engine: EngineKind
     @Published var searchEngine: SearchEngine {
-        didSet { UserDefaults.standard.set(searchEngine.id, forKey: Keys.searchEngine) }
+        didSet { AppPaths.defaults.set(searchEngine.id, forKey: Keys.searchEngine) }
     }
     @Published var addressText = ""
     /// Incremented to ask the toolbar to focus the address field.
     @Published private(set) var addressFocusRequest = 0
     @Published var showExtensions = false
     @Published var showBlocker = false
+
+    /// The settings category shown inside the window, or nil when settings are closed.
+    @Published var settingsCategory: SettingsCategory?
+
+    // Workspaces and groups: shapes in TabOrganization.swift, behaviour owned by the tabs area.
+    @Published var workspaces: [Workspace] = [.personal]
+    @Published var selectedWorkspaceID: UUID = Workspace.personal.id
+    @Published var groups: [TabGroup] = []
     @Published var notice: String?
 
     let gecko = GeckoEngine()
     let extensions: ExtensionManager
     let blocker: ContentBlocker
+    let library = Library()
     let chromiumAvailable: Bool
+
+    // MARK: Feature services
+    // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -54,7 +66,7 @@ final class BrowserModel: ObservableObject {
 
     init(chromiumAvailable: Bool) {
         self.chromiumAvailable = chromiumAvailable
-        let defaults = UserDefaults.standard
+        let defaults = AppPaths.defaults
         searchEngine = defaults.string(forKey: Keys.searchEngine).flatMap(SearchEngine.named) ?? .default
         // Mozilla is the default engine.
         let saved = defaults.string(forKey: Keys.engine).flatMap(EngineKind.init(rawValue:)) ?? .gecko
@@ -78,6 +90,15 @@ final class BrowserModel: ObservableObject {
     }
 
     var selectedTab: BrowserTab? { tabs.first { $0.id == selectedTabID } }
+
+    /// Shows settings inside the window, at `category`.
+    func openSettings(_ category: SettingsCategory = .general) {
+        settingsCategory = category
+    }
+
+    func closeSettings() {
+        settingsCategory = nil
+    }
 
     // MARK: - Tabs
 
@@ -315,7 +336,7 @@ final class BrowserModel: ObservableObject {
     /// Mosaic starts with next time.
     private func setEnginePreference(_ kind: EngineKind, remember: Bool = false) {
         if engine != kind { engine = kind }
-        if remember { UserDefaults.standard.set(kind.rawValue, forKey: Keys.engine) }
+        if remember { AppPaths.defaults.set(kind.rawValue, forKey: Keys.engine) }
     }
 
     func cycleSearchEngine() {
