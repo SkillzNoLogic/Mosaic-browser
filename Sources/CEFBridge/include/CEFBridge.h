@@ -27,6 +27,17 @@ NS_ASSUME_NONNULL_BEGIN
 /// Called once when the user quits, before browsers are torn down.
 @property(class, copy, nullable) void (^willQuitHandler)(void);
 
+/// Content blocking for Chromium: asked about every sub-resource request a page
+/// makes (never the page's own top-level document). Return YES to block it.
+///
+/// `documentURL` is the page the request belongs to; `resourceType` is a
+/// webRequest type name ("script", "image", "xmlhttprequest", "sub_frame", …).
+///
+/// The block is called on Chromium's network thread, for every request, so it
+/// must be thread-safe and fast. Set it once, before any browser exists.
+@property(class, copy, nullable) BOOL (^requestFilter)
+    (NSString *url, NSString *documentURL, NSString *resourceType);
+
 /// Loads the framework and starts Chromium. `dataDirectory` holds the profile
 /// (cookies, cache, storage). Returns NO if Chromium could not start, in which
 /// case the app can still run with its other engine.
@@ -57,6 +68,10 @@ NS_ASSUME_NONNULL_BEGIN
         canGoForward:(BOOL)canGoForward;
 /// The page asked for a new window or tab (target=_blank, window.open, ⌘-click).
 - (void)browserView:(MCEFBrowserView *)view wantsNewTabWithURL:(NSString *)url;
+/// The browser started loading a new top-level document.
+- (void)browserViewDidStartDocumentLoad:(MCEFBrowserView *)view;
+/// `requestFilter` blocked a request made by this browser's page.
+- (void)browserView:(MCEFBrowserView *)view didBlockRequest:(NSString *)url;
 @end
 
 /// A view that hosts one Chromium browser. The browser is created the first

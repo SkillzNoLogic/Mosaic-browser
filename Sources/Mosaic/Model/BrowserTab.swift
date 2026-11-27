@@ -40,6 +40,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var failure: String?
+    /// Requests the content blocker stopped since this tab's page began loading.
+    @Published var blockedCount = 0
 
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
@@ -101,6 +103,22 @@ extension BrowserTab: MCEFBrowserDelegate {
         MainActor.assumeIsolated {
             guard view === chromiumView else { return }
             onNewTabRequest?(self, url)
+        }
+    }
+
+    nonisolated func browserViewDidStartDocumentLoad(_ view: MCEFBrowserView) {
+        MainActor.assumeIsolated {
+            guard view === chromiumView, blockedCount != 0 else { return }
+            blockedCount = 0
+            onChange?(self)
+        }
+    }
+
+    nonisolated func browserView(_ view: MCEFBrowserView, didBlockRequest url: String) {
+        MainActor.assumeIsolated {
+            guard view === chromiumView else { return }
+            blockedCount += 1
+            onChange?(self)
         }
     }
 }

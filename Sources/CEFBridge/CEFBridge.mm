@@ -9,6 +9,7 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_parser.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -29,6 +30,32 @@ bool g_quitting = false;
 CefScopedLibraryLoader* g_library = nullptr;
 std::list<CefRefPtr<CefBrowser>> g_browsers;
 void (^g_willQuit)(void) = nil;
+// Written once on the main thread before any browser exists; read on the IO thread.
+BOOL (^g_requestFilter)(NSString*, NSString*, NSString*) = nil;
+
+/// Chromium's resource types under the names the webRequest API (and so
+/// uBlock Origin's filter syntax) uses for them.
+NSString* WebRequestType(cef_resource_type_t type) {
+  switch (type) {
+    case RT_MAIN_FRAME: return @"main_frame";
+    case RT_SUB_FRAME: return @"sub_frame";
+    case RT_STYLESHEET: return @"stylesheet";
+    case RT_SCRIPT: return @"script";
+    case RT_IMAGE: return @"image";
+    case RT_FAVICON: return @"image";
+    case RT_FONT_RESOURCE: return @"font";
+    case RT_OBJECT: return @"object";
+    case RT_PLUGIN_RESOURCE: return @"object";
+    case RT_MEDIA: return @"media";
+    case RT_WORKER: return @"script";
+    case RT_SHARED_WORKER: return @"script";
+    case RT_SERVICE_WORKER: return @"script";
+    case RT_XHR: return @"xmlhttprequest";
+    case RT_PING: return @"ping";
+    case RT_CSP_REPORT: return @"csp_report";
+    default: return @"other";
+  }
+}
 
 /// Marks the placeholder page shown when a navigation fails, so its data: URL
 /// is never reported to the address bar.
@@ -82,7 +109,8 @@ class MosaicClient : public CefClient,
                      public CefDisplayHandler,
                      public CefLifeSpanHandler,
                      public CefLoadHandler,
-                     public CefRequestHandler {
+                     public CefRequestHandler,
+                     public CefResourceRequestHandler {
  public:
   explicit MosaicClient(MCEFBrowserView* view) : view_(view) {}
 
@@ -210,6 +238,54 @@ class MosaicClient : public CefClient,
   }
 
   // CefRequestHandler
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      bool is_navigation,
+      bool is_download,
+      const CefString& request_initiator,
+      bool& disable_default_handling) override {
+    return this;
+  }
+
+  // CefResourceRequestHandler. Runs on the IO thread for every request.
+  cef_return_value_t OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
+                                          CefRefPtr<CefFrame> frame,
+                                          CefRefPtr<CefRequest> request,
+                                          CefRefPtr<CefCallback> callback) override {
+    const cef_resource_type_t type = request->GetResourceType();
+    __weak MCEFBrowserView* weakView = view_;
+    if (type == RT_MAIN_FRAME) {
+      // A page's own document is never blocked; note the navigation so the
+      // per-page blocked count starts over.
+      dispatch_async(dispatch_get_main_queue(), ^{
+        MCEFBrowserView* view = weakView;
+        [view.delegate browserViewDidStartDocumentLoad:view];
+      });
+      return RV_CONTINUE;
+    }
+    BOOL (^filter)(NSString*, NSString*, NSString*) = g_requestFilter;
+    if (!filter) {
+      return RV_CONTINUE;
+    }
+    // "First party for cookies" is the top-level document the request belongs
+    // to, which is what filter rules mean by the page.
+    CefString document = request->GetFirstPartyForCookies();
+    if (document.empty() && browser) {
+      document = browser->GetMainFrame()->GetURL();
+    }
+    NSString* url = ToNSString(request->GetURL());
+    if (!filter(url, ToNSString(document), WebRequestType(type))) {
+      return RV_CONTINUE;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MCEFBrowserView* view = weakView;
+      [view.delegate browserView:view didBlockRequest:url];
+    });
+    return RV_CANCEL;
+  }
+
   bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
                         CefRefPtr<CefFrame> frame,
                         const CefString& target_url,
@@ -299,6 +375,14 @@ class MosaicClient : public CefClient,
 
 + (void)setWillQuitHandler:(void (^)(void))handler {
   g_willQuit = [handler copy];
+}
+
++ (BOOL (^)(NSString*, NSString*, NSString*))requestFilter {
+  return g_requestFilter;
+}
+
++ (void)setRequestFilter:(BOOL (^)(NSString*, NSString*, NSString*))filter {
+  g_requestFilter = [filter copy];
 }
 
 + (BOOL)startWithArgc:(int)argc argv:(char**)argv dataDirectory:(NSString*)dataDirectory {

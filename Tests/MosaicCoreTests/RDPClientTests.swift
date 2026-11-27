@@ -103,6 +103,9 @@ final class FakeGecko: @unchecked Sendable {
                     "type": "longString", "actor": "long1", "length": Self.longText.count,
                     "initial": String(Self.longText.prefix(1000)),
                 ]
+            case "reject":
+                // What Gecko sends when an awaited promise rejects.
+                event["topLevelAwaitRejected"] = true
             case "throw":
                 event["hasException"] = true
                 event["exceptionMessage"] = "Error: boom"
@@ -180,6 +183,13 @@ final class FakeGecko: @unchecked Sendable {
             #expect(message.contains("boom"))
         }
         // The connection stays usable after a script error.
+        #expect(try await client.evaluate("str") as? String == "hello")
+    }
+
+    @Test func rejectedPromisesAreErrorsNotEmptyResults() async throws {
+        let (client, server) = try await connect()
+        defer { client.close(); server.stop() }
+        await #expect(throws: RDPClient.RDPError.self) { _ = try await client.evaluate("reject") }
         #expect(try await client.evaluate("str") as? String == "hello")
     }
 

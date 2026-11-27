@@ -10,6 +10,10 @@ A two-engine web browser for Apple Silicon Macs, written in Swift and SwiftUI.
 - **Chrome extensions on the Mozilla engine.** Mosaic downloads a Chrome extension's `.crx`
   (from a Chrome Web Store link, an extension ID, or a file), converts it, and runs it on
   Gecko.
+- **Built-in ad and tracker blocker.** uBlock Origin's filtering engine, compiled into the
+  browser from uBO's source (not installed as an extension), with uBO's default filter
+  lists. On by default, in both engines; switch it off globally or per site from the shield
+  in the toolbar.
 
 Status: **v0.1, an early prototype.** The pieces above work; a lot of ordinary browser
 features (bookmarks, history, downloads UI, settings) do not exist yet. Read
@@ -20,10 +24,11 @@ Requirements: Apple Silicon Mac, macOS 14 or later. Intel Macs are not supported
 ## Build and run
 
 Only the Xcode Command Line Tools are needed (`xcode-select --install`); full Xcode is
-optional. CMake is needed once, to build Chromium's wrapper library (`brew install cmake`).
+optional. CMake and esbuild are needed once, to build Chromium's wrapper library and the
+content blocker (`brew install cmake esbuild`).
 
 ```sh
-Scripts/bootstrap.sh     # one time: fetches both engines (~280 MB download)
+Scripts/bootstrap.sh     # one time: fetches both engines and the blocker (~300 MB download)
 Scripts/build.sh         # builds build/Mosaic.app
 open build/Mosaic.app
 ```
@@ -34,6 +39,7 @@ open build/Mosaic.app
 | --- | --- | --- |
 | Chromium | Chromium Embedded Framework (CEF) 158, checksum-verified | `Vendor/cef/` (git-ignored), copied into the app at build time |
 | Gecko | Firefox ESR, from mozilla.org | `~/Library/Application Support/Mosaic/Engines/Firefox.app` |
+| Blocker | uBlock Origin 1.77.2 source (checksum-verified), bundled with esbuild, plus a snapshot of uBO's default filter lists | `Vendor/ublock/` (git-ignored), copied into the app at build time |
 
 The Gecko runtime is a private copy with its own profile. Mosaic never reads or modifies a
 Firefox you already have. If the private copy is missing, Mosaic falls back to a Gecko
@@ -52,6 +58,7 @@ Run the tests with `Scripts/test.sh`.
 | Tabs | ⌘T new, ⌘W close, ⌘⇧] / ⌘⇧[ next / previous |
 | Navigate | ⌘[ back, ⌘] forward, ⌘R reload, ⌘L address bar |
 | Extensions | Puzzle-piece button, or ⌘⇧X |
+| Content blocker | Shield button (shows the count blocked on the page), or ⌘⇧B to switch it on/off |
 
 The coloured dot on each tab shows its engine: orange for Mozilla, blue for Chromium. New
 tabs open in the engine of the tab you are on. The engine you last picked with the switch
@@ -135,6 +142,34 @@ unchanged. `Sources/MosaicCore/Extensions` handles the differences:
 Converted extensions are unsigned, so they are loaded as temporary add-ons each time Gecko
 starts. Their storage persists because each keeps a stable ID (`<chrome id>@crx.mosaic`).
 
+### Built-in content blocker
+
+The blocker is part of the browser, not an extension. `Resources/blocker/engine.js` imports
+uBlock Origin's own static network filtering engine (`static-net-filtering.js` and its
+dependencies, the same modules uBO's Node.js build uses) straight from uBO's source;
+`bootstrap.sh` bundles them into one script, `ublock-engine.js`. One uBO module is
+substituted (`publicsuffix-static.js`, which removes a top-level `await` the bundle format
+cannot use), and `polyfills.js` supplies the few web APIs a bare JavaScript engine lacks.
+The bundle then runs in two places, so both engines make identical decisions from the same
+lists:
+
+- **Chromium tabs:** a JavaScriptCore context inside Mosaic (`BlockerEngine`). CEF asks
+  `RequestFilter` before every sub-resource request, on its network thread.
+- **Mozilla tabs:** a sandbox in Gecko's parent process, loaded by the agent
+  (`configureBlocker`), which cancels matching requests from an `http-on-modify-request`
+  observer.
+
+A page's own document is never blocked, and non-web pages (`about:`, `file:`, extension
+pages) are never filtered. The filter lists ship in the app, so blocking works offline from
+the first launch; Mosaic refreshes them in the background when they are more than two days
+old, or on demand with **Update Lists**. A download that does not look like a filter list
+never replaces a working one. Settings live in Mosaic's preferences (`blockerEnabled`,
+`blockerAllowlist`).
+
+To toggle it from source rather than the UI, change the default in `ContentBlocker.init`
+(`defaults.object(forKey: Keys.enabled) as? Bool ?? true`), or leave `Vendor/ublock` out of
+the build: `build.sh` then builds the app without the blocker and the shield says so.
+
 ## Known limitations
 
 **Extensions**
@@ -147,6 +182,19 @@ starts. Their storage persists because each keeps a stable ID (`<chrome id>@crx.
   ("Alloy") browsers have no extension support.
 - Extensions do not update themselves. Reinstall to update.
 - Tested end to end with one extension so far (Dark Reader, MV3).
+
+**Content blocker**
+
+- Network blocking only. uBO's cosmetic filtering (hiding leftover ad containers) and
+  scriptlet injection (which defeats many anti-adblock scripts and some video ads) need
+  content scripts and are not implemented, so pages can show empty ad slots and some ads
+  still get through. Expect it to block noticeably less than the uBO extension does.
+- uBO's redirect filters (`$redirect`, replacing a blocked script with a harmless stub),
+  `$removeparam`, `$csp` and other modifiers are not applied; matching requests are simply
+  blocked or let through.
+- No per-request logger, element picker, custom filters or list selection yet.
+- Blocking applies to requests a tab makes. Service-worker traffic in Mozilla tabs may not
+  be attributed to its tab and is then let through.
 
 **The Gecko window**
 
@@ -228,5 +276,12 @@ takes keyboard focus on its own.
 
 Mosaic bundles the Chromium Embedded Framework (BSD licence; Chromium's own licences are in
 `Vendor/cef/CREDITS.html` after bootstrap) and runs an unmodified Firefox ESR (MPL 2.0).
+
+The content blocker contains uBlock Origin's filtering engine, Copyright (C) Raymond Hill
+and contributors, licensed under the **GNU GPL v3** (its licence is copied into the app as
+`blocker/LICENSE-uBlock-Origin.txt`). Distributing a Mosaic build that includes it means
+complying with the GPL for that distribution, which in practice means releasing Mosaic's
+own source under a GPL-compatible licence. The filter lists have their own licences (GPL v3,
+CC BY-SA 3.0 and others; see each list's header).
 Firefox is a trademark of the Mozilla Foundation; Mosaic is not affiliated with Mozilla or
 Google.

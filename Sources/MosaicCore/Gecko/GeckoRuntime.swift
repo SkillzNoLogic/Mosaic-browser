@@ -155,7 +155,9 @@ public enum GeckoProfile {
     #ai-window-box, #ai-window-splitter {
       display: none !important;
     }
-    #browser, #appcontent, #tabbrowser-tabbox, #tabbrowser-tabpanels, .browserStack {
+    /* Newer Firefox (161; not ESR 153) draws a 1px separator as a top border on
+       .browserContainer, which would show as a line along the top of every page. */
+    #browser, #appcontent, #tabbrowser-tabbox, #tabbrowser-tabpanels, .browserContainer, .browserStack {
       margin: 0 !important;
       border: none !important;
       border-radius: 0 !important;

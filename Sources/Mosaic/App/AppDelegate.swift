@@ -4,7 +4,7 @@ import MosaicCore
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private(set) var model: BrowserModel!
     private var window: NSWindow!
     private var workspaceObserver: NSObjectProtocol?
@@ -153,6 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         view.addItem(.separator())
         view.addItem(item("Switch Rendering Engine", #selector(toggleEngine), "e", [.command, .shift]))
         view.addItem(item("Next Search Engine", #selector(cycleSearchEngine), "s", [.command, .shift]))
+        view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift]))
         view.addItem(.separator())
         view.addItem(item("Extensions…", #selector(showExtensions), "x", [.command, .shift]))
         main.addItem(submenu: view, title: "View")
@@ -192,6 +193,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func goForward() { model.goForward() }
     @objc private func toggleEngine() { model.toggleEngine() }
     @objc private func cycleSearchEngine() { model.cycleSearchEngine() }
+    @objc private func toggleBlocker() { model.toggleBlocker() }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleBlocker) {
+            menuItem.state = model.blocker.isEnabled ? .on : .off
+            return model.blocker.status != .unavailable
+        }
+        return true
+    }
     @objc private func showExtensions() { model.showExtensions = true }
     @objc private func nextTab() { model.selectAdjacentTab(offset: 1) }
     @objc private func previousTab() { model.selectAdjacentTab(offset: -1) }

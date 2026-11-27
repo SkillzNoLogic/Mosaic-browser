@@ -184,6 +184,7 @@ struct ToolbarView: View {
             }
             searchEngineMenu
             enginePicker
+            BlockerButton()
             Button {
                 model.showExtensions = true
             } label: {

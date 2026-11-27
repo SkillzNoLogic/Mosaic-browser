@@ -63,6 +63,11 @@ final class Automation {
                 model.openExtensionPage(ext, kind: parts[1])
             }
         case "showExtensions": model.showExtensions = (value != "false")
+        case "blocker": model.setBlockerEnabled(value != "off")
+        case "blockerSite":
+            if let tab = model.selectedTab { model.setBlocking(value != "off", onSiteOf: tab) }
+        case "showBlocker": model.showBlocker = (value != "false")
+        case "updateLists": Task { await model.blocker.updateLists() }
         case "geckoEval":
             // {"do":"geckoEval","value":"<agent method>","out":"/path"}
             let out = command["out"] as? String
@@ -112,6 +117,7 @@ final class Automation {
                     "engine": tab.engine.rawValue, "url": tab.url, "title": tab.title,
                     "loading": tab.isLoading, "canGoBack": tab.canGoBack, "canGoForward": tab.canGoForward,
                     "geckoID": tab.geckoID ?? -1, "hasChromiumView": tab.chromiumView != nil,
+                    "blocked": tab.blockedCount,
                     "failure": tab.failure ?? "", "selected": tab.id == model.selectedTabID,
                 ] as [String: Any]
             },
@@ -134,6 +140,12 @@ final class Automation {
                     "notes": ext.notes.map { "\($0.severity.rawValue): \($0.message)" },
                 ] as [String: Any]
             },
+            "blocker": [
+                "status": "\(model.blocker.status)", "enabled": model.blocker.isEnabled,
+                "allowlist": model.blocker.settings.allowlist.sorted(),
+                "engineVersion": model.blocker.engineVersion ?? "",
+                "updating": model.blocker.isUpdating,
+            ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
         ]

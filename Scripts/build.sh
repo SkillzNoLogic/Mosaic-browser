@@ -40,6 +40,17 @@ fill_plist "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist" "Mosaic" ""
 cp "$ROOT/Resources/gecko/"* "$APP/Contents/Resources/gecko/"
 [[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 
+# Built-in content blocker: uBlock Origin's engine (bundled from source by
+# bootstrap.sh), a snapshot of its filter lists for first launch, and its licence.
+BLOCKER="$ROOT/Vendor/ublock"
+if [[ -f "$BLOCKER/ublock-engine.js" ]]; then
+  mkdir -p "$APP/Contents/Resources/blocker/lists"
+  cp "$BLOCKER/ublock-engine.js" "$BLOCKER/LICENSE-uBlock-Origin.txt" "$APP/Contents/Resources/blocker/"
+  cp "$BLOCKER/lists/"* "$APP/Contents/Resources/blocker/lists/"
+else
+  echo "warning: content blocker not bundled (run Scripts/bootstrap.sh); building without it." >&2
+fi
+
 # Chromium: the framework plus one helper app per sub-process type. The names
 # and locations are what CEF looks for; do not rename them.
 # -c clones on APFS, so the ~300 MB framework costs no time or disk.

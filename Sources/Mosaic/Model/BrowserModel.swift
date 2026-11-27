@@ -18,10 +18,12 @@ final class BrowserModel: ObservableObject {
     /// Incremented to ask the toolbar to focus the address field.
     @Published private(set) var addressFocusRequest = 0
     @Published var showExtensions = false
+    @Published var showBlocker = false
     @Published var notice: String?
 
     let gecko = GeckoEngine()
     let extensions: ExtensionManager
+    let blocker: ContentBlocker
     let chromiumAvailable: Bool
 
     /// True while the user is typing in the address field; page-driven URL
@@ -58,12 +60,19 @@ final class BrowserModel: ObservableObject {
         let saved = defaults.string(forKey: Keys.engine).flatMap(EngineKind.init(rawValue:)) ?? .gecko
         engine = (saved == .chromium && !chromiumAvailable) ? .gecko : saved
         extensions = ExtensionManager(gecko: gecko)
+        blocker = ContentBlocker(gecko: gecko)
 
         gecko.onSnapshot = { [weak self] in self?.reconcile(with: $0) }
         gecko.onStopped = { [weak self] in self?.geckoStopped() }
-        gecko.onStarted = { [weak self] in await self?.extensions.loadAllIntoGecko() }
-        // Re-render dependents when the engine's status changes.
+        gecko.onStarted = { [weak self] in
+            // The blocker first, so the very first page is already filtered.
+            await self?.blocker.configureGecko()
+            await self?.extensions.loadAllIntoGecko()
+        }
+        // Re-render dependents when the engine's or the blocker's status changes.
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
+        blocker.start()
 
         newTab()
     }
@@ -292,6 +301,7 @@ final class BrowserModel: ObservableObject {
         tab.canGoForward = false
         tab.isLoading = false
         tab.failure = nil
+        tab.blockedCount = 0
         if !url.isEmpty { load(url, in: tab) }
         updateDocking()
     }
@@ -398,6 +408,7 @@ final class BrowserModel: ObservableObject {
         if tab.isLoading != state.loading, !settling || state.loading { tab.isLoading = state.loading }
         if tab.canGoBack != state.canGoBack { tab.canGoBack = state.canGoBack }
         if tab.canGoForward != state.canGoForward { tab.canGoForward = state.canGoForward }
+        if tab.blockedCount != state.blocked { tab.blockedCount = state.blocked }
         tabChanged(tab)
     }
 
@@ -471,6 +482,26 @@ final class BrowserModel: ObservableObject {
 
     /// True when Gecko's window is what the user sees in the content area.
     var isGeckoDocked: Bool { showsGeckoPage && windowIsVisible && contentRect != nil }
+
+    // MARK: - Content blocker
+
+    /// Master switch. The page in front is reloaded so the change is visible.
+    func setBlockerEnabled(_ enabled: Bool) {
+        guard blocker.isEnabled != enabled else { return }
+        blocker.setEnabled(enabled)
+        notice = enabled ? "Content blocker on" : "Content blocker off"
+        reload()
+    }
+
+    func toggleBlocker() {
+        setBlockerEnabled(!blocker.isEnabled)
+    }
+
+    /// Per-site switch for the site of the selected tab.
+    func setBlocking(_ blocking: Bool, onSiteOf tab: BrowserTab) {
+        blocker.setBlocking(blocking, onSiteOf: tab.url)
+        if tab === selectedTab { reload() }
+    }
 
     // MARK: - Extensions
 

@@ -10,6 +10,8 @@ enum AppPaths {
     static var geckoProfile: URL { support.appendingPathComponent("Gecko/Profile", isDirectory: true) }
     static var chromiumData: URL { support.appendingPathComponent("Chromium", isDirectory: true) }
     static var extensions: URL { support.appendingPathComponent("Extensions", isDirectory: true) }
+    /// Filter lists of the built-in content blocker.
+    static var blockerLists: URL { support.appendingPathComponent("Blocker/lists", isDirectory: true) }
 
     /// Folder inside the app bundle holding `agent.sys.mjs`.
     static var geckoAgent: URL? { Bundle.main.resourceURL?.appendingPathComponent("gecko", isDirectory: true) }
@@ -37,6 +39,7 @@ final class GeckoEngine: ObservableObject {
         case notRunning
         case startTimedOut(String)
         case exitedDuringStartup
+        case agent(String)
 
         var errorDescription: String? {
             switch self {
@@ -45,6 +48,7 @@ final class GeckoEngine: ObservableObject {
             case .notRunning: "Gecko is not running."
             case .startTimedOut(let stage): "Gecko did not finish starting (\(stage))."
             case .exitedDuringStartup: "Gecko quit while it was starting."
+            case .agent(let message): message
             }
         }
     }
@@ -57,6 +61,8 @@ final class GeckoEngine: ObservableObject {
         let canGoBack: Bool
         let canGoForward: Bool
         let selected: Bool
+        /// Requests the content blocker stopped since the page started loading.
+        let blocked: Int
     }
 
     struct Event: Decodable, Equatable {
@@ -174,7 +180,8 @@ final class GeckoEngine: ObservableObject {
         // 3. Wait for the browser window, then strip its chrome.
         _ = try await Self.retry(seconds: 45, stage: "browser window") { () -> Bool? in
             if launched.isTerminated { throw GeckoError.exitedDuringStartup }
-            return (try await connection.evaluate(Self.agentCall("setup", [])) as? String) == "true" ? true : nil
+            let result = try await connection.evaluate(Self.agentCall("setup", []))
+            return (try Self.unwrapAgentResult(result)) == "true" ? true : nil
         }
 
         status = .running
@@ -320,8 +327,33 @@ final class GeckoEngine: ObservableObject {
         """
     }
 
+    /// A call to an agent method, wrapped so that whatever happens comes back
+    /// as one JSON string: `{"ok":true,"value":<the method's JSON>}` or
+    /// `{"ok":false,"error":"<message>"}`. Without the wrapper a failing async
+    /// method would be indistinguishable from one that returned nothing, since
+    /// the debugging protocol reports a rejected promise without its reason.
     private static func agentCall(_ method: String, _ arguments: [Any]) -> String {
-        "\(agentExpression).\(method)(\(arguments.map(jsLiteral).joined(separator: ", ")))"
+        let call = "\(agentExpression).\(method)(\(arguments.map(jsLiteral).joined(separator: ", ")))"
+        return """
+        (async () => {
+          try {
+            return JSON.stringify({ ok: true, value: await \(call) });
+          } catch (error) {
+            return JSON.stringify({ ok: false, error: String(error?.message ?? error) });
+          }
+        })()
+        """
+    }
+
+    /// Unwraps `agentCall`'s envelope into the method's own JSON string.
+    private static func unwrapAgentResult(_ result: Any?) throws -> String? {
+        guard let text = result as? String, let data = text.data(using: .utf8),
+              let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return nil }
+        guard (envelope["ok"] as? Bool) == true else {
+            throw GeckoError.agent((envelope["error"] as? String) ?? "the Gecko agent reported an error")
+        }
+        return envelope["value"] as? String
     }
 
     /// JSON is a subset of JavaScript, so a JSON-encoded value is a safe literal.
@@ -337,7 +369,7 @@ final class GeckoEngine: ObservableObject {
     func call(_ method: String, _ arguments: Any...) async throws -> Any? {
         guard status == .running, let client else { throw GeckoError.notRunning }
         let result = try await client.evaluate(Self.agentCall(method, arguments))
-        guard let text = result as? String, let data = text.data(using: .utf8) else { return nil }
+        guard let text = try Self.unwrapAgentResult(result), let data = text.data(using: .utf8) else { return nil }
         let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         return value is NSNull ? nil : value
     }
@@ -355,7 +387,8 @@ final class GeckoEngine: ObservableObject {
             let decoder = JSONDecoder()
             while !Task.isCancelled {
                 guard let self, self.generation == polled, let client = self.client else { return }
-                if let text = try? await client.evaluate(Self.agentCall("state", [])) as? String,
+                if let result = try? await client.evaluate(Self.agentCall("state", [])),
+                   let text = (try? Self.unwrapAgentResult(result)) ?? nil,
                    let snapshot = try? decoder.decode(Snapshot.self, from: Data(text.utf8)),
                    self.generation == polled, snapshot.ready
                 {

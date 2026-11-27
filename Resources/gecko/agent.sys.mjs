@@ -1,12 +1,17 @@
 /* Mosaic's agent inside Gecko.
  *
  * Mosaic loads this module into Gecko's parent process (through the remote
- * debugging socket) and calls the methods of `Agent` to drive the engine:
- * open/close/select tabs, navigate, keep the chromeless Gecko window glued to
- * Mosaic's content area, and manage converted Chrome extensions.
+ * debugging server: a Unix socket on macOS, a loopback TCP port on Windows) and
+ * calls the methods of `Agent` to drive the engine: open/close/select tabs,
+ * navigate, make the Gecko window chromeless so Mosaic can show it in its own
+ * content area, and manage converted Chrome extensions.
  *
  * Every method returns a JSON string (or a promise of one) so results cross the
  * debugging protocol as plain values.
+ *
+ * The same file serves every platform. Where they differ it is spelled out:
+ * the shortcut modifier, the units of `setRect`, and how the window is made
+ * borderless.
  */
 
 const lazy = {};
@@ -16,6 +21,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 const SYSTEM_PRINCIPAL = Services.scriptSecurityManager.getSystemPrincipal();
+
+/** "Darwin" on macOS, "WINNT" on Windows, "Linux" on Linux. */
+const IS_MAC = Services.appinfo.OS === "Darwin";
 
 /** Stable numeric IDs for tabs; Mosaic refers to tabs by these. */
 const tabIds = new WeakMap();
@@ -57,6 +65,86 @@ function browserWindow() {
   return Services.wm.getMostRecentWindow("navigator:browser");
 }
 
+// ---- Content blocker --------------------------------------------------------
+//
+// Mosaic's built-in blocker is uBlock Origin's network filtering engine, bundled
+// from uBO's source (Resources/blocker/engine.js). The same bundle runs inside
+// the Mosaic app for Chromium tabs; here it runs in a sandbox in Gecko's parent
+// process, and every HTTP request a tab makes is put to it before it is sent.
+
+const blocker = {
+  /** The loaded engine (the sandbox's `MosaicBlocker`), or null. */
+  engine: null,
+  enabled: true,
+  /** Normalised hostnames blocking is switched off for (subdomains included). */
+  allowlist: new Set(),
+  observing: false,
+  /** Requests blocked since each tab's current page started loading. */
+  blocked: new WeakMap(),
+};
+
+function isAllowlisted(hostname) {
+  let host = hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+  for (;;) {
+    if (blocker.allowlist.has(host)) {
+      return true;
+    }
+    const dot = host.indexOf(".");
+    if (dot === -1) {
+      return false;
+    }
+    host = host.slice(dot + 1);
+  }
+}
+
+/** `http-on-modify-request` observer: the last point a request can be stopped. */
+function onHttpRequest(subject) {
+  try {
+    const channel = subject.QueryInterface(Ci.nsIHttpChannel);
+    // Only requests that belong to a tab. Gecko's own traffic and extensions'
+    // background requests have no tab and are left alone.
+    const browser = channel.loadInfo?.browsingContext?.top?.embedderElement;
+    // Looked up through the browser window itself: `gBrowser` is not reachable
+    // from the element's `ownerGlobal` as seen from this module.
+    const tab = browser ? browserWindow()?.gBrowser?.getTabForBrowser(browser) : null;
+    if (!tab) {
+      return;
+    }
+    const request = ChannelWrapper.get(channel);
+    // Gecko reports <img srcset> loads as "imageset"; filters know them as images.
+    const type = request.type === "imageset" ? "image" : request.type;
+    if (type === "main_frame") {
+      // A page's own document is never blocked; restart its count. This runs
+      // even while blocking is off, so a stale count does not linger.
+      blocker.blocked.set(tab, 0);
+      return;
+    }
+    if (!blocker.enabled || blocker.engine === null) {
+      return;
+    }
+    const page = browser.currentURI;
+    if (!page || !page.schemeIs("http") && !page.schemeIs("https")) {
+      return;
+    }
+    if (isAllowlisted(page.host)) {
+      return;
+    }
+    if (blocker.engine.match(request.finalURL, page.spec, type) !== 1) {
+      return;
+    }
+    channel.cancel(Cr.NS_ERROR_ABORT);
+    blocker.blocked.set(tab, (blocker.blocked.get(tab) ?? 0) + 1);
+  } catch (error) {
+    // A request the blocker cannot classify is let through.
+    console.error("Mosaic blocker:", error);
+  }
+}
+
+/** Gives the main thread a turn, so loading filter lists does not freeze Gecko. */
+function nextTick() {
+  return new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+}
+
 function requireWindow() {
   const win = browserWindow();
   if (!win || !win.gBrowser) {
@@ -96,26 +184,64 @@ function load(browser, url) {
   }
 }
 
-/** Keyboard shortcuts that belong to Mosaic's UI even while Gecko has focus. */
+function baseWindow(win) {
+  return win.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow);
+}
+
+/**
+ * The window's native handle (the HWND on Windows) as a decimal string; "0" if
+ * it has none, which is the case in headless mode. Gecko itself reports the
+ * handle as "0x…" text because a pointer does not fit a JS number, so it is
+ * kept as a string on its way to Mosaic too.
+ */
+function nativeHandle(win) {
+  try {
+    return BigInt(baseWindow(win).nativeHandle).toString();
+  } catch (_) {
+    return "0";
+  }
+}
+
+/**
+ * True when the platform's shortcut modifier (Command on macOS, Control
+ * everywhere else) is held, alone or with Shift. Control+Alt is excluded: on
+ * Windows that is how AltGr arrives, and it types characters.
+ */
+function hasShortcutModifier(event) {
+  if (event.altKey) {
+    return false;
+  }
+  return IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+/** Shortcuts that belong to Mosaic's UI even while Gecko has focus. */
+const FORWARDED = { l: "focusAddress", t: "newTab", n: "newTab", w: "closeTab" };
+const FORWARDED_WITH_SHIFT = { e: "toggleEngine" };
+
+/**
+ * Gecko's own shortcuts for whole windows: close window, reopen closed window,
+ * new private window, and (where it is a key binding rather than a system menu
+ * item) quit. Mosaic shows exactly one Gecko window, as part of its own, so
+ * these would close the engine under it or put a second, chromeless Gecko
+ * window on the desktop. They are swallowed.
+ */
+const SWALLOWED_WITH_SHIFT = new Set(IS_MAC ? ["w", "n", "p"] : ["w", "n", "p", "q"]);
+
 function onKeyDown(event) {
-  if (!event.metaKey || event.ctrlKey || event.altKey) {
+  if (!hasShortcutModifier(event)) {
     return;
   }
   const key = event.key.toLowerCase();
-  let type = null;
-  if (!event.shiftKey) {
-    if (key === "l") type = "focusAddress";
-    else if (key === "t" || key === "n") type = "newTab";
-    else if (key === "w") type = "closeTab";
-  } else if (key === "e") {
-    type = "toggleEngine";
-  }
-  if (!type) {
+  const forwarded = event.shiftKey ? FORWARDED_WITH_SHIFT : FORWARDED;
+  const type = Object.hasOwn(forwarded, key) ? forwarded[key] : null;
+  if (!type && !(event.shiftKey && SWALLOWED_WITH_SHIFT.has(key))) {
     return;
   }
   event.preventDefault();
   event.stopImmediatePropagation();
-  pendingEvents.push({ type });
+  if (type) {
+    pendingEvents.push({ type });
+  }
 }
 
 function describeAddon(addon) {
@@ -161,7 +287,17 @@ export const Agent = {
       for (const tab of win.gBrowser.tabs) {
         startupTabs.add(tab);
       }
-      // Borderless: no title bar, no traffic lights. Mosaic's window frames it.
+      if (!IS_MAC && win.windowState !== win.STATE_NORMAL) {
+        // A new profile can open maximized. Mosaic is about to size this
+        // window itself, and Gecko lays a maximized window out differently
+        // (it compensates for borders the system pushes off-screen).
+        win.restore();
+      }
+      // Borderless: no title bar, no frame, no traffic lights. Mosaic's window
+      // frames it. On Windows this has to happen now, while the window is
+      // still top-level: once Mosaic has adopted it as a child window Gecko
+      // declines to touch its styles ("embedded context" in
+      // nsWindow::HideWindowChrome).
       win.document.documentElement.setAttribute("hidechrome", "true");
       win.addEventListener("keydown", onKeyDown, true);
       win.gBrowser.tabContainer.addEventListener("TabOpen", onTabOpen);
@@ -193,16 +329,27 @@ export const Agent = {
         canGoBack: !!browser.canGoBack,
         canGoForward: !!browser.canGoForward,
         selected: tab.selected,
+        blocked: blocker.blocked.get(tab) ?? 0,
       });
     }
     return JSON.stringify({ ready: true, tabs, events: pendingEvents.splice(0) });
   },
 
-  /** Moves and sizes the Gecko window (screen coordinates, top-left origin). */
+  /**
+   * Moves and sizes the Gecko window (screen coordinates, top-left origin).
+   * The units are the ones each Mosaic works in: points on macOS, which are
+   * Gecko's CSS pixels there, and physical pixels everywhere else.
+   */
   setRect(x, y, width, height) {
     const win = requireWindow();
     if (win.windowState === win.STATE_MINIMIZED) {
       win.restore();
+    }
+    if (!IS_MAC) {
+      // nsIBaseWindow works in device pixels, so no scale factor is involved
+      // and the result is exact on displays scaled above 100%.
+      baseWindow(win).setPositionAndSize(x, y, width, height, 0);
+      return "true";
     }
     if (win.screenX !== x || win.screenY !== y) {
       win.moveTo(x, y);
@@ -309,6 +456,64 @@ export const Agent = {
     return "true";
   },
 
+  // ---- Content blocker ----------------------------------------------------
+
+  /**
+   * Loads the blocking engine and its filter lists, replacing any engine
+   * already in use (which keeps working until the new one is ready).
+   *   bundlePath      ublock-engine.js
+   *   suffixListPath  public_suffix_list.dat
+   *   listPaths       filter list files
+   * Returns the number of network filters in effect.
+   */
+  async configureBlocker(bundlePath, suffixListPath, listPaths, enabled, allowlist) {
+    blocker.enabled = !!enabled;
+    blocker.allowlist = new Set(allowlist);
+
+    // A sandbox of its own: the bundle installs a few globals, which must not
+    // leak into the global that all of Gecko's system modules share.
+    const sandbox = Cu.Sandbox(SYSTEM_PRINCIPAL, {
+      sandboxName: "Mosaic content blocker",
+      wantGlobalProperties: ["TextDecoder", "TextEncoder", "URL", "structuredClone", "atob", "btoa"],
+      freshCompartment: true,
+    });
+    // Privileged code may not load scripts from file: URLs, so the bundle's
+    // folder is mapped to resource://mosaic-blocker/, the way the agent's own
+    // folder is mapped to resource://mosaic/.
+    const bundle = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+    bundle.initWithPath(bundlePath);
+    Services.io
+      .getProtocolHandler("resource")
+      .QueryInterface(Ci.nsISubstitutingProtocolHandler)
+      .setSubstitution("mosaic-blocker", Services.io.newFileURI(bundle.parent));
+    Services.scriptloader.loadSubScript(`resource://mosaic-blocker/${bundle.leafName}`, sandbox);
+    const engine = sandbox.MosaicBlocker;
+
+    engine.init(await IOUtils.readUTF8(suffixListPath));
+    engine.beginLists();
+    for (const path of listPaths) {
+      const text = await IOUtils.readUTF8(path);
+      await nextTick();
+      engine.addList(PathUtils.filename(path), text);
+      await nextTick();
+    }
+    const count = engine.commitLists();
+
+    blocker.engine = engine;
+    if (!blocker.observing) {
+      Services.obs.addObserver(onHttpRequest, "http-on-modify-request");
+      blocker.observing = true;
+    }
+    return JSON.stringify({ filters: count, version: engine.version });
+  },
+
+  /** Updates the master switch and the per-site exceptions. */
+  setBlockerOptions(enabled, allowlist) {
+    blocker.enabled = !!enabled;
+    blocker.allowlist = new Set(allowlist);
+    return "true";
+  },
+
   // ---- Extensions ---------------------------------------------------------
 
   /**
@@ -410,12 +615,32 @@ export const Agent = {
     return JSON.stringify(out);
   },
 
+  /**
+   * Quits Gecko in an orderly way, so the profile is flushed, without giving
+   * pages or prompts a chance to veto. The debugging connection drops as part
+   * of the shutdown, usually before this call's own reply is delivered.
+   */
+  quit() {
+    Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+    return "true";
+  },
+
+  /**
+   * Describes the engine. `pid` is the browser (parent) process, which on
+   * Windows is not necessarily the process Mosaic launched: Firefox's launcher
+   * process starts the real browser as its child. `windowHandle` is the
+   * browser window's native handle as a decimal string, "0" while there is no
+   * window yet or in headless mode; see `nativeHandle`.
+   */
   version() {
+    const win = browserWindow();
     return JSON.stringify({
-      agent: 1,
+      agent: 2,
       gecko: Services.appinfo.platformVersion,
       app: Services.appinfo.name,
       appVersion: Services.appinfo.version,
+      pid: Services.appinfo.processID,
+      windowHandle: win ? nativeHandle(win) : "0",
     });
   },
 };
