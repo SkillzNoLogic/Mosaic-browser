@@ -58,7 +58,7 @@ Run the tests with `Scripts/test.sh`.
 | Tabs | ⌘T new, ⌘W close, ⌘⇧] / ⌘⇧[ next / previous |
 | Navigate | ⌘[ back, ⌘] forward, ⌘R reload, ⌘L address bar |
 | Extensions | Puzzle-piece button, or ⌘⇧X |
-| Content blocker | Shield button (shows the count blocked on the page), or ⌘⇧B to switch it on/off |
+| Content blocker | Shield button (shows the count blocked on the page), or ⌥⇧⌘B to switch it on/off |
 
 The coloured dot on each tab shows its engine: orange for Mozilla, blue for Chromium. New
 tabs open in the engine of the tab you are on. The engine you last picked with the switch

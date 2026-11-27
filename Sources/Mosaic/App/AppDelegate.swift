@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var automation: Automation?
     /// Tabs area: Tab menu and History items (Features/Tabs/TabsMenuController.swift).
     private var tabsMenu: TabsMenuController?
+    private var libraryMenus: LibraryMenus?  // library: Bookmarks menu, History additions
 
     /// Builds the model, window and menus. Called before the event loop starts.
     func setUp(chromiumAvailable: Bool) {
@@ -155,7 +156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.addItem(.separator())
         view.addItem(item("Switch Rendering Engine", #selector(toggleEngine), "e", [.command, .shift]))
         view.addItem(item("Next Search Engine", #selector(cycleSearchEngine), "s", [.command, .shift]))
-        view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift]))
+        // ⇧⌘B is the bookmarks bar (as in Safari and Chrome); the blocker takes ⌥⇧⌘B.
+        view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift, .option]))
         view.addItem(.separator())
         view.addItem(item("Extensions…", #selector(showExtensions), "x", [.command, .shift]))
         main.addItem(submenu: view, title: "View")
@@ -168,6 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         self.tabsMenu = tabsMenu
         tabsMenu.addHistoryItems(to: history)
         main.addItem(submenu: history, title: "History")
+        // library: Show All History, recently visited, the Bookmarks menu (Features/Library/LibraryMenus.swift)
+        let libraryMenus = LibraryMenus(model: model)
+        self.libraryMenus = libraryMenus
+        libraryMenus.extendHistoryMenu(history)
+        main.addItem(submenu: libraryMenus.makeBookmarksMenu(), title: "Bookmarks")
 
         // Tabs area: the Tab menu (search, pin, duplicate, mute, unload, groups, workspaces, ⌘1–9).
         main.addItem(submenu: tabsMenu.makeTabMenu(), title: "Tab")

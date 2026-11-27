@@ -90,6 +90,9 @@ final class Automation {
         // Tabs area: pin, mute, duplicate, workspaces, groups, sleeping tabs… (Features/Tabs/TabsAutomation.swift)
         case let tabs where TabsAutomation.commands.contains(tabs):
             TabsAutomation.handle(tabs, value: value, command: command, model: model)
+        // library: bookmarks, history, suggestions, import/export (Features/Library/LibraryAutomation.swift)
+        case _ where LibraryAutomation.handles(action):
+            LibraryAutomation.run(action, value: value, out: command["out"] as? String, model: model)
         case "quit": NSApp.terminate(nil)
         default: break
         }
@@ -157,6 +160,7 @@ final class Automation {
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
             "platform": PlatformAutomation.dump(model),  // platform
+            "library": LibraryAutomation.dumpFields(model),  // library
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {

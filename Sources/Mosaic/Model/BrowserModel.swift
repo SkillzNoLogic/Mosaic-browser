@@ -183,6 +183,7 @@ final class BrowserModel: ObservableObject {
     }
 
     private func tabChanged(_ tab: BrowserTab) {
+        library.tabDidChange(tab, in: self)  // library: history from every tab, both engines (HistoryRecorder)
         guard tab.id == selectedTabID else { return }
         // The toolbar reads the selected tab's state through the model.
         objectWillChange.send()
@@ -195,13 +196,15 @@ final class BrowserModel: ObservableObject {
 
     /// Handles whatever was submitted in the address bar or the start page.
     func navigate(_ input: String) {
-        guard let url = AddressResolver.resolve(input, searchEngine: searchEngine) else { return }
+        // library: resolve() adds search keywords ("w swift") to AddressResolver.
+        guard let url = library.resolve(input, searchEngine: searchEngine) else { return }
         let tab = selectedTab ?? newTab()
         let wasStartPage = tab.isStartPage
         isEditingAddress = false
         applyEngineRule(for: url, to: tab)  // platform: per-site engine rules
         load(url.absoluteString, in: tab)
         offerSwitchIfAlreadyOpen(tab, wasStartPage: wasStartPage)  // tabs: duplicate detection
+        library.noteTypedNavigation(in: tab)  // library: typed visits rank higher
         focusContent()
     }
 
@@ -489,6 +492,7 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        case "toggleBookmarksBar": library.showsBookmarksBar.toggle()  // ⇧⌘B pressed inside a Gecko page
         case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
         default: break
         }
@@ -615,6 +619,7 @@ final class BrowserModel: ObservableObject {
 
     func shutdown() {
         finishTabs()  // tabs: final session save, clean-exit marker
+        library.flushPendingVisits()  // library: record visits still waiting for their title
         gecko.stopAndWait()
     }
 }
