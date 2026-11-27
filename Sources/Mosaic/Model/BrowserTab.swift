@@ -49,6 +49,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var workspaceID: UUID?
     @Published var groupID: UUID?
 
+    // Tabs area: sleeping tabs (Features/Tabs/BrowserModel+Sleep.swift).
+    /// Unloaded to save memory: its engine holds nothing (Chromium) or a discarded browser
+    /// (Gecko). URL and title are kept and the page comes back when the tab is selected.
+    /// The shell draws such tabs dimmed.
+    @Published var isAsleep = false
+    /// When this tab last was, or stopped being, the selected tab.
+    var lastActivated = Date()
+    /// Set by engines that can tell (Gecko). Tabs playing audio are never put to sleep.
+    @Published var isPlayingAudio = false
+
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
     /// Gecko: the agent's ID for this tab, once Gecko has created it.

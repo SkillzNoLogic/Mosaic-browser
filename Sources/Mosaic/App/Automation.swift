@@ -86,6 +86,9 @@ final class Automation {
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
         case "dump": dump(to: value)
+        // Tabs area: pin, mute, duplicate, workspaces, groups, sleeping tabs… (Features/Tabs/TabsAutomation.swift)
+        case let tabs where TabsAutomation.commands.contains(tabs):
+            TabsAutomation.handle(tabs, value: value, command: command, model: model)
         case "quit": NSApp.terminate(nil)
         default: break
         }
@@ -115,15 +118,15 @@ final class Automation {
 
     private func dump(to path: String) {
         let frame = window?.frame ?? .zero
-        let state: [String: Any] = [
+        var state: [String: Any] = [
             "tabs": model.tabs.map { tab in
-                [
+                ([
                     "engine": tab.engine.rawValue, "url": tab.url, "title": tab.title,
                     "loading": tab.isLoading, "canGoBack": tab.canGoBack, "canGoForward": tab.canGoForward,
                     "geckoID": tab.geckoID ?? -1, "hasChromiumView": tab.chromiumView != nil,
                     "blocked": tab.blockedCount,
                     "failure": tab.failure ?? "", "selected": tab.id == model.selectedTabID,
-                ] as [String: Any]
+                ] as [String: Any]).merging(TabsAutomation.tabFields(tab, model: model)) { own, _ in own }  // tabs area
             },
             "engine": model.engine.rawValue,
             "searchEngine": model.searchEngine.id,
@@ -153,6 +156,7 @@ final class Automation {
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
         ]
+        state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
