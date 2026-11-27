@@ -7,7 +7,9 @@ import MosaicCore
 /// and the glue between Mosaic's UI and the two engines.
 @MainActor
 final class BrowserModel: ObservableObject {
-    @Published private(set) var tabs: [BrowserTab] = []
+    /// Every tab of every workspace, in tab-strip order (see `visibleTabs` for the selected
+    /// workspace's). Reordered by the tabs area (Features/Tabs), which keeps its rules.
+    @Published var tabs: [BrowserTab] = []
     @Published private(set) var selectedTabID: UUID?
     /// Engine used for new tabs. Mirrors the selected tab's engine.
     @Published private(set) var engine: EngineKind
@@ -39,6 +41,7 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    let tabsFeature = TabsFeature()  // tabs: sessions, recently closed, sleeping tabs, settings
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -88,7 +91,7 @@ final class BrowserModel: ObservableObject {
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
 
-        newTab()
+        startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
 
     var selectedTab: BrowserTab? { tabs.first { $0.id == selectedTabID } }
@@ -116,11 +119,7 @@ final class BrowserModel: ObservableObject {
     @discardableResult
     func newTab(url: String = "", engine requested: EngineKind? = nil, select: Bool = true) -> BrowserTab {
         let tab = makeTab(engine: requested ?? engine)
-        if let current = selectedTab, let index = tabs.firstIndex(of: current) {
-            tabs.insert(tab, at: index + 1)
-        } else {
-            tabs.append(tab)
-        }
+        insertTab(tab, after: selectedTab, linked: false)  // tabs: workspace, pins, groups
         if select { self.select(tab) }
         if url.isEmpty {
             if select { focusAddressBar() }
@@ -130,19 +129,22 @@ final class BrowserModel: ObservableObject {
         return tab
     }
 
-    private func makeTab(engine: EngineKind) -> BrowserTab {
+    func makeTab(engine: EngineKind) -> BrowserTab {
         let tab = BrowserTab(engine: engine)
+        tab.workspaceID = selectedWorkspaceID  // tabs: new tabs open in the current workspace
         tab.onChange = { [weak self] in self?.tabChanged($0) }
         tab.onNewTabRequest = { [weak self] source, url in
-            self?.newTab(url: url, engine: source.engine)
+            self?.openLinkedTab(url: url, from: source)  // tabs: next to its opener, in its group
         }
         return tab
     }
 
     func select(_ tab: BrowserTab) {
         guard tabs.contains(tab) else { return }
+        let previous = selectedTab
         selectedTabID = tab.id
         lastLocalSelection = Date()
+        tabSelected(tab, previous: previous)  // tabs: workspace, wakes a sleeping tab
         setEnginePreference(tab.engine)
         isEditingAddress = false
         addressText = tab.url
@@ -152,24 +154,29 @@ final class BrowserModel: ObservableObject {
         updateDocking()
     }
 
+    /// Closes `tab` unconditionally (a deliberate action); see `closeSelectedTab` for ⌘W.
     func close(_ tab: BrowserTab) {
         guard let index = tabs.firstIndex(of: tab) else { return }
+        recordClosed(tab)  // tabs: Recently Closed
+        let successor = successorAfterClosing(tab)  // tabs: a neighbour in the same workspace
         detachFromEngine(tab)
         tabs.remove(at: index)
-        if tabs.isEmpty {
-            newTab()
-        } else if selectedTabID == tab.id {
-            select(tabs[min(index, tabs.count - 1)])
+        tabRemoved(tab)  // tabs: empty groups, remembered selection
+        if selectedTabID == tab.id {
+            if let successor { select(successor) } else { newTab() }
         }
     }
 
+    /// ⌘W. A pinned tab only closes on a second press (tabs: Features/Tabs).
     func closeSelectedTab() {
-        if let tab = selectedTab { close(tab) }
+        if let tab = selectedTab, confirmsClose(tab) { close(tab) }
     }
 
+    /// Next/previous tab of the current workspace, skipping collapsed groups.
     func selectAdjacentTab(offset: Int) {
-        guard let tab = selectedTab, let index = tabs.firstIndex(of: tab), tabs.count > 1 else { return }
-        select(tabs[(index + offset + tabs.count) % tabs.count])
+        let order = navigableTabs  // tabs
+        guard let tab = selectedTab, let index = order.firstIndex(of: tab), order.count > 1 else { return }
+        select(order[(index + offset + order.count) % order.count])
     }
 
     private func tabChanged(_ tab: BrowserTab) {
@@ -187,8 +194,10 @@ final class BrowserModel: ObservableObject {
     func navigate(_ input: String) {
         guard let url = AddressResolver.resolve(input, searchEngine: searchEngine) else { return }
         let tab = selectedTab ?? newTab()
+        let wasStartPage = tab.isStartPage
         isEditingAddress = false
         load(url.absoluteString, in: tab)
+        offerSwitchIfAlreadyOpen(tab, wasStartPage: wasStartPage)  // tabs: duplicate detection
         focusContent()
     }
 
@@ -370,7 +379,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// Releases whatever the tab holds in its current engine.
-    private func detachFromEngine(_ tab: BrowserTab) {
+    func detachFromEngine(_ tab: BrowserTab) {
         if let view = tab.chromiumView {
             view.closeBrowser()
             tab.chromiumView = nil
@@ -398,16 +407,13 @@ final class BrowserModel: ObservableObject {
 
         for state in snapshot.tabs where !closedGeckoIDs.contains(state.id) {
             if let tab = byGeckoID[state.id] {
-                apply(state, to: tab)
+                // tabs: a discarded tab reports placeholder state until it is selected again.
+                if !tab.isAsleep { apply(state, to: tab) }
             } else if pendingGeckoOpens == 0 {
                 let tab = makeTab(engine: .gecko)
                 tab.geckoID = state.id
                 apply(state, to: tab)
-                if let current = selectedTab, let index = tabs.firstIndex(of: current) {
-                    tabs.insert(tab, at: index + 1)
-                } else {
-                    tabs.append(tab)
-                }
+                insertTab(tab, after: selectedTab, linked: true)  // tabs: next to its opener
                 byGeckoID[state.id] = tab
                 // Show it if the user is on a Gecko page (they clicked a link
                 // that opens a tab) or asked for it; a tab Gecko opens on its
@@ -460,7 +466,9 @@ final class BrowserModel: ObservableObject {
 
     /// Selects a tab Gecko already made current (no command sent back).
     private func selectLocally(_ tab: BrowserTab) {
+        let previous = selectedTab
         selectedTabID = tab.id
+        tabSelected(tab, previous: previous)  // tabs
         setEnginePreference(tab.engine)
         isEditingAddress = false
         addressText = tab.url
@@ -476,6 +484,7 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
         default: break
         }
     }
@@ -506,7 +515,7 @@ final class BrowserModel: ObservableObject {
         updateDocking()
     }
 
-    private func updateDocking() {
+    func updateDocking() {
         var rect: GeckoRect?
         if let area = contentRect, area.width >= 50, area.height >= 50, let primary = NSScreen.screens.first {
             // AppKit measures from the bottom-left of the primary display, Gecko from its top-left.
@@ -583,6 +592,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func shutdown() {
+        finishTabs()  // tabs: final session save, clean-exit marker
         gecko.stopAndWait()
     }
 }

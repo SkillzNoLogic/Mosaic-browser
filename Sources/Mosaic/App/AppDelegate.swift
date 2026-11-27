@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var window: NSWindow!
     private var workspaceObserver: NSObjectProtocol?
     private var automation: Automation?
+    /// Tabs area: Tab menu and History items (Features/Tabs/TabsMenuController.swift).
+    private var tabsMenu: TabsMenuController?
 
     /// Builds the model, window and menus. Called before the event loop starts.
     func setUp(chromiumAvailable: Bool) {
@@ -161,7 +163,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let history = NSMenu(title: "History")
         history.addItem(item("Back", #selector(goBack), "["))
         history.addItem(item("Forward", #selector(goForward), "]"))
+        // Tabs area: Reopen Closed Tab (⌘⇧T), Recently Closed, Reopen All Tabs from Last Session.
+        let tabsMenu = TabsMenuController(model: model)
+        self.tabsMenu = tabsMenu
+        tabsMenu.addHistoryItems(to: history)
         main.addItem(submenu: history, title: "History")
+
+        // Tabs area: the Tab menu (search, pin, duplicate, mute, unload, groups, workspaces, ⌘1–9).
+        main.addItem(submenu: tabsMenu.makeTabMenu(), title: "Tab")
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

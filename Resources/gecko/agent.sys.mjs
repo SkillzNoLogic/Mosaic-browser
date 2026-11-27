@@ -331,13 +331,16 @@ export const Agent = {
           }
         }
       } catch (_) {}
+      // Tabs area: a discarded tab (see discardTab) has no linked panel, and reading
+      // canGoBack/canGoForward on its lazy browser would load it again.
+      const discarded = !tab.linkedPanel;
       tabs.push({
         id: idOf(tab),
         url,
         title: tab.label ?? "",
         loading: tab.hasAttribute("busy"),
-        canGoBack: !!browser.canGoBack,
-        canGoForward: !!browser.canGoForward,
+        canGoBack: !discarded && !!browser.canGoBack,
+        canGoForward: !discarded && !!browser.canGoForward,
         selected: tab.selected,
         blocked: blocker.blocked.get(tab) ?? 0,
       });
@@ -654,3 +657,80 @@ export const Agent = {
     });
   },
 };
+
+// ---- Tabs area: sleeping tabs and tab shortcuts -------------------------------
+//
+// Additions owned by Mosaic's tabs area, kept in this section. Platform-neutral.
+
+// Shortcuts pressed while a Gecko page has focus that belong to Mosaic's tab handling:
+// reopen closed tab, tab search, ⌘1–⌘9, next/previous tab. Without these, Gecko would act
+// on its own (hidden) tab strip: reopen one of its closed tabs, open its add-ons page,
+// or switch between Gecko tabs only.
+FORWARDED_WITH_SHIFT.t = "tabs.reopenClosed";
+FORWARDED_WITH_SHIFT.a = "tabs.search";
+FORWARDED_WITH_SHIFT["}"] = "tabs.next";
+FORWARDED_WITH_SHIFT["{"] = "tabs.previous";
+for (let number = 1; number <= 9; number++) {
+  FORWARDED[String(number)] = `tabs.select${number}`;
+}
+
+Object.assign(Agent, {
+  /**
+   * Unloads a background tab to free memory, keeping the tab, its history and scroll
+   * position; Gecko restores it when the tab is selected again. `force` skips the page's
+   * chance to refuse (a beforeunload handler, an open dialog). Gecko never discards its
+   * selected tab, so if this one is selected (Mosaic is showing a Chromium tab), Gecko is
+   * first switched to another loaded tab, or to a hidden blank one. Returns true if the
+   * tab is now discarded.
+   */
+  async discardTab(id, force) {
+    const { win, tab } = requireTab(id);
+    const gBrowser = win.gBrowser;
+    if (!tab.linkedPanel) {
+      return JSON.stringify(true);
+    }
+    if (tab.selected) {
+      const loaded = gBrowser.tabs.filter(other => other !== tab && other.linkedPanel && !other.closing);
+      const parked = loaded.find(other => startupTabs.has(other)) ??
+        loaded.find(other => !startupTabs.has(other));
+      if (parked) {
+        gBrowser.selectedTab = parked;
+      } else {
+        openingOwnTab = true;
+        try {
+          const placeholder = gBrowser.addTab("about:blank", { triggeringPrincipal: SYSTEM_PRINCIPAL });
+          startupTabs.add(placeholder);
+          gBrowser.selectedTab = placeholder;
+        } finally {
+          openingOwnTab = false;
+        }
+      }
+    }
+    // Lets session history catch up, so the restored tab has its latest state.
+    if (typeof gBrowser.prepareDiscardBrowser === "function") {
+      await gBrowser.prepareDiscardBrowser(tab);
+    }
+    // Re-checks everything, including that the tab was not selected meanwhile.
+    return JSON.stringify(!!gBrowser.discardBrowser(tab, !!force));
+  },
+
+  /** Per tab: whether it is playing sound, and whether it is discarded. */
+  tabActivity() {
+    const win = browserWindow();
+    if (!win || !win.gBrowser) {
+      return "[]";
+    }
+    const tabs = [];
+    for (const tab of win.gBrowser.tabs) {
+      if (startupTabs.has(tab) || tab.closing) {
+        continue;
+      }
+      tabs.push({
+        id: idOf(tab),
+        audible: tab.hasAttribute("soundplaying"),
+        discarded: !tab.linkedPanel,
+      });
+    }
+    return JSON.stringify(tabs);
+  },
+});
