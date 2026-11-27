@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mosaic.App/Mosaic.App.csproj" />
+    <Project Path="src/Mosaic.Core/Mosaic.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Mosaic.Core.Tests/Mosaic.Core.Tests.csproj" />
+  </Folder>
+</Solution>
