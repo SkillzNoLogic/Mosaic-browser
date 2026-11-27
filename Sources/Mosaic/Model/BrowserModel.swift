@@ -39,6 +39,7 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    lazy var downloads = DownloadManager(model: self) // downloads area; created at the end of init
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -87,6 +88,7 @@ final class BrowserModel: ObservableObject {
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
+        _ = downloads // downloads area: starts receiving both engines' downloads
 
         newTab()
     }

@@ -272,6 +272,216 @@ function extensionPage(id, kind) {
   return /^[a-z-]+:/.test(path) ? path : policy.getURL(path.replace(/^\//, ""));
 }
 
+// ---- Downloads (downloads area) ---------------------------------------------
+//
+// Mosaic lists and controls Gecko's downloads in its own UI. The agent watches Gecko's
+// download list (Downloads.ALL) and Mosaic polls `downloadsState(version)`, which answers
+// with a one-line "unchanged" unless a download changed since that version. Nothing here
+// runs until Mosaic calls `configureDownloads`, so existing behaviour is untouched.
+
+const downloadsLazy = {};
+ChromeUtils.defineESModuleGetters(downloadsLazy, {
+  Downloads: "resource://gre/modules/Downloads.sys.mjs",
+});
+
+const downloads = {
+  /** The DownloadList being watched, once `watchDownloads` has finished. */
+  list: null,
+  listPromise: null,
+  /** Stable numeric IDs; Mosaic refers to downloads by these. */
+  ids: new WeakMap(),
+  byId: new Map(),
+  nextId: 1,
+  /** Bumped whenever anything Mosaic shows about a download changes. */
+  version: 0,
+  /** Downloads Mosaic paused (Gecko pauses by cancelling and keeping partial data). */
+  paused: new WeakSet(),
+  /** Downloads already in Gecko's list when the agent started watching. */
+  restored: new WeakSet(),
+  /** Requests from inside Gecko for Mosaic: a shortcut pressed, a context-menu item chosen. */
+  commands: [],
+  /** Whether the context menu offers "Download Linked File with Free Download Manager". */
+  fdmMenu: false,
+  hookedWindows: new WeakSet(),
+};
+
+function trackDownload(download, restored) {
+  if (!downloads.ids.has(download)) {
+    const id = downloads.nextId++;
+    downloads.ids.set(download, id);
+    downloads.byId.set(id, download);
+    if (restored) {
+      downloads.restored.add(download);
+    }
+  }
+  downloads.version++;
+}
+
+function untrackDownload(download) {
+  const id = downloads.ids.get(download);
+  if (id !== undefined) {
+    downloads.byId.delete(id);
+  }
+  downloads.paused.delete(download);
+  downloads.version++;
+}
+
+async function watchDownloads() {
+  if (!downloads.listPromise) {
+    downloads.listPromise = (async () => {
+      const list = await downloadsLazy.Downloads.getList(downloadsLazy.Downloads.ALL);
+      let initial = true;
+      // addView reports the downloads already in the list synchronously.
+      list.addView({
+        onDownloadAdded: download => trackDownload(download, initial),
+        onDownloadChanged: download => trackDownload(download, false),
+        onDownloadRemoved: download => untrackDownload(download),
+      });
+      initial = false;
+      downloads.list = list;
+    })();
+  }
+  await downloads.listPromise;
+}
+
+function describeDownloadError(error) {
+  if (!error) {
+    return "";
+  }
+  if (error.becauseBlockedByReputationCheck) {
+    return "Gecko blocked this file as potentially harmful";
+  }
+  if (error.becauseBlockedByParentalControls) {
+    return "Blocked by parental controls";
+  }
+  if (error.becauseBlocked) {
+    return "Gecko blocked this download";
+  }
+  if (error.becauseTargetFailed) {
+    return "Could not write the file";
+  }
+  if (error.becauseSourceFailed) {
+    return "Network error";
+  }
+  return String(error.message || "Download failed");
+}
+
+function describeDownload(download) {
+  let state;
+  if (!download.stopped) {
+    state = "inProgress";
+  } else if (download.succeeded) {
+    state = "completed";
+  } else if (download.error) {
+    state = "failed";
+  } else if (downloads.paused.has(download)) {
+    state = "paused";
+  } else if (download.canceled) {
+    // Gecko's own pause: cancelled with the partial data kept.
+    state = download.hasPartialData ? "paused" : "cancelled";
+  } else {
+    state = "inProgress"; // created, not started yet
+  }
+  let referrer = "";
+  try {
+    referrer = download.source.referrerInfo?.originalReferrer?.spec ?? "";
+  } catch (_) {}
+  return {
+    id: downloads.ids.get(download),
+    url: download.source.url,
+    referrer,
+    path: download.target.path ?? "",
+    contentType: download.contentType ?? "",
+    totalBytes: download.hasProgress ? download.totalBytes : -1,
+    currentBytes: download.currentBytes,
+    speed: Math.round(download.speed || 0),
+    state,
+    error: describeDownloadError(download.error),
+    hasPartialData: !!download.hasPartialData,
+    restored: downloads.restored.has(download),
+    private: !!download.source.isPrivate,
+    startTime: download.startTime ? download.startTime.getTime() : 0,
+  };
+}
+
+/** Shortcuts for Mosaic's downloads page: ⌥⌘L / Ctrl+J, and Gecko's own ⌘⇧Y / Ctrl+Shift+Y. */
+function onDownloadsKeyDown(event) {
+  const code = event.code;
+  const mosaicShortcut = IS_MAC
+    ? event.metaKey && event.altKey && !event.ctrlKey && !event.shiftKey && code === "KeyL"
+    : event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && code === "KeyJ";
+  // Gecko would open its own Library window, outside Mosaic.
+  const libraryShortcut = (IS_MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) &&
+    event.shiftKey && !event.altKey && code === "KeyY";
+  if (!mosaicShortcut && !libraryShortcut) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  downloads.commands.push({ type: "showDownloads" });
+}
+
+function hookDownloadsWindow(win) {
+  if (!win || !win.document || downloads.hookedWindows.has(win)) {
+    return;
+  }
+  downloads.hookedWindows.add(win);
+  win.addEventListener("keydown", onDownloadsKeyDown, true);
+
+  const menu = win.document.getElementById("contentAreaContextMenu");
+  if (!menu) {
+    return;
+  }
+  const item = win.document.createXULElement("menuitem");
+  item.id = "mosaic-download-with-fdm";
+  item.setAttribute("label", "Download Linked File with Free Download Manager");
+  item.hidden = true;
+  const anchor = win.document.getElementById("context-savelink");
+  if (anchor) {
+    anchor.after(item);
+  } else {
+    menu.appendChild(item);
+  }
+  menu.addEventListener("popupshowing", event => {
+    if (event.target !== menu) {
+      return;
+    }
+    const context = win.gContextMenu;
+    item.hidden = !(downloads.fdmMenu && context?.onLink && /^(https?|ftp):/i.test(context.linkURL ?? ""));
+  });
+  item.addEventListener("command", () => {
+    const context = win.gContextMenu;
+    if (!context?.linkURL) {
+      return;
+    }
+    let page = "";
+    try {
+      page = context.browser?.currentURI?.spec ?? "";
+    } catch (_) {}
+    downloads.commands.push({ type: "sendLinkToFDM", url: context.linkURL, referrer: page });
+  });
+}
+
+/** The Cookie header Gecko would send to `url` (first-party, unpartitioned cookies). */
+function cookieHeaderFor(url) {
+  const uri = Services.io.newURI(url);
+  const host = uri.host;
+  const path = uri.filePath || "/";
+  const secure = uri.schemeIs("https");
+  const pairs = [];
+  for (const cookie of Services.cookies.getCookiesFromHost(host, {})) {
+    const domain = cookie.host;
+    const domainMatches = domain.startsWith(".")
+      ? host === domain.slice(1) || host.endsWith(domain)
+      : host === domain;
+    if (!domainMatches || (cookie.isSecure && !secure) || !path.startsWith(cookie.path || "/")) {
+      continue;
+    }
+    pairs.push(`${cookie.name}=${cookie.value}`);
+  }
+  return pairs.join("; ");
+}
+
 export const Agent = {
   /**
    * Installs Mosaic's hooks in the browser window. Returns "false" until
@@ -579,6 +789,118 @@ export const Agent = {
       return "null";
     }
     return this.openTab(url, true);
+  },
+
+  // ---- Downloads (downloads area) -------------------------------------------
+
+  /**
+   * Starts watching Gecko's downloads for Mosaic and sets how Gecko saves them:
+   *   directory  folder new downloads are saved in, without asking
+   *   fdmMenu    whether link context menus offer Free Download Manager
+   * Safe to call again (on every Gecko start, or when the options change).
+   */
+  async configureDownloads(options) {
+    const { directory, fdmMenu } = options ?? {};
+    if (directory) {
+      Services.prefs.setIntPref("browser.download.folderList", 2);
+      Services.prefs.setStringPref("browser.download.dir", directory);
+    }
+    // Mosaic asks where to save (when the user wants that) in its own UI, and shows
+    // downloads in its own list, so Gecko's dialogs and panel stay out of the way.
+    Services.prefs.setBoolPref("browser.download.useDownloadDir", true);
+    Services.prefs.setBoolPref("browser.download.always_ask_before_handling_new_types", false);
+    Services.prefs.setBoolPref("browser.download.alwaysOpenPanel", false);
+    Services.prefs.setBoolPref("browser.download.panel.shown", true);
+    Services.prefs.setBoolPref("browser.download.start_downloads_in_tmp_dir", false);
+    // Download checks stay on this computer: nothing about the file is sent to a
+    // reputation service.
+    Services.prefs.setBoolPref("browser.safebrowsing.downloads.remote.enabled", false);
+    downloads.fdmMenu = !!fdmMenu;
+    await watchDownloads();
+    hookDownloadsWindow(browserWindow());
+    return JSON.stringify({ watching: true, count: downloads.byId.size });
+  },
+
+  /**
+   * Every download, plus requests queued for Mosaic, unless nothing changed since
+   * `sinceVersion`: then just `{version, unchanged: true}`.
+   */
+  downloadsState(sinceVersion) {
+    if (sinceVersion === downloads.version && downloads.commands.length === 0) {
+      return JSON.stringify({ version: downloads.version, unchanged: true });
+    }
+    return JSON.stringify({
+      version: downloads.version,
+      watching: downloads.list !== null,
+      downloads: [...downloads.byId.values()].map(describeDownload),
+      commands: downloads.commands.splice(0),
+    });
+  },
+
+  /** pause | resume | retry | cancel (keeps it listed, can be retried) | remove (from the list; the file stays). */
+  async downloadAction(id, action) {
+    const download = downloads.byId.get(id);
+    if (!download) {
+      throw new Error(`no download ${id}`);
+    }
+    switch (action) {
+      case "pause":
+        downloads.paused.add(download);
+        download.tryToKeepPartialData = true;
+        await download.cancel();
+        break;
+      case "resume":
+      case "retry":
+        downloads.paused.delete(download);
+        download.start().catch(() => {});
+        break;
+      case "cancel":
+        downloads.paused.delete(download);
+        await download.cancel();
+        await download.removePartialData();
+        break;
+      case "remove":
+        downloads.paused.delete(download);
+        if (!download.stopped || download.hasPartialData) {
+          await download.finalize(true);
+        }
+        await downloads.list?.remove(download);
+        untrackDownload(download);
+        break;
+      default:
+        throw new Error(`unknown download action ${action}`);
+    }
+    downloads.version++;
+    return "true";
+  },
+
+  /** Downloads `url` to `targetPath` (a full path). Returns the new download's ID. */
+  async startDownload(url, targetPath) {
+    await watchDownloads();
+    const download = await downloadsLazy.Downloads.createDownload({
+      source: { url },
+      target: { path: targetPath, partFilePath: `${targetPath}.part` },
+    });
+    download.tryToKeepPartialData = true;
+    await downloads.list.add(download);
+    download.start().catch(() => {});
+    return JSON.stringify(downloads.ids.get(download) ?? null);
+  },
+
+  /**
+   * What another download program needs to fetch `url` the way Gecko would: the
+   * User-Agent, and (only when `includeCookies`) the Cookie header.
+   */
+  downloadRequestInfo(url, includeCookies) {
+    const userAgent = Cc["@mozilla.org/network/protocol;1?name=http"]
+      .getService(Ci.nsIHttpProtocolHandler).userAgent;
+    let cookies = "";
+    if (includeCookies) {
+      try {
+        cookies = cookieHeaderFor(url);
+      } catch (_) {}
+    }
+    return JSON.stringify({ userAgent, cookies });
   },
 
   /** Sizes of the window's top-level boxes; for diagnosing leftover chrome. */

@@ -14,6 +14,9 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
+// downloads area: download handler and link context-menu items (CEFDownloads.mm).
+#include "CEFDownloadsInternal.h"
+
 #if !__has_feature(objc_arc)
 #error "CEFBridge must be compiled with ARC"
 #endif
@@ -118,6 +121,12 @@ class MosaicClient : public CefClient,
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  // downloads area (CEFDownloads.mm). A context-menu handler of this client's own should
+  // call MosaicDownloadsBeforeContextMenu / MosaicDownloadsContextMenuCommand instead.
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return MosaicDownloadHandler(); }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+    return MosaicDownloadsContextMenuHandler();
+  }
 
   // CefDisplayHandler
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
@@ -306,6 +315,11 @@ class MosaicClient : public CefClient,
 };
 
 }  // namespace
+
+// downloads area: lets CEFDownloads.mm start a download no page asked for (retry).
+CefRefPtr<CefBrowser> MosaicAnyLiveBrowser() {
+  return (g_browsers.empty() || g_quitting) ? nullptr : g_browsers.front();
+}
 
 // MARK: - MosaicApplication
 

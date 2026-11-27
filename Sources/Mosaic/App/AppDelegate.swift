@@ -169,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         windowMenu.addItem(.separator())
         windowMenu.addItem(item("Show Next Tab", #selector(nextTab), "}", [.command]))
         windowMenu.addItem(item("Show Previous Tab", #selector(previousTab), "{", [.command]))
+        windowMenu.addItem(.separator()) // downloads area
+        windowMenu.addItem(item("Downloads", #selector(showDownloads), "l", [.command, .option]))
         main.addItem(submenu: windowMenu, title: "Window")
         NSApp.windowsMenu = windowMenu
 
@@ -205,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func showExtensions() { model.showExtensions = true }
     @objc private func nextTab() { model.selectAdjacentTab(offset: 1) }
     @objc private func previousTab() { model.selectAdjacentTab(offset: -1) }
+    @objc private func showDownloads() { model.downloads.openDownloadsPage() } // downloads area
 
     @objc private func showAbout() {
         var engines = "Chromium \(MosaicCEF.chromiumVersion)" + (model.chromiumAvailable ? "" : " (not bundled)")

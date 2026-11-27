@@ -3,6 +3,9 @@
 
 #import <AppKit/AppKit.h>
 
+// downloads area: Chromium downloads API.
+#import "CEFDownloads.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 /// The application class Mosaic must run as. Chromium needs to know when the

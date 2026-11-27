@@ -87,6 +87,9 @@ final class Automation {
         case "hitTest": hitTest(to: value)
         case "dump": dump(to: value)
         case "quit": NSApp.terminate(nil)
+        // downloads area: "download…" commands, listed in DownloadManager+Automation.swift.
+        case _ where action.hasPrefix("download"):
+            model.downloads.handleAutomation(action, value: value, command: command)
         default: break
         }
     }
@@ -152,6 +155,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "downloads": model.downloads.automationState(), // downloads area
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
