@@ -81,6 +81,18 @@ jobs:
       - name: Unit tests
         run: dotnet test windows/tests/Mosaic.Core.Tests --configuration Release --no-build
 
+      - name: Gecko process diagnostics
+        # What Firefox's processes do when started the engine's way; read this first when the
+        # Gecko integration tests fail on Windows.
+        if: always() && env.MOSAIC_GECKO_EXE != ''
+        continue-on-error: true
+        run: |
+          Write-Host '--- headless (as the integration tests run it) ---'
+          .\windows\scripts\diagnose-gecko.ps1 -Headless -Seconds 20
+          Write-Host ''
+          Write-Host '--- with a window (as Mosaic runs it) ---'
+          .\windows\scripts\diagnose-gecko.ps1 -Seconds 20
+
       - name: Publish win-x64
         run: .\windows\scripts\build.ps1 -Runtime win-x64 -Zip -SkipTests
 
