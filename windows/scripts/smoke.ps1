@@ -264,6 +264,67 @@ function Save-Screenshot {
     }
 }
 
+function Save-WindowTree {
+    # Every native window inside Mosaic's main window, with its class, owning process and
+    # place. The embedded Gecko window and WebView2 are native windows that WPF knows nothing
+    # about, so this is the way to see what is really drawn where, and by which process.
+    param([Parameter(Mandatory = $true)] [string] $Name)
+    try {
+        if (-not ('MosaicSmoke.WindowTree' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace MosaicSmoke {
+    public static class WindowTree {
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+        delegate bool EnumProc(IntPtr window, IntPtr data);
+        [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr data);
+        [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr window);
+        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out RECT rect);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder name, int size);
+
+        public static List<string> Describe(IntPtr root) {
+            var lines = new List<string>();
+            RECT origin;
+            GetWindowRect(root, out origin);
+            lines.Add(string.Format("root 0x{0:X} at {1},{2} size {3}x{4}", root.ToInt64(), origin.Left, origin.Top,
+                origin.Right - origin.Left, origin.Bottom - origin.Top));
+            EnumChildWindows(root, (window, data) => {
+                var name = new StringBuilder(256);
+                GetClassNameW(window, name, name.Capacity);
+                uint processId;
+                GetWindowThreadProcessId(window, out processId);
+                RECT rect;
+                GetWindowRect(window, out rect);
+                lines.Add(string.Format("0x{0:X} parent 0x{1:X} pid {2} {3} {4} at {5},{6} size {7}x{8}",
+                    window.ToInt64(), GetParent(window).ToInt64(), processId, IsWindowVisible(window) ? "visible" : "hidden",
+                    name, rect.Left - origin.Left, rect.Top - origin.Top, rect.Right - rect.Left, rect.Bottom - rect.Top));
+                return true;
+            }, IntPtr.Zero);
+            return lines;
+        }
+    }
+}
+'@
+        }
+        $process = Get-Process -Id $script:App.Id
+        $process.Refresh()
+        $lines = [MosaicSmoke.WindowTree]::Describe($process.MainWindowHandle)
+        $path = Join-Path $OutputDirectory "windows-$Name.txt"
+        Write-TextFile -Path $path -Text (($lines -join "`r`n") + "`r`n")
+        Write-Host "    window tree: $path"
+        foreach ($line in $lines) { Write-Host "      $line" }
+    }
+    catch {
+        Write-Host "    window tree '$Name' FAILED: $($_.Exception.Message)"
+    }
+}
+
 function Get-ProcessSnapshot {
     # Every process that belongs to this run: Mosaic's process tree, Gecko's process tree
     # (Firefox's launcher process may have exited, which cuts the browser off from Mosaic's
@@ -429,6 +490,7 @@ try {
     }
     Write-Host "    loaded; Gecko process $(Get-MosaicProperty $state 'geckoProcessId'), window attached"
     Save-Screenshot '1-gecko'
+    Save-WindowTree '1-gecko'
 
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {
@@ -443,6 +505,7 @@ try {
     }
     Write-Host '    loaded'
     Save-Screenshot '2-chromium'
+    Save-WindowTree '2-chromium'
 
     Write-Host "==> 3. Search engine: switch to $SearchEngineId and search"
     Invoke-Mosaic -Do 'searchEngine' -Value $SearchEngineId | Out-Null
