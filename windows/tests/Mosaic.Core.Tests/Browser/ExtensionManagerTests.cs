@@ -234,6 +234,23 @@ public class ExtensionManagerTests
     // ---- Removing, enabling ----
 
     [Fact]
+    public void ReinstallUnloadsTheOldCopyBeforeReplacingItsFiles() => TestLoop.Run(async () =>
+    {
+        // On Windows an engine holding the old files open would make the store's swap fail.
+        using var fixture = WithGeckoRunning(f => f.Library.Add(Id, "Dark Reader"));
+        var manager = fixture.Extensions;
+        Assert.True(manager.IsLoaded(manager.Extensions[0]));
+        fixture.Http.Respond = _ => Task.FromResult(StubHttpHandler.Package("Dark Reader|5.0"));
+
+        Assert.True(await manager.InstallFromWebStoreAsync(Id));
+
+        var methods = fixture.Gecko.Calls.Select(call => call.Method)
+            .Where(method => method is "uninstallExtension" or "installExtension").ToList();
+        Assert.Equal(["uninstallExtension", "installExtension"], methods.TakeLast(2));
+        Assert.True(manager.IsLoaded(Assert.Single(manager.Extensions)));
+    });
+
+    [Fact]
     public void RemoveUnloadsFromGeckoAndForgetsTheExtension() => TestLoop.Run(async () =>
     {
         using var fixture = WithGeckoRunning(f => f.Library.Add("aaaa", "Alpha"));

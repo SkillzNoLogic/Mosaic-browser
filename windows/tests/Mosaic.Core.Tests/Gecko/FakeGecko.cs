@@ -168,6 +168,11 @@ internal sealed class FakeGecko : IDisposable
                     case "throw":
                         Throw(result, "Error: boom");
                         break;
+                    case "reject":
+                        // What Gecko sends when an awaited promise rejects: a flag and nothing else.
+                        result["hasException"] = false;
+                        result["topLevelAwaitRejected"] = true;
+                        break;
                     case "noise":
                         // Unrelated events from the same actor must be ignored.
                         await SendAsync(new JsonObject

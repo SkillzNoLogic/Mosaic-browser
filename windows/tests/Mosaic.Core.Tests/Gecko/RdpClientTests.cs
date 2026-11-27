@@ -90,6 +90,10 @@ public class RdpClientTests
         Assert.Contains("boom", error.Message);
         // The connection stays usable after a script error.
         Assert.Equal("hello", (await client.EvaluateAsync("str"))!.GetValue<string>());
+
+        // A rejected awaited promise is an error too, not an empty result.
+        await ThrowsAsync(RdpErrorKind.Remote, () => client.EvaluateAsync("reject"));
+        Assert.Equal("hello", (await client.EvaluateAsync("str"))!.GetValue<string>());
     }
 
     [Theory, MemberData(nameof(Transports))]

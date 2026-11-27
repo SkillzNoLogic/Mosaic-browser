@@ -15,6 +15,29 @@ public class GeckoEngineTests
     // ---- Helpers --------------------------------------------------------------------------
 
     [Fact]
+    public void AgentScriptsWrapTheCallInAnEnvelope()
+    {
+        var script = GeckoEngine.AgentScript("openTab", "about:blank", true);
+        Assert.Contains($"await {GeckoEngine.AgentCall("openTab", "about:blank", true)}", script);
+        Assert.Contains("ok: false", script);
+    }
+
+    [Fact]
+    public void AgentResultsAreUnwrappedAndFailuresCarryTheAgentsMessage()
+    {
+        Assert.Equal(7, GeckoEngine.UnwrapAgentResult(JsonValue.Create("""{"ok":true,"value":"7"}"""))!.GetValue<int>());
+        Assert.Null(GeckoEngine.UnwrapAgentResult(JsonValue.Create("""{"ok":true,"value":"null"}""")));
+        Assert.Null(GeckoEngine.UnwrapAgentResult(JsonValue.Create("""{"ok":true}""")));
+        Assert.Null(GeckoEngine.UnwrapAgentResult(JsonValue.Create("not an envelope")));
+        Assert.Null(GeckoEngine.UnwrapAgentResult(null));
+
+        var failure = Assert.Throws<RdpException>(() =>
+            GeckoEngine.UnwrapAgentResult(JsonValue.Create("""{"ok":false,"error":"no tab 9"}""")));
+        Assert.Equal(RdpErrorKind.Remote, failure.Kind);
+        Assert.Equal("no tab 9", failure.Message);
+    }
+
+    [Fact]
     public void AgentCallsEncodeArgumentsAsJavaScriptLiterals()
     {
         const string agent = """ChromeUtils.importESModule("resource://mosaic/agent.sys.mjs").Agent""";

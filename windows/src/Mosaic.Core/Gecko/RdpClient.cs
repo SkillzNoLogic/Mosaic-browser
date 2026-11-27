@@ -167,6 +167,11 @@ public sealed class RdpClient : IDisposable
         if (packet["hasException"] is JsonValue thrown && thrown.TryGetValue(out bool hasException) && hasException)
             throw RdpException.Remote(Describe(packet["exceptionMessage"]) ?? "script threw an exception");
 
+        // An awaited promise that rejects is not reported as an exception: the reply carries only
+        // this flag, with no message and no value. Without this check it would read as "undefined".
+        if (packet["topLevelAwaitRejected"] is JsonValue rejected && rejected.TryGetValue(out bool wasRejected) && wasRejected)
+            throw RdpException.Remote("an awaited promise was rejected");
+
         var result = packet["result"];
         packet.Remove("result"); // hand the value over without its parent packet attached
         return await UnwrapAsync(result).ConfigureAwait(false);

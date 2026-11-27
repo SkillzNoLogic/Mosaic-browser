@@ -807,7 +807,7 @@ public sealed class GeckoEngine : IGeckoEngine
 
     public async Task<JsonNode?> CallAsync(string method, params object?[] arguments)
     {
-        var script = AgentCall(method, arguments);
+        var script = AgentScript(method, arguments);
         RdpClient client;
         lock (_gate)
         {
@@ -815,7 +815,7 @@ public sealed class GeckoEngine : IGeckoEngine
                 throw new InvalidOperationException("Gecko is not running.");
             client = current;
         }
-        return DecodeResult(await client.EvaluateAsync(script).ConfigureAwait(false));
+        return UnwrapAgentResult(await client.EvaluateAsync(script).ConfigureAwait(false));
     }
 
     public void Send(string method, params object?[] arguments) =>
@@ -881,6 +881,40 @@ public sealed class GeckoEngine : IGeckoEngine
           return {{AgentExpression}}.version();
         })()
         """;
+
+    /// <summary>
+    /// <see cref="AgentCall"/> wrapped so that whatever happens comes back as one JSON string:
+    /// <c>{"ok":true,"value":&lt;the method's JSON&gt;}</c> or <c>{"ok":false,"error":"…"}</c>.
+    /// The debugging protocol reports a rejected promise with no reason at all, so without the
+    /// wrapper a failing async method (installExtension, for one) would lose its error message.
+    /// </summary>
+    internal static string AgentScript(string method, params object?[] arguments) => $$"""
+        (async () => {
+          try {
+            return JSON.stringify({ ok: true, value: await {{AgentCall(method, arguments)}} });
+          } catch (error) {
+            return JSON.stringify({ ok: false, error: String(error?.message ?? error) });
+          }
+        })()
+        """;
+
+    /// <summary>
+    /// Unwraps <see cref="AgentScript"/>'s envelope into the method's decoded result. A reply that
+    /// is not an envelope decodes to null, like any other unreadable result.
+    /// </summary>
+    /// <exception cref="RdpException">The agent method failed; the message is the agent's.</exception>
+    internal static JsonNode? UnwrapAgentResult(JsonNode? result)
+    {
+        if (DecodeResult(result) is not JsonObject envelope ||
+            envelope["ok"] is not JsonValue okValue || !okValue.TryGetValue(out bool ok))
+            return null;
+        if (!ok)
+        {
+            var message = envelope["error"] is JsonValue error && error.TryGetValue(out string? text) ? text : null;
+            throw new RdpException(RdpErrorKind.Remote, message ?? "the Gecko agent reported an error");
+        }
+        return envelope["value"] is JsonValue value ? DecodeResult(value) : null;
+    }
 
     internal static string AgentCall(string method, params object?[] arguments)
     {

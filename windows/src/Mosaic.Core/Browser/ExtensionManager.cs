@@ -167,6 +167,16 @@ public sealed class ExtensionManager : ObservableObject
         try
         {
             var (package, knownId) = await fetch();
+
+            // Replacing an installed extension: both engines may hold its files open, and on
+            // Windows an open file makes the store's folder swap fail ("in use"). Let go first.
+            var incomingId = knownId ?? PackageId(package);
+            if (extensions.FirstOrDefault(extension => extension.Id == incomingId) is { } existing)
+            {
+                await UnloadFromGeckoAsync(existing);
+                await UnloadFromChromiumAsync(existing);
+            }
+
             // Unpacking and scanning touch a lot of files; keep that off the UI thread.
             var record = await Task.Run(() => library.Install(package, knownId));
             Extensions = library.Extensions;
@@ -287,6 +297,20 @@ public sealed class ExtensionManager : ObservableObject
             ErrorMessage = $"{extension.Name} could not be loaded into Gecko: {error.Message}";
         }
         SyncItems();
+    }
+
+    /// <summary>The extension ID a package carries, or null (a bare ZIP, or not a package at all;
+    /// <see cref="IExtensionLibrary.Install"/> then reports the problem).</summary>
+    private static string? PackageId(byte[] package)
+    {
+        try
+        {
+            return CrxArchive.Parse(package).ExtensionId;
+        }
+        catch (CrxParseException)
+        {
+            return null;
+        }
     }
 
     private async Task UnloadFromGeckoAsync(InstalledExtension extension)
