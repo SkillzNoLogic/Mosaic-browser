@@ -49,6 +49,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var workspaceID: UUID?
     @Published var groupID: UUID?
 
+    // Reader view (productivity area; set by ReaderMode, read by the shell's indicator).
+    /// The page looks like an article that reader view can show.
+    @Published var isReaderAvailable = false
+    /// The tab is showing its page in reader view.
+    @Published var isReaderActive = false
+
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
     /// Gecko: the agent's ID for this tab, once Gecko has created it.

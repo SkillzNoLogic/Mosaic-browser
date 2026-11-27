@@ -87,6 +87,8 @@ final class Automation {
         case "hitTest": hitTest(to: value)
         case "dump": dump(to: value)
         case "quit": NSApp.terminate(nil)
+        // productivity: palette, reader, shortcuts, Speed Dial (Productivity+Automation.swift).
+        case _ where model.productivity.handleAutomation(action, value: value, command: command): break
         default: break
         }
     }
@@ -152,6 +154,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "productivity": model.productivity.automationState,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)

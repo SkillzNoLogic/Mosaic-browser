@@ -596,10 +596,16 @@ class MosaicClient : public CefClient,
   }
   _closed = YES;
   self.delegate = nil;
+  [self releasePageScripts];  // productivity: page-script channel (MCEFBrowserView+Script.mm)
   if (_browser) {
     _browser->GetHost()->CloseBrowser(true);
   }
   [self removeFromSuperview];
+}
+
+// productivity: the browser for page scripts (MCEFBrowserView+Script.mm, reader mode).
+- (void*)mosaicBrowserHandle {
+  return _browser.get();
 }
 
 @end

@@ -39,6 +39,7 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    lazy var productivity = Productivity(model: self)  // palette, reader, shortcuts, Speed Dial
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -476,6 +477,8 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        // productivity: customised shortcuts pressed in a Gecko page.
+        case let type where type.hasPrefix("productivity."): productivity.handleGeckoEvent(type)
         default: break
         }
     }

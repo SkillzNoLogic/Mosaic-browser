@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func setUp(chromiumAvailable: Bool) {
         model = BrowserModel(chromiumAvailable: chromiumAvailable)
         NSApp.mainMenu = makeMainMenu()
+        model.productivity.start()  // productivity: applies customised shortcuts, watches tabs
         window = makeWindow()
         // No explicit activation: Launch Services decides whether Mosaic comes
         // to the front (it does for a normal launch, not for `open -g`).
@@ -110,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// Last chance to clean up; runs once however the app is quit.
     func prepareToQuit() {
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver) }
+        model?.productivity.reader.prepareToQuit()  // productivity: releases page-script channels
         model?.shutdown()
     }
 
@@ -155,6 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.addItem(item("Next Search Engine", #selector(cycleSearchEngine), "s", [.command, .shift]))
         view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift]))
         view.addItem(.separator())
+        view.addItem(item("Reader View", #selector(toggleReader), "r", [.command, .shift]))  // productivity
+        view.addItem(.separator())
         view.addItem(item("Extensions…", #selector(showExtensions), "x", [.command, .shift]))
         main.addItem(submenu: view, title: "View")
 
@@ -162,6 +166,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         history.addItem(item("Back", #selector(goBack), "["))
         history.addItem(item("Forward", #selector(goForward), "]"))
         main.addItem(submenu: history, title: "History")
+
+        // productivity
+        let tools = NSMenu(title: "Tools")
+        tools.addItem(item("Command Palette…", #selector(showCommandPalette), "k"))
+        main.addItem(submenu: tools, title: "Tools")
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -194,12 +203,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func toggleEngine() { model.toggleEngine() }
     @objc private func cycleSearchEngine() { model.cycleSearchEngine() }
     @objc private func toggleBlocker() { model.toggleBlocker() }
+    @objc private func toggleReader() { model.toggleReaderMode() }  // productivity
+    @objc private func showCommandPalette() { model.showCommandPalette() }  // productivity
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleBlocker) {
             menuItem.state = model.blocker.isEnabled ? .on : .off
             return model.blocker.status != .unavailable
         }
+        if menuItem.action == #selector(toggleReader) { return model.productivity.reader.validate(menuItem) }
         return true
     }
     @objc private func showExtensions() { model.showExtensions = true }
