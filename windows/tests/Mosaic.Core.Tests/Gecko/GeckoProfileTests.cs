@@ -101,4 +101,30 @@ public class GeckoProfileTests
         }
         Assert.False(GeckoProfile.IsLocked(profile.Path));
     }
+
+    [Fact]
+    public async Task StoppingWaitsForTheProfileLockToBeReleased()
+    {
+        // A browser process ended by the operating system lets go of its lock a moment after
+        // the launcher is gone; the shutdown waits for that rather than reporting Gecko gone.
+        using var profile = new TemporaryDirectory();
+        var held = new FileStream(profile.File("parent.lock"), FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        var release = Task.Run(async () =>
+        {
+            await Task.Delay(400);
+            await held.DisposeAsync();
+        });
+
+        Assert.True(await GeckoEngine.WaitForProfileReleaseAsync(profile.Path, TimeSpan.FromSeconds(5)));
+        Assert.True(release.IsCompleted);
+        Assert.False(GeckoProfile.IsLocked(profile.Path));
+    }
+
+    [Fact]
+    public async Task WaitingForAProfileThatStaysLockedGivesUp()
+    {
+        using var profile = new TemporaryDirectory();
+        using var held = new FileStream(profile.File("parent.lock"), FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        Assert.False(await GeckoEngine.WaitForProfileReleaseAsync(profile.Path, TimeSpan.FromMilliseconds(300)));
+    }
 }

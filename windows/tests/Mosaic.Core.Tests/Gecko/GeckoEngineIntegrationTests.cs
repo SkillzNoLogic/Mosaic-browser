@@ -179,7 +179,14 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
         Assert.True((await engine.CallAsync("setup"))!.GetValue<bool>());
         var layout = (await engine.CallAsync("rect"))!;
         Assert.Equal("true", layout["hidechrome"]!.GetValue<string>());
-        Assert.Equal(layout["height"]!.GetValue<int>(), layout["innerHeight"]!.GetValue<int>());
+        var outerHeight = layout["height"]!.GetValue<int>();
+        var pageHeight = layout["innerHeight"]!.GetValue<int>();
+        if (outerHeight != pageHeight)
+        {
+            // Whatever takes up the difference is Gecko UI the profile failed to hide; name it.
+            var boxes = (await engine.CallAsync("debugLayout"))?.ToJsonString();
+            Assert.Fail($"The page is {pageHeight}px tall in a {outerHeight}px window, so some Gecko UI is still showing. Layout: {boxes}");
+        }
 
         // Gecko's own startup tab is not reported.
         Assert.Empty((await watcher.UntilAsync(_ => true, "anything")).Tabs);

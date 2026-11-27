@@ -570,6 +570,21 @@ public sealed class GeckoEngine : IGeckoEngine
     }
 
     /// <summary>Opens the process the agent just reported itself to be; null if it has gone since.</summary>
+    /// <summary>
+    /// Waits, at most <paramref name="timeout"/>, until no process holds the profile's lock.
+    /// Returns whether it was released. Immediate where the lock cannot be observed (macOS).
+    /// </summary>
+    internal static async Task<bool> WaitForProfileReleaseAsync(string profile, TimeSpan timeout)
+    {
+        var clock = Stopwatch.StartNew();
+        while (GeckoProfile.IsLocked(profile))
+        {
+            if (clock.Elapsed >= timeout) return false;
+            await Task.Delay(RetryInterval).ConfigureAwait(false);
+        }
+        return true;
+    }
+
     private static Process? OpenProcess(int processId)
     {
         try
@@ -778,6 +793,14 @@ public sealed class GeckoEngine : IGeckoEngine
                 foreach (var process in processes) EngineRecord.Kill(process);
                 await EngineRecord.WaitForExitAsync(processes, KillSettle).ConfigureAwait(false);
             }
+
+            // On Windows the launched process is usually Firefox's launcher. When it goes, the
+            // operating system ends the browser process it started (the launcher keeps it in a
+            // kill-on-close job), but a moment later, and that browser is not among `processes`
+            // if the launch was stopped before the agent reported it. Its profile lock being
+            // released is the sign that it has gone too; without this wait, a start that
+            // immediately follows a stop finds the profile still in use.
+            if (profile is not null) await WaitForProfileReleaseAsync(profile, KillSettle).ConfigureAwait(false);
 
             if (profile is not null && processes.All(EngineRecord.HasExited)) EngineRecord.Delete(profile, session.Token);
             foreach (var process in processes) process.Dispose();
