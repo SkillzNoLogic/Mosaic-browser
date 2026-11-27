@@ -14,6 +14,8 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
+#include "CEFPrivacyInternal.h"  // privacy area
+
 #if !__has_feature(objc_arc)
 #error "CEFBridge must be compiled with ARC"
 #endif
@@ -166,6 +168,7 @@ class MosaicClient : public CefClient,
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
     g_browsers.push_back(browser);
+    mosaic_privacy::BrowserCreated(browser);  // privacy area
     MCEFBrowserView* view = view_;
     if (view && !g_quitting) {
       [view mosaicBrowserCreated:browser];
@@ -189,6 +192,7 @@ class MosaicClient : public CefClient,
 
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
+    mosaic_privacy::BrowserClosing(browser);  // privacy area
     for (auto it = g_browsers.begin(); it != g_browsers.end(); ++it) {
       if ((*it)->IsSame(browser)) {
         g_browsers.erase(it);
@@ -221,6 +225,10 @@ class MosaicClient : public CefClient,
                    const CefString& errorText,
                    const CefString& failedUrl) override {
     CEF_REQUIRE_UI_THREAD();
+    // privacy area: a failed HTTPS-only upgrade shows Mosaic's HTTPS-only page instead.
+    if (mosaic_privacy::OnLoadError(browser, frame, errorCode, failedUrl)) {
+      return;
+    }
     // ERR_ABORTED is a cancelled load (user pressed stop, download started…).
     if (errorCode == ERR_ABORTED || !frame->IsMain()) {
       return;
@@ -285,6 +293,24 @@ class MosaicClient : public CefClient,
     });
     return RV_CANCEL;
   }
+
+  // privacy area: HTTPS-only upgrades, tracking-parameter removal, cosmetic filtering.
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                      CefRefPtr<CefFrame> frame,
+                      CefRefPtr<CefRequest> request,
+                      bool user_gesture,
+                      bool is_redirect) override {
+    CEF_REQUIRE_UI_THREAD();
+    return mosaic_privacy::OnBeforeBrowse(browser, frame, request, user_gesture, is_redirect);
+  }
+
+  void OnLoadStart(CefRefPtr<CefBrowser> browser,
+                   CefRefPtr<CefFrame> frame,
+                   TransitionType transition_type) override {
+    CEF_REQUIRE_UI_THREAD();
+    mosaic_privacy::OnLoadStart(browser, frame);
+  }
+  // end privacy area
 
   bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
                         CefRefPtr<CefFrame> frame,
@@ -519,7 +545,8 @@ class MosaicClient : public CefClient,
   CefBrowserSettings browserSettings;
   _client = new MosaicClient(self);
   std::string url = _pendingURL.length ? _pendingURL.UTF8String : "about:blank";
-  CefBrowserHost::CreateBrowser(windowInfo, _client, url, browserSettings, nullptr, nullptr);
+  CefBrowserHost::CreateBrowser(windowInfo, _client, url, browserSettings, nullptr,
+                                mosaic_privacy::RequestContextForView(self));  // privacy area: private views
 }
 
 - (void)mosaicBrowserCreated:(CefRefPtr<CefBrowser>)browser {

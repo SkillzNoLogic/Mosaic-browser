@@ -131,6 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         let file = NSMenu(title: "File")
         file.addItem(item("New Tab", #selector(newTab), "t"))
+        file.addItem(item("New Private Tab", #selector(newPrivateTab), "n", [.command, .shift]))  // privacy area
         file.addItem(item("Open Location…", #selector(focusAddress), "l"))
         file.addItem(.separator())
         file.addItem(item("Close Tab", #selector(closeTab), "w"))
@@ -161,6 +162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let history = NSMenu(title: "History")
         history.addItem(item("Back", #selector(goBack), "["))
         history.addItem(item("Forward", #selector(goForward), "]"))
+        history.addItem(.separator())  // privacy area
+        history.addItem(item("Clear Browsing Data…", #selector(clearBrowsingData), "\u{8}", [.command, .shift]))
         main.addItem(submenu: history, title: "History")
 
         let windowMenu = NSMenu(title: "Window")
@@ -194,6 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func toggleEngine() { model.toggleEngine() }
     @objc private func cycleSearchEngine() { model.cycleSearchEngine() }
     @objc private func toggleBlocker() { model.toggleBlocker() }
+    @objc private func newPrivateTab() { model.newPrivateTab() }  // privacy area
+    @objc private func clearBrowsingData() { model.showClearBrowsingData() }  // privacy area
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleBlocker) {

@@ -39,6 +39,7 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker)
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -81,12 +82,14 @@ final class BrowserModel: ObservableObject {
         gecko.onStarted = { [weak self] in
             // The blocker first, so the very first page is already filtered.
             await self?.blocker.configureGecko()
+            await self?.privacy.configureGecko()  // privacy area
             await self?.extensions.loadAllIntoGecko()
         }
         // Re-render dependents when the engine's or the blocker's status changes.
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
+        privacy.start { [weak self] in self?.tabs.filter { !$0.isPrivate }.map(\.url) ?? [] }  // privacy area
 
         newTab()
     }
@@ -134,6 +137,11 @@ final class BrowserModel: ObservableObject {
         let tab = BrowserTab(engine: engine)
         tab.onChange = { [weak self] in self?.tabChanged($0) }
         tab.onNewTabRequest = { [weak self] source, url in
+            // privacy area: a private tab's links open in private tabs.
+            if source.isPrivate {
+                self?.newPrivateTab(url: url)
+                return
+            }
             self?.newTab(url: url, engine: source.engine)
         }
         return tab
@@ -225,6 +233,7 @@ final class BrowserModel: ObservableObject {
                 view.loadURL(url)
             } else {
                 let view = MCEFBrowserView(url: url)
+                view.isPrivate = tab.isPrivate  // privacy area: in-memory profile
                 view.delegate = tab
                 tab.chromiumView = view
                 objectWillChange.send()
@@ -336,6 +345,11 @@ final class BrowserModel: ObservableObject {
     func setEngine(_ kind: EngineKind) {
         if kind == .chromium, !chromiumAvailable {
             notice = "The Chromium engine is not bundled in this build. Run Scripts/bootstrap.sh and rebuild."
+            return
+        }
+        // privacy area: private tabs exist only in Chromium.
+        if kind == .gecko, selectedTab?.isPrivate == true {
+            notice = PrivacyController.geckoPrivateNotice
             return
         }
         setEnginePreference(kind, remember: true)
@@ -476,6 +490,7 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        case "newPrivateTab": newPrivateTab()  // privacy area
         default: break
         }
     }

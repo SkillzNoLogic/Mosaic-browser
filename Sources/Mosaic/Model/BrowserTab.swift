@@ -49,6 +49,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var workspaceID: UUID?
     @Published var groupID: UUID?
 
+    /// Privacy area: a private tab (Chromium, in-memory profile). Set once, right after
+    /// the tab is created, and never changed. History, passwords, downloads lists and
+    /// session restore must not record anything from a tab where this is true.
+    @Published var isPrivate = false
+
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
     /// Gecko: the agent's ID for this tab, once Gecko has created it.

@@ -85,6 +85,7 @@ final class Automation {
         case "activate": NSApp.activate(ignoringOtherApps: true)
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
+        case _ where action.hasPrefix("privacy."): model.handlePrivacyAutomation(action, command)  // privacy area
         case "dump": dump(to: value)
         case "quit": NSApp.terminate(nil)
         default: break
@@ -152,6 +153,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "privacy": model.privacyDump(),  // privacy area
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)

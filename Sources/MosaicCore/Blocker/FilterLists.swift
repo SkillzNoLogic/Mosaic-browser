@@ -6,8 +6,20 @@ public struct FilterList: Hashable, Sendable, Identifiable {
     public let id: String
     public let title: String
     public let url: URL
+    /// uBO's catalogue group: default, ads, privacy, malware, annoyances, multipurpose.
+    public var group: String = "default"
+    /// One line on what the list is for (optional lists only).
+    public var summary: String = ""
 
     public var fileName: String { "\(id).txt" }
+
+    public init(id: String, title: String, url: URL, group: String = "default", summary: String = "") {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.group = group
+        self.summary = summary
+    }
 }
 
 /// The lists uBlock Origin enables out of the box (its `assets.json`, entries
@@ -32,8 +44,70 @@ public enum FilterListCatalog {
             url: URL(string: "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=1&mimetype=plaintext")!),
     ]
 
-    private static func uAssets(_ id: String, _ title: String, _ path: String) -> FilterList {
-        FilterList(id: id, title: title, url: URL(string: "https://ublockorigin.github.io/uAssets/\(path)")!)
+    /// Stricter lists from uBO's catalogue (`assets/assets.json`, entries marked
+    /// `off`), offered in Settings. Not shipped with the app: downloaded when the
+    /// user turns one on. Left out: lists made mostly of things Mosaic does not
+    /// apply (AdGuard URL Tracking is all `$removeparam`; Mosaic strips tracking
+    /// parameters itself) and regional lists.
+    public static let optional: [FilterList] = [
+        uAssets("ublock-experimental", "uBlock filters – Experimental", "filters/experimental.txt", "default",
+                "Filters uBO is still testing. May break sites."),
+        FilterList(
+            id: "adguard-generic", title: "AdGuard – Ads",
+            url: URL(string: "https://filters.adtidy.org/extension/ublock/filters/2_without_easylist.txt")!,
+            group: "ads", summary: "AdGuard’s ad filters, without the parts EasyList already covers."),
+        uAssets("block-lan", "Block Outsider Intrusion into LAN", "filters/lan-block.txt", "privacy",
+                "Stops public websites from reaching devices on your local network."),
+        FilterList(
+            id: "curben-phishing", title: "Phishing URL Blocklist",
+            url: URL(string: "https://malware-filter.gitlab.io/phishing-filter/phishing-filter.txt")!,
+            group: "malware", summary: "Known phishing sites."),
+        uAssets("fanboy-cookiemonster", "EasyList – Cookie Notices", "thirdparties/easylist-cookies.txt",
+                "annoyances", "Hides cookie consent banners."),
+        uAssets("ublock-cookies-easylist", "uBlock filters – Cookie Notices", "filters/annoyances-cookies.txt",
+                "annoyances", "uBO’s additions to the cookie notice lists."),
+        FilterList(
+            id: "adguard-cookies", title: "AdGuard – Cookie Notices",
+            url: URL(string: "https://filters.adtidy.org/extension/ublock/filters/18.txt")!,
+            group: "annoyances", summary: "AdGuard’s cookie consent banner filters."),
+        uAssets("fanboy-social", "EasyList – Social Widgets", "thirdparties/easylist-social.txt", "annoyances",
+                "Share buttons and social media embeds."),
+        FilterList(
+            id: "adguard-popup-overlays", title: "AdGuard – Popup Overlays",
+            url: URL(string: "https://filters.adtidy.org/extension/ublock/filters/19.txt")!,
+            group: "annoyances", summary: "Subscription and sign-up pop-overs."),
+        uAssets("easylist-newsletters", "EasyList – Newsletter Notices", "thirdparties/easylist-newsletters.txt",
+                "annoyances", "Newsletter sign-up boxes."),
+        uAssets("easylist-notifications", "EasyList – Notifications", "thirdparties/easylist-notifications.txt",
+                "annoyances", "Requests to show notifications."),
+        uAssets("easylist-chat", "EasyList – Chat Widgets", "thirdparties/easylist-chat.txt", "annoyances",
+                "Support and sales chat bubbles."),
+        uAssets("easylist-annoyances", "EasyList – Other Annoyances", "thirdparties/easylist-annoyances.txt",
+                "annoyances", "Other page clutter."),
+        uAssets("ublock-annoyances", "uBlock filters – Annoyances", "filters/annoyances.txt", "annoyances",
+                "uBO’s own annoyance filters."),
+        FilterList(
+            id: "dpollock-0", title: "Dan Pollock’s hosts file",
+            url: URL(string: "https://someonewhocares.org/hosts/hosts")!,
+            group: "multipurpose", summary: "A long-running hosts-format block list."),
+    ]
+
+    /// Every list Mosaic knows, defaults first.
+    public static var all: [FilterList] { defaults + optional }
+
+    /// The lists for a set of enabled IDs, in catalogue order.
+    public static func lists(enabled: Set<String>) -> [FilterList] {
+        all.filter { enabled.contains($0.id) }
+    }
+
+    /// The name the user's own filters are compiled under.
+    public static let userFiltersName = "user-filters"
+
+    private static func uAssets(
+        _ id: String, _ title: String, _ path: String, _ group: String = "default", _ summary: String = ""
+    ) -> FilterList {
+        FilterList(id: id, title: title, url: URL(string: "https://ublockorigin.github.io/uAssets/\(path)")!,
+                   group: group, summary: summary)
     }
 }
 
@@ -55,6 +129,27 @@ public struct FilterListStore: Sendable {
     }
 
     public var suffixListURL: URL { directory.appendingPathComponent(FilterListCatalog.suffixListFileName) }
+    /// The user's own filters ("My filters"), compiled after every list.
+    public var userFiltersURL: URL { directory.appendingPathComponent("\(FilterListCatalog.userFiltersName).txt") }
+
+    /// The user's own filters, or "" when there are none.
+    public func userFilters() -> String {
+        (try? String(contentsOf: userFiltersURL, encoding: .utf8)) ?? ""
+    }
+
+    public func saveUserFilters(_ text: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: userFiltersURL, options: .atomic)
+    }
+
+    /// Enabled lists that have not been downloaded yet.
+    public func missingLists() -> [FilterList] {
+        lists.filter { !FileManager.default.fileExists(atPath: fileURL(for: $0).path) }
+    }
+
+    public func modificationDate(of list: FilterList) -> Date? {
+        (try? fileURL(for: list).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
     public func fileURL(for list: FilterList) -> URL { directory.appendingPathComponent(list.fileName) }
 
     /// Copies any list that is missing here from the snapshot in `bundled`.
@@ -76,19 +171,43 @@ public struct FilterListStore: Sendable {
         try? String(contentsOf: suffixListURL, encoding: .utf8)
     }
 
-    /// Every list that is on disk, in catalogue order.
+    /// Every list that is on disk, in catalogue order, then the user's filters.
     public func loadLists() -> [BlockerEngine.List] {
-        lists.compactMap { list in
+        var loaded: [BlockerEngine.List] = lists.compactMap { list in
             guard let text = try? String(contentsOf: fileURL(for: list), encoding: .utf8), !text.isEmpty else {
                 return nil
             }
             return BlockerEngine.List(name: list.id, text: text)
         }
+        let user = userFilters()
+        if !user.isEmpty { loaded.append(BlockerEngine.List(name: FilterListCatalog.userFiltersName, text: user)) }
+        return loaded
     }
 
-    /// Paths of the lists that are on disk, in catalogue order.
+    /// Paths of the lists that are on disk, in catalogue order, then the user's filters.
     public func availableListPaths() -> [String] {
-        lists.map { fileURL(for: $0).path }.filter { FileManager.default.fileExists(atPath: $0) }
+        var paths = lists.map { fileURL(for: $0).path }.filter { FileManager.default.fileExists(atPath: $0) }
+        if !userFilters().isEmpty { paths.append(userFiltersURL.path) }
+        return paths
+    }
+
+    /// Which loaded list contains `filter` as a line, for the dashboard ("My
+    /// filters" for the user's own). uBO's logger shows filters in a normalised
+    /// form, so this finds most but not all of them; nil when not found.
+    public func listContaining(filter: String) -> String? {
+        guard !filter.isEmpty else { return nil }
+        let candidates = Set([filter, filter.hasPrefix("||") ? filter : "||\(filter)^"])
+        let user = userFilters()
+        if user.split(whereSeparator: \.isNewline).contains(where: { candidates.contains($0.trimmingCharacters(in: .whitespaces)) }) {
+            return "My filters"
+        }
+        for list in lists {
+            guard let text = try? String(contentsOf: fileURL(for: list), encoding: .utf8) else { continue }
+            for line in text.split(whereSeparator: \.isNewline) where candidates.contains(String(line)) {
+                return list.title
+            }
+        }
+        return nil
     }
 
     /// When the least recently refreshed list was written; nil if any is missing.
@@ -110,13 +229,15 @@ public struct FilterListStore: Sendable {
 
     /// Downloads fresh copies of every list. A download that fails, or that does
     /// not look like the list it should be, leaves the existing file untouched.
-    public func update(using session: URLSession = .shared) async -> UpdateResult {
+    /// - Parameter only: refresh just these lists (by ID), not the suffix list.
+    public func update(using session: URLSession = .shared, only: Set<String>? = nil) async -> UpdateResult {
         var result = UpdateResult()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        var targets: [(name: String, url: URL, destination: URL, isSuffixList: Bool)] = [
-            (FilterListCatalog.suffixListFileName, FilterListCatalog.suffixListURL, suffixListURL, true)
-        ]
-        targets += lists.map { ($0.id, $0.url, fileURL(for: $0), false) }
+        var targets: [(name: String, url: URL, destination: URL, isSuffixList: Bool)] = []
+        if only == nil {
+            targets.append((FilterListCatalog.suffixListFileName, FilterListCatalog.suffixListURL, suffixListURL, true))
+        }
+        targets += lists.filter { only?.contains($0.id) ?? true }.map { ($0.id, $0.url, fileURL(for: $0), false) }
 
         for target in targets {
             do {
