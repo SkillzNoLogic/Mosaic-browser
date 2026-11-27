@@ -77,6 +77,7 @@ final class Automation {
             if let tab = model.selectedTab { model.setBlocking(value != "off", onSiteOf: tab) }
         case "showBlocker": model.showBlocker = (value != "false")
         case "updateLists": Task { await model.blocker.updateLists() }
+        case let page where page.hasPrefix("page."): model.pageFeatures.automation(page, command)  // engine area
         case "geckoEval":
             // {"do":"geckoEval","value":"<agent method>","out":"/path"}
             let out = command["out"] as? String
@@ -156,6 +157,7 @@ final class Automation {
                        "width": frame.width, "height": frame.height],
             "isActive": NSApp.isActive,
             "notice": model.notice ?? "",
+            "page": model.pageFeatures.automationState(),  // engine area
             "extensions": model.extensions.extensions.map { ext in
                 [
                     "id": ext.id, "geckoID": ext.geckoID, "name": ext.name, "version": ext.version,

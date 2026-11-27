@@ -1,4 +1,5 @@
 #import "CEFBridge.h"
+#import "CEFBridgeInternal.h"  // engine area: page features
 
 #include <list>
 #include <string>
@@ -103,6 +104,15 @@ class MosaicApp : public CefApp, public CefBrowserProcessHandler {
     // app to the Keychain and would prompt for "Chromium Safe Storage" again.
     // TODO(release): drop this once Mosaic ships with a stable signing identity.
     command_line->AppendSwitch("use-mock-keychain");
+    // Engine area: scripted checks (MOSAIC_FAKE_MEDIA=1) use fake camera/microphone
+    // devices, so no system permission dialog appears, and keep pages live while the
+    // window is covered (or the display asleep) so they still take scripted input.
+    const char* fakeMedia = getenv("MOSAIC_FAKE_MEDIA");
+    if (fakeMedia && std::string(fakeMedia) == "1") {
+      command_line->AppendSwitch("use-fake-device-for-media-stream");
+      command_line->AppendSwitch("disable-backgrounding-occluded-windows");
+      command_line->AppendSwitch("disable-renderer-backgrounding");
+    }
   }
 
  private:
@@ -118,7 +128,7 @@ class MosaicClient : public CefClient,
                      public CefRequestHandler,
                      public CefResourceRequestHandler {
  public:
-  explicit MosaicClient(MCEFBrowserView* view) : view_(view) {}
+  explicit MosaicClient(MCEFBrowserView* view) : view_(view), page_(new MosaicPageHandler(view)) {}
 
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -129,6 +139,20 @@ class MosaicClient : public CefClient,
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return MosaicDownloadHandler(); }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
     return MosaicDownloadsContextMenuHandler();
+  }
+
+  // Engine area: page features (CEFBridge+Engine.mm).
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return page_; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return page_; }
+  CefRefPtr<CefAudioHandler> GetAudioHandler() override { return page_; }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return page_; }
+  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return page_; }
+  void OnFullscreenModeChange(CefRefPtr<CefBrowser> browser, bool fullscreen) override {
+    page_->FullscreenChanged(fullscreen);
+  }
+  void OnMediaAccessChange(CefRefPtr<CefBrowser> browser, bool has_video_access,
+                           bool has_audio_access) override {
+    page_->MediaAccessChanged(has_video_access, has_audio_access);
   }
 
   // CefDisplayHandler
@@ -178,6 +202,10 @@ class MosaicClient : public CefClient,
                      CefRefPtr<CefDictionaryValue>& extra_info,
                      bool* no_javascript_access) override {
     CEF_REQUIRE_UI_THREAD();
+    // Engine area: pop-ups opened without a user gesture are blocked and offered instead.
+    if (page_->BlockPopupIfNeeded(target_url, user_gesture)) {
+      return true;
+    }
     // Mosaic has tabs, not popup windows: reroute into a new tab.
     if (!target_url.empty()) {
       MCEFBrowserView* view = view_;
@@ -361,6 +389,7 @@ class MosaicClient : public CefClient,
 
  private:
   __weak MCEFBrowserView* view_;
+  CefRefPtr<MosaicPageHandler> page_;  // engine area
 
   IMPLEMENT_REFCOUNTING(MosaicClient);
   DISALLOW_COPY_AND_ASSIGN(MosaicClient);
@@ -641,6 +670,7 @@ CefRefPtr<CefBrowser> MosaicAnyLiveBrowser() {
     browser->GetMainFrame()->LoadURL(initial.UTF8String);
   }
   _navigatedBeforeCreation = NO;
+  [self mosaicPageBrowserCreated];  // engine area
 }
 
 // Passwords (area: passwords): CEFPasswords.mm reaches the browser through this.
@@ -649,8 +679,14 @@ CefRefPtr<CefBrowser> MosaicAnyLiveBrowser() {
 }
 
 - (void)mosaicBrowserClosed {
+  [self mosaicPageBrowserClosed];  // engine area
   _browser = nullptr;
   _client = nullptr;
+}
+
+// Engine area: lets CEFBridge+Engine.mm reach the browser.
+- (CefRefPtr<CefBrowser>)mosaicBrowser {
+  return _browser;
 }
 
 - (void)loadURL:(NSString*)url {

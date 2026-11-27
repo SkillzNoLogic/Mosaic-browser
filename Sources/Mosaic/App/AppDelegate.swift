@@ -236,6 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         main.addItem(submenu: help, title: "Help")
         NSApp.helpMenu = help
 
+        model.pageFeatures.installMenuItems(in: main)  // engine area: find, zoom, print, screenshots…
         return main
     }
 

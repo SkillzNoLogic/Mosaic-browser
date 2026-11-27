@@ -47,7 +47,9 @@ final class PrivacyController: ObservableObject {
         static let settings = "privacySettings"
     }
 
-    init(gecko: GeckoEngine, blocker: ContentBlocker) {
+    /// `sitePermissions` is the engine area's store (one instance for the whole app, so what
+    /// the settings page changes is what the engines' prompts consult).
+    init(gecko: GeckoEngine, blocker: ContentBlocker, sitePermissions: SitePermissionStore) {
         self.gecko = gecko
         self.blocker = blocker
         if let data = AppPaths.defaults.data(forKey: Keys.settings),
@@ -56,7 +58,7 @@ final class PrivacyController: ObservableObject {
         } else {
             settings = PrivacySettings()
         }
-        sitePermissions = SitePermissionStore(fileURL: AppPaths.support.appendingPathComponent("SitePermissions.json"))
+        self.sitePermissions = sitePermissions
     }
 
     // MARK: - Lifecycle

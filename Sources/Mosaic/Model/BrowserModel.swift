@@ -47,9 +47,11 @@ final class BrowserModel: ObservableObject {
     let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
     let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
     let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
-    private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker)
+    private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker, sitePermissions: sitePermissions)
     lazy var productivity = Productivity(model: self)  // palette, reader, shortcuts, Speed Dial
     lazy var canvas = CanvasController(model: self)  // canvas: layout editor, Gradient Studio, configurations
+    let sitePermissions = SitePermissionStore(fileURL: AppPaths.sitePermissions)  // engine (privacy edits it)
+    lazy var pageFeatures = PageFeatures(model: self)  // engine: find, zoom, print, permissions, pop-ups…
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.

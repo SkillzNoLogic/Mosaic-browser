@@ -67,6 +67,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var isReaderAvailable = false
     /// The tab is showing its page in reader view.
     @Published var isReaderActive = false
+    // Engine area: the page's zoom (1 = 100 %), remembered per site (Features/Engine/PageFeatures.swift).
+    @Published var zoomFactor: Double = 1
 
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?

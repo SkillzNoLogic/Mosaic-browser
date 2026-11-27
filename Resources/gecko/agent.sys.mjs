@@ -219,6 +219,11 @@ function hasShortcutModifier(event) {
 /** Shortcuts that belong to Mosaic's UI even while Gecko has focus. */
 const FORWARDED = { l: "focusAddress", t: "newTab", n: "newTab", w: "closeTab" };
 const FORWARDED_WITH_SHIFT = { e: "toggleEngine", b: "toggleBookmarksBar" };
+// Engine area: Mosaic's find bar replaces Firefox's (macOS app only).
+if (IS_MAC) {
+  Object.assign(FORWARDED, { f: "find", g: "findNext" });
+  Object.assign(FORWARDED_WITH_SHIFT, { g: "findPrevious" });
+}
 
 /**
  * Gecko's own shortcuts for whole windows: close window, reopen closed window,
@@ -574,6 +579,256 @@ const READER_PREFS = {
   "reader.line_height": "int",
   "reader.color_scheme": "char",
 };
+
+// ---- Page features (engine area) --------------------------------------------
+//
+// Find in page, zoom, printing, developer tools, mute, screenshots, permission
+// requests, blocked pop-ups and page full screen. Mosaic draws the UI for all
+// of them, so the Firefox UI they would normally use (find bar, permission
+// panels anchored to the hidden toolbar, the pop-up notification bar) is
+// replaced by events Mosaic picks up from `state()`. Nothing here runs until
+// Mosaic calls `configurePageFeatures`.
+
+const page = {
+  configured: false,
+  /** Browsers whose finder has Mosaic's listener; browser → listener. */
+  finders: new WeakMap(),
+  /** Browsers with an open find session; browser → { caseSensitive }. */
+  findSessions: new WeakMap(),
+  /** Pending permission requests Mosaic is asked about; id → request record. */
+  requests: new Map(),
+  nextRequestId: 1,
+};
+
+const { setTimeout, clearTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
+
+/** Queues an event for Mosaic with a payload (`detail`, a JSON string). */
+function postPageEvent(type, tab, detail) {
+  pendingEvents.push({ type, tab: tab ? idOf(tab) : null, detail: JSON.stringify(detail ?? {}) });
+}
+
+
+function tabForBrowser(browser) {
+  return browser ? browserWindow()?.gBrowser?.getTabForBrowser(browser) ?? null : null;
+}
+
+/** Mosaic's permission names → the keys Gecko's permission manager uses. */
+const GECKO_PERMISSION_KEYS = { location: "geo", notifications: "desktop-notification", popups: "popup" };
+
+/** Content-permission request types Mosaic asks about, and what it calls them. */
+const CONTENT_PERMISSION_KINDS = {
+  geolocation: "location",
+  "desktop-notification": "notifications",
+  "persistent-storage": "other",
+  "storage-access": "other",
+  midi: "other",
+  xr: "other",
+  "local-network": "other",
+  "loopback-network": "other",
+  serial: "other",
+};
+
+function askMosaic(record, tab, detail) {
+  const id = page.nextRequestId++;
+  page.requests.set(id, record);
+  postPageEvent("permissionRequest", tab, { id, ...detail });
+  return id;
+}
+
+/** `Integration.contentPermission` override: geolocation, notifications and the rest. */
+function contentPermissionOverride(base) {
+  return {
+    createPermissionPrompt(type, request) {
+      const kind = CONTENT_PERMISSION_KINDS[type];
+      const tab = kind && page.configured ? tabForBrowser(request.element) : null;
+      if (!tab) {
+        return base.createPermissionPrompt.call(this, type, request);
+      }
+      return {
+        prompt() {
+          askMosaic({ type: "content", request }, tab, {
+            origin: request.principal.origin,
+            kinds: [kind],
+            other: kind === "other" ? [type] : [],
+          });
+        },
+      };
+    },
+  };
+}
+
+/** Takes over camera / microphone requests (screen sharing stays with Firefox). */
+function interceptWebRTC(actor, data) {
+  if (!data.secure || data.sharingScreen || data.audioOutputDevices?.length) {
+    return false;
+  }
+  const camera = data.videoInputDevices?.[0];
+  const microphone = data.audioInputDevices?.[0];
+  const tab = tabForBrowser(actor.getBrowser());
+  if ((!camera && !microphone) || !tab) {
+    return false;
+  }
+  const kinds = [];
+  if (camera) kinds.push("camera");
+  if (microphone) kinds.push("microphone");
+  // Firefox's own handler fills in data.origin; this runs before it.
+  const origin = actor.manager.topWindowContext.documentPrincipal.origin;
+  askMosaic({ type: "webrtc", actor, data, camera, microphone }, tab, { origin, kinds, other: [] });
+  return true;
+}
+
+function answerWebRTC(record, allow) {
+  const { actor, data, camera, microphone } = record;
+  if (!allow) {
+    actor.denyRequest(data);
+    return;
+  }
+  const principal = actor.manager.topWindowContext.documentPrincipal;
+  const devices = [];
+  if (camera) {
+    // As Firefox's own prompt does when camera access is granted.
+    Services.perms.addFromPrincipal(principal, "MediaManagerVideo", Services.perms.ALLOW_ACTION,
+      Services.perms.EXPIRE_SESSION);
+    devices.push(camera.deviceIndex);
+    actor.activateDevicePerm(data.windowID, camera.mediaSource, camera.rawId);
+  }
+  if (microphone) {
+    devices.push(microphone.deviceIndex);
+    actor.activateDevicePerm(data.windowID, microphone.mediaSource, microphone.rawId);
+  }
+  actor.checkOSPermission(!!camera, !!microphone, false).then(granted => {
+    if (granted) {
+      actor.sendAsyncMessage("webrtc:Allow", { callID: data.callID, windowID: data.windowID, devices });
+    } else {
+      actor.denyRequestNoPermission(data);
+    }
+  });
+}
+
+let webRTCPatched = false;
+
+function patchWebRTC() {
+  if (webRTCPatched) {
+    return;
+  }
+  const { WebRTCParent } = ChromeUtils.importESModule("resource:///actors/WebRTCParent.sys.mjs");
+  const original = WebRTCParent.prototype.receiveMessage;
+  WebRTCParent.prototype.receiveMessage = function (message) {
+    try {
+      if (page.configured && message.name === "webrtc:Request" && interceptWebRTC(this, message.data)) {
+        return undefined;
+      }
+      if (page.configured && message.name === "webrtc:CancelRequest") {
+        for (const [id, record] of page.requests) {
+          if (record.type === "webrtc" && record.data.callID === message.data) {
+            page.requests.delete(id);
+            postPageEvent("permissionCancel", null, { id });
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Mosaic: camera/microphone request", error);
+    }
+    return original.call(this, message);
+  };
+  webRTCPatched = true;
+}
+
+/** Pop-ups Gecko blocked: reported to Mosaic instead of Firefox's notification bar. */
+function onBlockedPopups(event) {
+  const browser = event.target;
+  const tab = tabForBrowser(browser);
+  const blocker = browser?.popupAndRedirectBlocker;
+  if (!tab || !blocker) {
+    return;
+  }
+  event.stopImmediatePropagation();
+  const count = blocker.getBlockedPopupCount();
+  if (!count) {
+    return;
+  }
+  blocker.getBlockedPopups().then(
+    popups => postPageEvent("popupBlocked", tab, { count, urls: popups.map(popup => popup.popupWindowURISpec) }),
+    () => postPageEvent("popupBlocked", tab, { count, urls: [] })
+  );
+}
+
+/** Reports the page entering and leaving full screen (the JavaScript API). */
+function watchFullscreen(win) {
+  let wasFullscreen = false;
+  const observer = new win.MutationObserver(() => {
+    const now = win.document.documentElement.hasAttribute("inDOMFullscreen");
+    if (now !== wasFullscreen) {
+      wasFullscreen = now;
+      postPageEvent("pageFullscreen", win.gBrowser.selectedTab, { value: now });
+    }
+  });
+  observer.observe(win.document.documentElement, { attributes: true, attributeFilter: ["inDOMFullscreen"] });
+}
+
+function findListenerFor(browser) {
+  let listener = page.finders.get(browser);
+  if (listener) {
+    return listener;
+  }
+  listener = {
+    waiter: null,
+    onFindResult(data) {
+      const waiter = this.waiter;
+      if (!waiter || data.searchString !== waiter.text) {
+        return;
+      }
+      waiter.result = data.result;
+      if (data.result === Ci.nsITypeAheadFind.FIND_NOTFOUND) {
+        waiter.finish({ found: false, wrapped: false, current: 0, total: 0, limit: 0 });
+      }
+    },
+    onMatchesCountResult(data) {
+      const waiter = this.waiter;
+      if (!waiter || data.searchString !== waiter.text || waiter.result === null) {
+        return;
+      }
+      waiter.finish({
+        found: waiter.result !== Ci.nsITypeAheadFind.FIND_NOTFOUND,
+        wrapped: waiter.result === Ci.nsITypeAheadFind.FIND_WRAPPED,
+        current: data.current,
+        total: data.total,
+        limit: data.limit,
+      });
+    },
+    onHighlightFinished() {},
+    onCurrentSelection() {},
+  };
+  browser.finder.addResultListener(listener);
+  page.finders.set(browser, listener);
+  return listener;
+}
+
+/** Draws part of a page (CSS pixels, document coordinates; null for the visible area). */
+async function snapshotPNG(browser, rect, width, height, scale, path) {
+  const wgp = browser.browsingContext.currentWindowGlobal;
+  const canvas = new OffscreenCanvas(Math.round(width * scale), Math.round(height * scale));
+  const context = canvas.getContext("2d");
+  context.fillStyle = "rgb(255,255,255)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  if (!rect) {
+    const bitmap = await wgp.drawSnapshot(null, scale, "rgb(255,255,255)");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+  } else {
+    // In bands, as Firefox's own screenshots do, to stay within texture limits.
+    const band = 4096;
+    for (let top = 0; top < height; top += band) {
+      const h = Math.min(band, height - top);
+      const bitmap = await wgp.drawSnapshot(new DOMRect(rect.x, rect.y + top, width, h), scale, "rgb(255,255,255)");
+      context.drawImage(bitmap, 0, Math.floor(top * scale), Math.round(width * scale), Math.floor(h * scale));
+      bitmap.close();
+    }
+  }
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  await IOUtils.write(path, new Uint8Array(await blob.arrayBuffer()));
+  return { width: canvas.width, height: canvas.height };
+}
 
 export const Agent = {
   /**
@@ -1088,6 +1343,51 @@ export const Agent = {
     return "true";
   },
 
+  // ---- Page features (engine area) -----------------------------------------
+
+  /**
+   * Routes permission requests, blocked pop-ups and page full screen to Mosaic
+   * (events in `state()`), and silences Firefox's find-bar sounds. Call once
+   * after `setup`. Options:
+   *   fakeMedia  test runs only: fake camera/microphone streams and a fixed
+   *              location, so no system permission dialog appears.
+   */
+  configurePageFeatures(options = {}) {
+    const win = requireWindow();
+    if (!page.configured) {
+      page.configured = true;
+      Services.prefs.setBoolPref("accessibility.typeaheadfind.enablesound", false);
+      const { Integration } = ChromeUtils.importESModule("resource://gre/modules/Integration.sys.mjs");
+      Integration.contentPermission.register(contentPermissionOverride);
+      patchWebRTC();
+      // Capture phase on the window, ahead of Firefox's own listener on gBrowser.
+      win.addEventListener("DOMUpdateBlockedPopups", onBlockedPopups, true);
+      watchFullscreen(win);
+      // Context-menu items for Firefox features Mosaic does not use (its bookmarks, its
+      // account's "send to device", its AI chat): they would act on data Mosaic never shows.
+      const hidden = ["context-bookmarkpage", "context-bookmarklink", "context-bookmarkframe",
+        "context-sendpagetodevice", "context-sep-sendpagetodevice", "context-sendlinktodevice",
+        "context-sep-sendlinktodevice", "context-ask-chat"];
+      // The menu is native on macOS, so CSS cannot hide items: they are marked hidden after
+      // Firefox's own handler (registered first) has prepared the menu.
+      const menu = win.document.getElementById("contentAreaContextMenu");
+      menu?.addEventListener("popupshowing", event => {
+        if (event.target === menu) {
+          for (const id of hidden) {
+            win.document.getElementById(id)?.setAttribute("hidden", "true");
+          }
+        }
+      });
+    }
+    if (options.fakeMedia) {
+      Services.prefs.setBoolPref("media.navigator.streams.fake", true);
+      Services.prefs.setBoolPref("geo.provider.use_corelocation", false);
+      Services.prefs.setStringPref("geo.provider.network.url",
+        'data:application/json,{"location":{"lat":51.5007,"lng":-0.1246},"accuracy":20}');
+    }
+    return "true";
+  },
+
   /** Current values of the reader preferences Mosaic manages (READER_PREFS). */
   readerPrefs() {
     const prefs = {};
@@ -1109,6 +1409,297 @@ export const Agent = {
       } else if (type === "char") {
         Services.prefs.setCharPref(name, String(value));
       }
+    }
+    return "true";
+  },
+
+  /** Per tab: its zoom (1 = 100 %) and whether it is muted. */
+  pageActivity() {
+    const win = browserWindow();
+    if (!win || !win.gBrowser) {
+      return "[]";
+    }
+    const tabs = [];
+    for (const tab of win.gBrowser.tabs) {
+      if (startupTabs.has(tab) || tab.closing || !tab.linkedPanel) {
+        continue;
+      }
+      let zoom = 1;
+      try {
+        zoom = win.ZoomManager.getZoomForBrowser(tab.linkedBrowser);
+      } catch (_) {}
+      tabs.push({ id: idOf(tab), zoom, muted: !!tab.muted });
+    }
+    return JSON.stringify(tabs);
+  },
+
+  /** Answers a `permissionRequest` event. Returns false if it is no longer pending. */
+  answerPermission(requestId, allow) {
+    const record = page.requests.get(requestId);
+    if (!record) {
+      return "false";
+    }
+    page.requests.delete(requestId);
+    try {
+      if (record.type === "webrtc") {
+        answerWebRTC(record, !!allow);
+      } else if (allow) {
+        record.request.allow();
+      } else {
+        record.request.cancel();
+      }
+    } catch (error) {
+      console.error("Mosaic: answering a permission request", error);
+      return JSON.stringify(String(error?.message ?? error));
+    }
+    return "true";
+  },
+
+  /**
+   * Mirrors Mosaic's site decisions into Gecko's permission manager, so pages
+   * see them (Notification.permission, repeat requests, pop-up blocking).
+   * `entries`: [{ origin, permission: "location"|"notifications"|"popups", decision: "allow"|"block"|null }]
+   */
+  setSitePermissions(entries) {
+    const { perms } = Services;
+    for (const { origin, permission, decision } of entries) {
+      const key = GECKO_PERMISSION_KEYS[permission];
+      if (!key || origin === "file://") {
+        continue;
+      }
+      let principal;
+      try {
+        principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(origin);
+      } catch (_) {
+        continue;
+      }
+      if (decision === "allow" || decision === "block") {
+        perms.addFromPrincipal(principal, key, decision === "allow" ? perms.ALLOW_ACTION : perms.DENY_ACTION);
+      } else {
+        perms.removeFromPrincipal(principal, key);
+      }
+    }
+    return "true";
+  },
+
+  /** Opens the pop-ups the page in tab `id` was stopped from opening. */
+  async openBlockedPopups(id) {
+    await requireTab(id).browser.popupAndRedirectBlocker?.unblockAllPopups();
+    return "true";
+  },
+
+  /**
+   * Finds `text` in tab `id` and highlights every match. `options`:
+   * { again: next/previous match of the same text, backwards, caseSensitive }.
+   * Resolves to { found, wrapped, current, total, limit }.
+   */
+  find(id, text, options = {}) {
+    const { browser } = requireTab(id);
+    const finder = browser.finder;
+    const listener = findListenerFor(browser);
+    let session = page.findSessions.get(browser);
+    if (!session) {
+      session = { caseSensitive: null };
+      page.findSessions.set(browser, session);
+      finder.onFindbarOpen();
+      finder.onHighlightAllChange(true);
+    }
+    const caseSensitive = !!options.caseSensitive;
+    if (session.caseSensitive !== caseSensitive) {
+      session.caseSensitive = caseSensitive;
+      finder.caseSensitive = caseSensitive;
+    }
+    return new Promise(resolve => {
+      const timer = setTimeout(() => waiter.finish(null), 2000);
+      const waiter = {
+        text,
+        result: null,
+        finish(value) {
+          clearTimeout(timer);
+          if (listener.waiter === waiter) {
+            listener.waiter = null;
+          }
+          if (value?.found) {
+            // Every match, as Firefox's find bar does with "Highlight All".
+            finder.highlight(true, text, false);
+          }
+          resolve(JSON.stringify(value ?? { found: waiter.result === 0 || waiter.result === 2, wrapped: false,
+            current: 0, total: 0, limit: 0, timedOut: true }));
+        },
+      };
+      listener.waiter?.finish(null);
+      listener.waiter = waiter;
+      if (options.again) {
+        finder.findAgain(text, !!options.backwards, false, false);
+      } else {
+        finder.fastFind(text, false, false);
+      }
+    });
+  },
+
+  /** Ends the find session in tab `id`: highlights go, the last match stays selected. */
+  stopFind(id) {
+    const { browser } = requireTab(id);
+    if (page.findSessions.has(browser)) {
+      page.findSessions.delete(browser);
+      browser.finder.onFindbarClose();
+    }
+    return "true";
+  },
+
+  /** Sets the zoom of tab `id` (1 = 100 %). Gecko remembers it for the site too. */
+  setZoom(id, factor) {
+    const { win, browser } = requireTab(id);
+    if (Math.abs(factor - 1) < 0.005) {
+      win.FullZoom.reset(browser);
+      win.ZoomManager.setZoomForBrowser(browser, 1);
+    } else {
+      win.FullZoom.setZoom(factor, browser);
+    }
+    return JSON.stringify(win.ZoomManager.getZoomForBrowser(browser));
+  },
+
+  /** Opens Firefox's print dialog (tab-modal, inside the page area) for tab `id`. */
+  print(id) {
+    const { win, tab, browser } = requireTab(id);
+    win.gBrowser.selectedTab = tab;
+    win.PrintUtils.startPrintWindow(browser.browsingContext);
+    return "true";
+  },
+
+  /** Saves tab `id` as a PDF at `path`, without any dialog. */
+  async saveAsPDF(id, path) {
+    const { browser } = requireTab(id);
+    const settings = Cc["@mozilla.org/gfx/printsettings-service;1"]
+      .getService(Ci.nsIPrintSettingsService)
+      .createNewPrintSettings();
+    settings.printerName = "";
+    settings.isInitializedFromPrinter = true;
+    settings.isInitializedFromPrefs = true;
+    settings.outputDestination = Ci.nsIPrintSettings.kOutputDestinationFile;
+    settings.outputFormat = Ci.nsIPrintSettings.kOutputFormatPDF;
+    settings.toFileName = path;
+    settings.printSilent = true;
+    await browser.browsingContext.print(settings);
+    return "true";
+  },
+
+  /** Dialogs open over tab `id` (alerts, print, …), by their document URL. */
+  dialogs(id) {
+    const { win, browser } = requireTab(id);
+    const box = win.gBrowser.getTabDialogBox(browser);
+    const urls = [box._tabDialogManager, box._contentDialogManager]
+      .flatMap(manager => manager?._dialogs ?? [])
+      .map(dialog => dialog._openedURL ?? "");
+    return JSON.stringify(urls);
+  },
+
+  /** Closes every dialog over tab `id`, as if each were cancelled. */
+  closeDialogs(id) {
+    const { win, browser } = requireTab(id);
+    win.gBrowser.getTabDialogBox(browser).abortAllDialogs();
+    return "true";
+  },
+
+  /** Opens or closes the developer tools of tab `id` (docked in the page area). Returns whether they are open. */
+  async toggleDevTools(id) {
+    const { win, tab } = requireTab(id);
+    win.gBrowser.selectedTab = tab;
+    const { require } = ChromeUtils.importESModule("resource://devtools/shared/loader/Loader.sys.mjs");
+    const { gDevTools } = require("devtools/client/framework/devtools");
+    if (gDevTools.getToolboxForTab(tab)) {
+      await gDevTools.closeToolboxForTab(tab);
+      return "false";
+    }
+    await gDevTools.showToolboxForTab(tab, { hostType: "bottom" });
+    return "true";
+  },
+
+  setMuted(id, muted) {
+    const { tab } = requireTab(id);
+    if (tab.muted !== !!muted) {
+      tab.toggleMuteAudio();
+    }
+    return JSON.stringify(tab.muted);
+  },
+
+  /**
+   * Saves a PNG of tab `id` at `path`: the visible area, or the whole page
+   * (cut off at 16384 CSS pixels tall). Resolves to { width, height, cropped }.
+   */
+  async screenshot(id, path, fullPage) {
+    const { win, browser } = requireTab(id);
+    const scale = win.devicePixelRatio || 1;
+    if (!fullPage) {
+      const size = await snapshotPNG(browser, null, browser.clientWidth, browser.clientHeight, scale, path);
+      return JSON.stringify({ ...size, cropped: false });
+    }
+    const info = await browser.browsingContext.currentWindowGlobal
+      .getActor("Thumbnails")
+      .sendQuery("Browser:Thumbnail:ContentInfo");
+    const maxHeight = 16384;
+    const height = Math.min(Math.max(info.documentHeight, info.height), maxHeight);
+    const size = await snapshotPNG(browser, { x: 0, y: 0 }, info.width, height, scale, path);
+    return JSON.stringify({ ...size, cropped: info.documentHeight > maxHeight });
+  },
+
+  /** Puts the most likely video of tab `id` into Picture-in-Picture (or takes it out). */
+  togglePictureInPicture(id) {
+    const { browser } = requireTab(id);
+    browser.browsingContext.currentWindowGlobal
+      .getActor("PictureInPictureLauncher")
+      .sendAsyncMessage("PictureInPicture:KeyToggle");
+    return "true";
+  },
+
+  /**
+   * A real (trusted) mouse click at (x, y) in tab `id`'s page, CSS pixels; button
+   * 0 left, 2 right (which opens the context menu). For scripted checks: it
+   * counts as a user gesture.
+   */
+  synthesizeClick(id, x, y, button = 0) {
+    const { win, tab, browser } = requireTab(id);
+    win.gBrowser.selectedTab = tab;
+    const rect = browser.getBoundingClientRect();
+    const send = type => {
+      if (typeof win.synthesizeMouseEvent === "function") {
+        // Newer Gecko (ESR 153): a chrome-window method. Not marked as DOM-synthesized,
+        // so the page treats it as real input (user activation).
+        win.synthesizeMouseEvent(type, rect.left + x, rect.top + y,
+          { button, buttons: type === "mousedown" ? 1 << (button === 2 ? 1 : 0) : 0, clickCount: 1, modifiers: 0 },
+          { isDOMEventSynthesized: false });
+      } else {
+        win.windowUtils.sendMouseEvent(type, rect.left + x, rect.top + y, button, 1, 0);
+      }
+    };
+    send("mousedown");
+    send("mouseup");
+    if (button === 2) {
+      send("contextmenu");
+    }
+    return "true";
+  },
+
+  /**
+   * Popups open in the Gecko window (context menu, the clipboard "Paste" button, …), by
+   * id; closes them if `close`. For scripted checks, which must not leave one open.
+   */
+  openPopups(close) {
+    const doc = requireWindow().document;
+    const open = [...doc.querySelectorAll("menupopup, panel")].filter(popup => popup.state === "open");
+    if (close) {
+      for (const popup of open) {
+        popup.hidePopup();
+      }
+    }
+    return JSON.stringify(open.map(popup => popup.id || popup.localName));
+  },
+
+  /** Leaves page full screen, if the page is in it. */
+  exitFullscreen() {
+    const win = requireWindow();
+    if (win.document.fullscreenElement) {
+      win.document.exitFullscreen();
     }
     return "true";
   },
