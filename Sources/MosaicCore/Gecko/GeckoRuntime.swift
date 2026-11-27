@@ -28,8 +28,25 @@ public struct GeckoRuntime: Equatable, Sendable {
         return urls
     }
 
-    public static func locate(applicationSupport: URL) -> GeckoRuntime? {
+    /// Test switch: with `MOSAIC_GECKO_PRIVATE_ONLY=1`, only the private copy inside
+    /// `MOSAIC_DATA_DIR` counts, so an isolated profile behaves like a Mac that has never had
+    /// a Gecko runtime (no borrowed Firefox, no shared copy from the user's main profile).
+    /// Used to check the first-launch experience of the downloadable app.
+    public static let privateOnlyVariable = "MOSAIC_GECKO_PRIVATE_ONLY"
+
+    public static func locate(
+        applicationSupport: URL, environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> GeckoRuntime? {
         let managed = managedAppURL(applicationSupport: applicationSupport)
+        if environment[privateOnlyVariable] == "1" {
+            if let dataDirectory = environment["MOSAIC_DATA_DIR"], !dataDirectory.isEmpty,
+               URL(fileURLWithPath: dataDirectory).standardizedFileURL.path
+                != applicationSupport.standardizedFileURL.path
+            {
+                return nil
+            }
+            return GeckoRuntime(appURL: managed, isManaged: true)
+        }
         for url in candidates(applicationSupport: applicationSupport) {
             if let runtime = GeckoRuntime(appURL: url, isManaged: url == managed) { return runtime }
         }

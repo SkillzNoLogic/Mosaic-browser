@@ -656,6 +656,45 @@ export const Agent = {
       windowHandle: win ? nativeHandle(win) : "0",
     });
   },
+
+  // ---- Platform area: safe engine switching, languages ----------------------
+  // Additive; platform-neutral. Mosaic loads a page in a background tab before
+  // moving a tab to Gecko, and keeps the old engine's page until it has loaded.
+
+  /**
+   * Load state of one tab: whether it is still loading, the document it shows
+   * and, if that document is one of Gecko's error pages (network, certificate,
+   * blocked), the error code from its address ("dnsNotFound", …), else null.
+   */
+  pageStatus(id) {
+    const { tab, browser } = requireTab(id);
+    let documentURI = "";
+    try {
+      documentURI = browser.browsingContext?.currentWindowGlobal?.documentURI?.spec ?? "";
+    } catch (_) {}
+    let error = null;
+    if (/^about:(neterror|certerror|blocked|httpsonlyerror)/.test(documentURI)) {
+      const match = /[?&]e=([^&]*)/.exec(documentURI);
+      error = match ? decodeURIComponent(match[1]) : documentURI.split("?")[0];
+    }
+    return JSON.stringify({
+      loading: tab.hasAttribute("busy"),
+      url: browser.currentURI?.spec ?? "",
+      document: documentURI,
+      title: tab.label ?? "",
+      error,
+    });
+  },
+
+  /**
+   * Languages pages are asked for (Accept-Language, navigator.languages): a
+   * comma-separated list of BCP 47 tags, most preferred first. Applies to
+   * documents loaded from now on.
+   */
+  setAcceptLanguages(list) {
+    Services.prefs.setStringPref("intl.accept_languages", String(list));
+    return JSON.stringify(Services.prefs.getStringPref("intl.accept_languages", ""));
+  },
 };
 
 // ---- Tabs area: sleeping tabs and tab shortcuts -------------------------------

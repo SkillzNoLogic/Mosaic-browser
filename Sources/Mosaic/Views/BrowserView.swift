@@ -43,10 +43,11 @@ struct BrowserView: View {
         }
         .ignoresSafeArea()
         .overlay(alignment: .bottom) { NoticeBanner() }
-        .sheet(isPresented: $model.showExtensions) {
-            ExtensionsSheet()
-                .environmentObject(model)
-                .environmentObject(model.extensions)
+        // platform: extensions are managed in Settings › Extensions (the sheet is gone).
+        .onChange(of: model.showExtensions) { _, show in
+            guard show else { return }
+            model.showExtensions = false
+            model.openSettings(.extensions)
         }
     }
 }

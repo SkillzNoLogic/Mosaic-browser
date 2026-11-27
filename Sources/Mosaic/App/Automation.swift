@@ -40,6 +40,7 @@ final class Automation {
               let action = command["do"] as? String
         else { return }
         let value = command["value"] as? String ?? ""
+        if PlatformAutomation.handle(action, command, model: model) { return }  // platform: see PlatformAutomation.swift
 
         switch action {
         case "navigate": model.navigate(value)
@@ -155,6 +156,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "platform": PlatformAutomation.dump(model),  // platform
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {

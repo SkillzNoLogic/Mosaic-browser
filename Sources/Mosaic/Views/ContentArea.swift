@@ -33,6 +33,8 @@ private struct TabContent: View {
             InternalPageView(page: page)
         } else if tab.isStartPage {
             StartPage()
+        } else if tab.engine == .gecko, model.geckoRuntimeMissing {
+            GeckoRuntimeMissingView(tab: tab)  // platform: offers the in-app Gecko install
         } else if let failure = tab.failure {
             EngineMessage(
                 symbol: "exclamationmark.triangle", title: "This page can’t be shown",

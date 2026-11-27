@@ -42,6 +42,7 @@ final class BrowserModel: ObservableObject {
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
     let tabsFeature = TabsFeature()  // tabs: sessions, recently closed, sleeping tabs, settings
+    let platform = PlatformServices()  // platform: Gecko runtime installer, engine rules, languages, updates
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -90,6 +91,7 @@ final class BrowserModel: ObservableObject {
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
+        platform.attach(to: self)  // platform: before the first tab, which may pick Chromium if Gecko is missing
 
         startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
@@ -118,6 +120,7 @@ final class BrowserModel: ObservableObject {
 
     @discardableResult
     func newTab(url: String = "", engine requested: EngineKind? = nil, select: Bool = true) -> BrowserTab {
+        let requested = requested ?? engineRule(forNewTabURL: url)  // platform: per-site engine rules
         let tab = makeTab(engine: requested ?? engine)
         insertTab(tab, after: selectedTab, linked: false)  // tabs: workspace, pins, groups
         if select { self.select(tab) }
@@ -196,6 +199,7 @@ final class BrowserModel: ObservableObject {
         let tab = selectedTab ?? newTab()
         let wasStartPage = tab.isStartPage
         isEditingAddress = false
+        applyEngineRule(for: url, to: tab)  // platform: per-site engine rules
         load(url.absoluteString, in: tab)
         offerSwitchIfAlreadyOpen(tab, wasStartPage: wasStartPage)  // tabs: duplicate detection
         focusContent()
@@ -347,6 +351,7 @@ final class BrowserModel: ObservableObject {
             notice = "The Chromium engine is not bundled in this build. Run Scripts/bootstrap.sh and rebuild."
             return
         }
+        if beginSafeEngineSwitch(to: kind) { return }  // platform: keeps the page until the other engine has loaded it
         setEnginePreference(kind, remember: true)
         guard let tab = selectedTab, tab.engine != kind else { return }
         let url = tab.url
@@ -589,6 +594,23 @@ final class BrowserModel: ObservableObject {
                 notice = error.localizedDescription
             }
         }
+    }
+
+    // MARK: - Platform hooks (owner: platform; logic in Features/Platform/BrowserModel+Platform.swift)
+    // Narrow access to private state for safe engine switching and per-site rules.
+
+    func platformReleaseEngine(of tab: BrowserTab) { detachFromEngine(tab) }
+    func platformRefreshDocking() { updateDocking() }
+    func platformFollowEngine(_ kind: EngineKind, remember: Bool) { setEnginePreference(kind, remember: remember) }
+    /// Hides a Gecko tab from mirroring (a page being loaded in the background), or shows it again.
+    func platformHideGeckoTab(_ id: Int, _ hidden: Bool) {
+        if hidden { closedGeckoIDs.insert(id) } else { closedGeckoIDs.remove(id) }
+    }
+    /// Runs `body` (which opens a Gecko tab) without that tab being adopted as a new Mosaic tab.
+    func platformOpeningGeckoTab<T>(_ body: () async throws -> T) async rethrows -> T {
+        pendingGeckoOpens += 1
+        defer { pendingGeckoOpens -= 1 }
+        return try await body()
     }
 
     func shutdown() {
