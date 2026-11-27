@@ -49,6 +49,9 @@ cp "$BIN/Mosaic" "$APP/Contents/MacOS/Mosaic"
 fill_plist "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist" "Mosaic" ""
 cp "$ROOT/Resources/gecko/"* "$APP/Contents/Resources/gecko/"
 [[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
+# Reader view for Chromium tabs: Mozilla's Readability (Apache 2.0, with its licence) and
+# Mosaic's reader page.
+cp -R "$ROOT/Resources/reader" "$APP/Contents/Resources/"
 
 # Built-in content blocker: uBlock Origin's engine (bundled from source by
 # bootstrap.sh), a snapshot of its filter lists for first launch, and its licence.

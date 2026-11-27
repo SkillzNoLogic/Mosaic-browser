@@ -230,6 +230,10 @@ const FORWARDED_WITH_SHIFT = { e: "toggleEngine", b: "toggleBookmarksBar" };
 const SWALLOWED_WITH_SHIFT = new Set(IS_MAC ? ["w", "n", "p"] : ["w", "n", "p", "q"]);
 
 function onKeyDown(event) {
+  // productivity: shortcuts the user assigned in Mosaic (see forwardCustomShortcut).
+  if (forwardCustomShortcut(event)) {
+    return;
+  }
   if (!hasShortcutModifier(event)) {
     return;
   }
@@ -493,6 +497,83 @@ function cookieHeaderFor(url) {
 function passwords() {
   return ChromeUtils.importESModule("resource://mosaic/passwords.sys.mjs").MosaicPasswords;
 }
+// ---- Customised shortcuts and reader view (productivity) --------------------
+//
+// Mosaic lets the user change its keyboard shortcuts. Shortcuts pressed while a Gecko
+// page has focus never reach Mosaic's menus, so Mosaic sends the current list here and
+// matching key presses are queued as events ("productivity.shortcut:<command>").
+
+/** Chord ("accel+shift+k") → event type. Empty until Mosaic sends a list. */
+const customShortcuts = new Map();
+
+/** Characters that already imply Shift; Mosaic stores such chords without "shift". */
+const SHIFTED_SYMBOLS = new Set([..."~!@#$%^&*()_+{}|:\"<>?"]);
+
+/**
+ * The chord of a key press, in the form Mosaic sends: modifiers in the order accel
+ * (Command on macOS, Control elsewhere), ctrl (macOS only), alt, shift, then the key as
+ * KeyboardEvent.key (letters lower-case).
+ */
+function chordOf(event) {
+  let key = event.key;
+  if (event.altKey) {
+    // Option changes the character on macOS (Option-K types "˚"): use the physical key.
+    const match = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code);
+    if (match) {
+      key = match[1] ?? match[2];
+    }
+  }
+  if (key.length === 1) {
+    key = key.toLowerCase();
+  }
+  const shift = event.shiftKey && !(key.length === 1 && SHIFTED_SYMBOLS.has(key));
+  const parts = [];
+  if (IS_MAC ? event.metaKey : event.ctrlKey) {
+    parts.push("accel");
+  }
+  if (IS_MAC && event.ctrlKey) {
+    parts.push("ctrl");
+  }
+  if (event.altKey) {
+    parts.push("alt");
+  }
+  if (shift) {
+    parts.push("shift");
+  }
+  parts.push(key);
+  return parts.join("+");
+}
+
+function forwardCustomShortcut(event) {
+  if (customShortcuts.size === 0 || ["Meta", "Control", "Alt", "Shift"].includes(event.key)) {
+    return false;
+  }
+  const type = customShortcuts.get(chordOf(event));
+  if (!type) {
+    return false;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  pendingEvents.push({ type });
+  return true;
+}
+
+/** The address an about:reader page shows, or null for any other page. */
+function readerOriginalURL(spec) {
+  if (!spec.startsWith("about:reader?")) {
+    return null;
+  }
+  return new URLSearchParams(spec.slice("about:reader?".length)).get("url");
+}
+
+/** Preferences of Gecko's reader view that Mosaic keeps in step with its own settings. */
+const READER_PREFS = {
+  "reader.font_type": "char",
+  "reader.font_size": "int",
+  "reader.content_width": "int",
+  "reader.line_height": "int",
+  "reader.color_scheme": "char",
+};
 
 export const Agent = {
   /**
@@ -945,6 +1026,91 @@ export const Agent = {
   async passwordsFillGenerated(id, origin, password) {
     const count = await passwords().fill(requireTab(id).browser, origin, "MosaicPasswords:fillGenerated", { password });
     return JSON.stringify(count);
+  },
+
+  // ---- Customised shortcuts and reader view (productivity) ---------------
+
+  /**
+   * Replaces the list of Mosaic shortcuts to forward while a page has focus:
+   * `pairs` is [[chord, eventType], …] (see chordOf for the chord format).
+   */
+  setForwardedShortcuts(pairs) {
+    customShortcuts.clear();
+    for (const [chord, type] of pairs) {
+      customShortcuts.set(String(chord), String(type));
+    }
+    return JSON.stringify(customShortcuts.size);
+  },
+
+  /**
+   * Reader view state of a tab: `available` once Gecko has judged the page to be an
+   * article, `active` while the tab shows about:reader, with the original address.
+   */
+  readerInfo(id) {
+    const { browser } = requireTab(id);
+    const spec = browser.currentURI?.spec ?? "";
+    const original = readerOriginalURL(spec);
+    return JSON.stringify({ available: !!browser.isArticle || original !== null, active: original !== null, original });
+  },
+
+  /**
+   * Shows the tab in Gecko's reader view (`on` true) or returns to the page (false).
+   * Entering goes through the page's AboutReader actor, as Firefox's own reader button
+   * does, so the article it already parsed is reused. Leaving steps back in history when
+   * the previous entry is the original page (so it is not reloaded), else loads it.
+   */
+  setReaderMode(id, on) {
+    const { browser } = requireTab(id);
+    const spec = browser.currentURI?.spec ?? "";
+    const original = readerOriginalURL(spec);
+    if ((original !== null) === !!on) {
+      return "true";
+    }
+    if (on) {
+      const actor = browser.browsingContext?.currentWindowGlobal?.getActor("AboutReader");
+      if (actor) {
+        actor.sendAsyncMessage("Reader:ToggleReaderMode", {});
+      } else {
+        load(browser, "about:reader?url=" + encodeURIComponent(spec));
+      }
+      return "true";
+    }
+    let previous = null;
+    try {
+      const history = browser.browsingContext.sessionHistory;
+      previous = history.index > 0 ? history.getEntryAtIndex(history.index - 1).URI.spec : null;
+    } catch (_) {}
+    if (browser.canGoBack && previous === original) {
+      browser.goBack();
+    } else {
+      load(browser, original);
+    }
+    return "true";
+  },
+
+  /** Current values of the reader preferences Mosaic manages (READER_PREFS). */
+  readerPrefs() {
+    const prefs = {};
+    for (const [name, type] of Object.entries(READER_PREFS)) {
+      if (Services.prefs.getPrefType(name) === Services.prefs.PREF_INVALID) {
+        continue;
+      }
+      prefs[name] = type === "int" ? Services.prefs.getIntPref(name) : Services.prefs.getCharPref(name);
+    }
+    return JSON.stringify(prefs);
+  },
+
+  /** Sets reader preferences (only the names in READER_PREFS); open reader pages follow. */
+  setReaderPrefs(prefs) {
+    for (const [name, value] of Object.entries(prefs ?? {})) {
+      const type = READER_PREFS[name];
+      if (type === "int") {
+        Services.prefs.setIntPref(name, Math.round(Number(value)));
+      } else if (type === "char") {
+        Services.prefs.setCharPref(name, String(value));
+      }
+    }
+    return "true";
   },
 
   /** Sizes of the window's top-level boxes; for diagnosing leftover chrome. */

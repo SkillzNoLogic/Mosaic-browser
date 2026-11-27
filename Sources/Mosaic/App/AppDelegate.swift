@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func setUp(chromiumAvailable: Bool) {
         model = BrowserModel(chromiumAvailable: chromiumAvailable)
         NSApp.mainMenu = makeMainMenu()
+        model.productivity.start()  // productivity: applies customised shortcuts, watches tabs
         window = makeWindow()
         model.applyStartupPage()
         // No explicit activation: Launch Services decides whether Mosaic comes
@@ -115,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// Last chance to clean up; runs once however the app is quit.
     func prepareToQuit() {
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver) }
+        model?.productivity.reader.prepareToQuit()  // productivity: releases page-script channels
         model?.shutdown()
     }
 
@@ -188,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         view.addItem(item("Block Ads and Trackers", #selector(toggleBlocker), "b", [.command, .shift, .option]))
         view.addItem(.separator())
         // [engine] Zoom In, Zoom Out, Actual Size, Developer Tools
-        // [productivity] Reader Mode
+        view.addItem(item("Reader View", #selector(toggleReader), "r", [.command, .shift]))  // productivity
         main.addItem(submenu: view, title: "View")
 
         let history = NSMenu(title: "History")
@@ -211,6 +213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         // Tabs area: the Tab menu (search, pin, duplicate, mute, unload, groups, workspaces, ⌘1–9).
         main.addItem(submenu: tabsMenu.makeTabMenu(), title: "Tab")
+
+        // productivity
+        let tools = NSMenu(title: "Tools")
+        tools.addItem(item("Command Palette…", #selector(showCommandPalette), "k"))
+        main.addItem(submenu: tools, title: "Tools")
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
@@ -263,6 +270,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc private func newPrivateTab() { model.newPrivateTab() }  // privacy area
     @objc private func clearBrowsingData() { model.showClearBrowsingData() }  // privacy area
+    @objc private func toggleReader() { model.toggleReaderMode() }  // productivity
+    @objc private func showCommandPalette() { model.showCommandPalette() }  // productivity
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
@@ -281,6 +290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         case #selector(showSettings):
             menuItem.title = model.settingsCategory == nil ? "Settings…" : "Close Settings"
             return true
+        case #selector(toggleReader):  // productivity
+            return model.productivity.reader.validate(menuItem)
         default:
             return true
         }

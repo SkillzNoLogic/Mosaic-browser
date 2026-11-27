@@ -48,6 +48,7 @@ final class BrowserModel: ObservableObject {
     let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
     let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
     private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker)
+    lazy var productivity = Productivity(model: self)  // palette, reader, shortcuts, Speed Dial
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -517,6 +518,8 @@ final class BrowserModel: ObservableObject {
         case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
         case "passwords": if let message = event.passwords { passwords.handleGecko(message) }  // passwords
         case "newPrivateTab": newPrivateTab()  // privacy area
+        // productivity: customised shortcuts pressed in a Gecko page.
+        case let type where type.hasPrefix("productivity."): productivity.handleGeckoEvent(type)
         default: break
         }
     }

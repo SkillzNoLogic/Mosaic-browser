@@ -102,6 +102,8 @@ final class Automation {
         // downloads area: "download…" commands, listed in DownloadManager+Automation.swift.
         case _ where action.hasPrefix("download"):
             model.downloads.handleAutomation(action, value: value, command: command)
+        // productivity: palette, reader, shortcuts, Speed Dial (Productivity+Automation.swift).
+        case _ where model.productivity.handleAutomation(action, value: value, command: command): break
         default: break
         }
     }
@@ -172,6 +174,7 @@ final class Automation {
             "downloads": model.downloads.automationState(), // downloads area
             "passwords": model.passwords.automationState(),  // passwords (never includes a password)
             "privacy": model.privacyDump(),  // privacy area
+            "productivity": model.productivity.automationState,
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell

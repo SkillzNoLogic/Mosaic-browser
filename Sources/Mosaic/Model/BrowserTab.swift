@@ -62,6 +62,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     /// the tab is created, and never changed. History, passwords, downloads lists and
     /// session restore must not record anything from a tab where this is true.
     @Published var isPrivate = false
+    // Reader view (productivity area; set by ReaderMode, read by the shell's indicator).
+    /// The page looks like an article that reader view can show.
+    @Published var isReaderAvailable = false
+    /// The tab is showing its page in reader view.
+    @Published var isReaderActive = false
 
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?

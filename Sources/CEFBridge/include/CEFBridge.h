@@ -115,6 +115,38 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// MARK: Page scripts (productivity area, for reader mode; usable by any feature)
+// Implemented in MCEFBrowserView+Script.mm over CEF's in-process DevTools protocol.
+@interface MCEFBrowserView (MosaicScript)
+
+/// True once the browser exists (scripts can run).
+@property(nonatomic, readonly) BOOL hasPageScriptSupport;
+
+/// Evaluates `script` in the page's main frame, awaiting it if it returns a promise.
+/// `value` is the JSON-compatible result (NSString, NSNumber, NSArray, NSDictionary, NSNull).
+- (void)evaluatePageScript:(NSString *)script
+                completion:(void (^)(id _Nullable value, NSString *_Nullable error))completion;
+
+/// Installs a function `window[name](string)` in this browser's pages (now and after every
+/// navigation); each call delivers its string to `handler`. Pages can call it too, so treat
+/// payloads as untrusted input.
+- (void)addPageMessageHandlerNamed:(NSString *)name handler:(void (^)(NSString *payload))handler;
+
+/// Removes the page function and handler added with `addPageMessageHandlerNamed:handler:`.
+- (void)removePageMessageHandlerNamed:(NSString *)name;
+
+/// Drops every page-script handler and pending call (done by `closeBrowser`): a DevTools
+/// observer left registered would hold up closing the browser.
+- (void)releasePageScripts;
+
+/// Calls any DevTools protocol method (e.g. "Page.captureScreenshot") on this browser.
+/// `result` is the method's result dictionary; `error` is set when it failed.
+- (void)callDevToolsMethod:(NSString *)method
+                    params:(nullable NSDictionary<NSString *, id> *)params
+                completion:(void (^)(NSDictionary *_Nullable result, NSString *_Nullable error))completion;
+
+@end
+
 NS_ASSUME_NONNULL_END
 
 // Passwords (area: passwords): save/fill additions, in their own header.
