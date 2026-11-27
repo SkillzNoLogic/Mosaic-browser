@@ -94,6 +94,9 @@ final class Automation {
         case _ where LibraryAutomation.handles(action):
             LibraryAutomation.run(action, value: value, out: command["out"] as? String, model: model)
         case "quit": NSApp.terminate(nil)
+        // downloads area: "download…" commands, listed in DownloadManager+Automation.swift.
+        case _ where action.hasPrefix("download"):
+            model.downloads.handleAutomation(action, value: value, command: command)
         default: break
         }
     }
@@ -161,6 +164,7 @@ final class Automation {
             "extensionsBusy": model.extensions.isBusy,
             "platform": PlatformAutomation.dump(model),  // platform
             "library": LibraryAutomation.dumpFields(model),  // library
+            "downloads": model.downloads.automationState(), // downloads area
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {

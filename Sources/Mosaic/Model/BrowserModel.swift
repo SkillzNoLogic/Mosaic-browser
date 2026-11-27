@@ -43,6 +43,7 @@ final class BrowserModel: ObservableObject {
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
     let tabsFeature = TabsFeature()  // tabs: sessions, recently closed, sleeping tabs, settings
     let platform = PlatformServices()  // platform: Gecko runtime installer, engine rules, languages, updates
+    lazy var downloads = DownloadManager(model: self) // downloads area; created at the end of init
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -92,6 +93,7 @@ final class BrowserModel: ObservableObject {
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
         platform.attach(to: self)  // platform: before the first tab, which may pick Chromium if Gecko is missing
+        _ = downloads // downloads area: starts receiving both engines' downloads
 
         startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }

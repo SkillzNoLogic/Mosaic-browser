@@ -130,8 +130,19 @@ final class GeckoEngine: ObservableObject {
     /// An isolated profile has no engine of its own installed, so the user's private copy
     /// (in the standard Mosaic folder) is used as well, read-only.
     private static func locateRuntime() -> GeckoRuntime? {
-        GeckoRuntime.locate(applicationSupport: AppPaths.support)
-            ?? (AppPaths.isIsolatedProfile ? GeckoRuntime.locate(applicationSupport: AppPaths.standardSupport) : nil)
+        // An isolated profile prefers its own private runtime, then the user's private Firefox
+        // ESR, and only then a Gecko browser found in /Applications. Checking /Applications
+        // first would run whichever browser happens to be installed (Zen, Nightly…), whose newer
+        // Gecko marks the test profile as too new for ESR.
+        if AppPaths.isIsolatedProfile, ProcessInfo.processInfo.environment["MOSAIC_GECKO_PRIVATE_ONLY"] != "1" {
+            for support in [AppPaths.support, AppPaths.standardSupport] {
+                let managed = GeckoRuntime.managedAppURL(applicationSupport: support)
+                if let runtime = GeckoRuntime(appURL: managed, isManaged: support == AppPaths.support) {
+                    return runtime
+                }
+            }
+        }
+        return GeckoRuntime.locate(applicationSupport: AppPaths.support)
     }
 
     // MARK: - Lifecycle
