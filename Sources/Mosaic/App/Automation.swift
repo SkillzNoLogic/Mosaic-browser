@@ -86,6 +86,9 @@ final class Automation {
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
         case "dump": dump(to: value)
+        // library: bookmarks, history, suggestions, import/export (Features/Library/LibraryAutomation.swift)
+        case _ where LibraryAutomation.handles(action):
+            LibraryAutomation.run(action, value: value, out: command["out"] as? String, model: model)
         case "quit": NSApp.terminate(nil)
         default: break
         }
@@ -152,6 +155,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "library": LibraryAutomation.dumpFields(model),  // library
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)

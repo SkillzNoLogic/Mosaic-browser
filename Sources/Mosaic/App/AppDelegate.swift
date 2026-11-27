@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var window: NSWindow!
     private var workspaceObserver: NSObjectProtocol?
     private var automation: Automation?
+    private var libraryMenus: LibraryMenus?  // library: Bookmarks menu, History additions
 
     /// Builds the model, window and menus. Called before the event loop starts.
     func setUp(chromiumAvailable: Bool) {
@@ -162,6 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         history.addItem(item("Back", #selector(goBack), "["))
         history.addItem(item("Forward", #selector(goForward), "]"))
         main.addItem(submenu: history, title: "History")
+        // library: Show All History, recently visited, the Bookmarks menu (Features/Library/LibraryMenus.swift)
+        let libraryMenus = LibraryMenus(model: model)
+        self.libraryMenus = libraryMenus
+        libraryMenus.extendHistoryMenu(history)
+        main.addItem(submenu: libraryMenus.makeBookmarksMenu(), title: "Bookmarks")
 
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")

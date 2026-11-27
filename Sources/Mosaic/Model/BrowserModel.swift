@@ -173,6 +173,7 @@ final class BrowserModel: ObservableObject {
     }
 
     private func tabChanged(_ tab: BrowserTab) {
+        library.tabDidChange(tab, in: self)  // library: history from every tab, both engines (HistoryRecorder)
         guard tab.id == selectedTabID else { return }
         // The toolbar reads the selected tab's state through the model.
         objectWillChange.send()
@@ -185,10 +186,12 @@ final class BrowserModel: ObservableObject {
 
     /// Handles whatever was submitted in the address bar or the start page.
     func navigate(_ input: String) {
-        guard let url = AddressResolver.resolve(input, searchEngine: searchEngine) else { return }
+        // library: resolve() adds search keywords ("w swift") to AddressResolver.
+        guard let url = library.resolve(input, searchEngine: searchEngine) else { return }
         let tab = selectedTab ?? newTab()
         isEditingAddress = false
         load(url.absoluteString, in: tab)
+        library.noteTypedNavigation(in: tab)  // library: typed visits rank higher
         focusContent()
     }
 
@@ -583,6 +586,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func shutdown() {
+        library.flushPendingVisits()  // library: record visits still waiting for their title
         gecko.stopAndWait()
     }
 }
