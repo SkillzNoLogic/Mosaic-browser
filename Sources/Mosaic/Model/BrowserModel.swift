@@ -46,6 +46,7 @@ final class BrowserModel: ObservableObject {
     lazy var downloads = DownloadManager(model: self) // downloads area; created at the end of init
     let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
     let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
+    let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -96,6 +97,7 @@ final class BrowserModel: ObservableObject {
         blocker.start()
         platform.attach(to: self)  // platform: before the first tab, which may pick Chromium if Gecko is missing
         _ = downloads // downloads area: starts receiving both engines' downloads
+        passwords.attach(to: self)  // passwords: connects to both engines
 
         startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
@@ -498,6 +500,7 @@ final class BrowserModel: ObservableObject {
         case "toggleBlocker": toggleBlocker()
         case "toggleBookmarksBar": library.showsBookmarksBar.toggle()  // ⇧⌘B pressed inside a Gecko page
         case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
+        case "passwords": if let message = event.passwords { passwords.handleGecko(message) }  // passwords
         default: break
         }
     }

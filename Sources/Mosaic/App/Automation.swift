@@ -88,6 +88,8 @@ final class Automation {
         case "activate": NSApp.activate(ignoringOtherApps: true)
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
+        case let action where action.hasPrefix("passwords"):  // passwords: see PasswordsAutomation.swift
+            model.passwords.automation(action, value: value, command: command)
         case "dump": dump(to: value)
         // Tabs area: pin, mute, duplicate, workspaces, groups, sleeping tabs… (Features/Tabs/TabsAutomation.swift)
         case let tabs where TabsAutomation.commands.contains(tabs):
@@ -167,6 +169,7 @@ final class Automation {
             "platform": PlatformAutomation.dump(model),  // platform
             "library": LibraryAutomation.dumpFields(model),  // library
             "downloads": model.downloads.automationState(), // downloads area
+            "passwords": model.passwords.automationState(),  // passwords (never includes a password)
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell

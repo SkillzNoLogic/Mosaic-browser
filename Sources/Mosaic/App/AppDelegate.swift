@@ -163,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         edit.addItem(.separator())
         // [engine] Find…, Find Next, Find Previous
         // [productivity] Command Palette
+        model.passwords.menu.addItems(to: edit, model: model)  // passwords: Fill Password (⌘\) and more
         main.addItem(submenu: edit, title: "Edit")
 
         let view = NSMenu(title: "View")

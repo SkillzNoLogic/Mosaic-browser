@@ -89,6 +89,8 @@ final class GeckoEngine: ObservableObject {
 
     struct Event: Decodable, Equatable {
         let type: String
+        /// passwords: payload of "passwords" events (decoding never fails; see PasswordPageMessage).
+        var passwords: PasswordPageMessage? = nil
     }
 
     struct Snapshot: Decodable {
