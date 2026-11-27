@@ -14,6 +14,8 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 
+#include "CEFPasswords.h"  // passwords: save/fill hooks (CEFPasswords.mm)
+
 #if !__has_feature(objc_arc)
 #error "CEFBridge must be compiled with ARC"
 #endif
@@ -140,6 +142,17 @@ class MosaicClient : public CefClient,
     [view.delegate browserView:view didChangeURL:ToNSString(url)];
   }
 
+  // Passwords (area: passwords): page-script messages; see CEFPasswords.mm.
+  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                        cef_log_severity_t level,
+                        const CefString& message,
+                        const CefString& source,
+                        int line) override {
+    CEF_REQUIRE_UI_THREAD();
+    MCEFBrowserView* view = view_;
+    return mosaic_passwords::ConsoleMessage(view, browser, message);
+  }
+
   // CefLifeSpanHandler
   bool OnBeforePopup(CefRefPtr<CefBrowser> browser,
                      CefRefPtr<CefFrame> frame,
@@ -213,6 +226,12 @@ class MosaicClient : public CefClient,
               didChangeLoading:isLoading
                      canGoBack:canGoBack
                   canGoForward:canGoForward];
+  }
+
+  // Passwords (area: passwords): injects the form watcher; see CEFPasswords.mm.
+  void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+    CEF_REQUIRE_UI_THREAD();
+    mosaic_passwords::FrameLoaded(browser, frame);
   }
 
   void OnLoadError(CefRefPtr<CefBrowser> browser,
@@ -539,6 +558,11 @@ class MosaicClient : public CefClient,
     browser->GetMainFrame()->LoadURL(initial.UTF8String);
   }
   _navigatedBeforeCreation = NO;
+}
+
+// Passwords (area: passwords): CEFPasswords.mm reaches the browser through this.
+- (CefRefPtr<CefBrowser>)mosaicPasswordsBrowser {
+  return _browser;
 }
 
 - (void)mosaicBrowserClosed {

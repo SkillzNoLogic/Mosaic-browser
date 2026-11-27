@@ -145,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        model.passwords.menu.addItems(to: edit, model: model)  // passwords: Fill Password (⌘\) and more
         main.addItem(submenu: edit, title: "Edit")
 
         let view = NSMenu(title: "View")

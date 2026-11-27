@@ -85,6 +85,8 @@ final class Automation {
         case "activate": NSApp.activate(ignoringOtherApps: true)
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
+        case let action where action.hasPrefix("passwords"):  // passwords: see PasswordsAutomation.swift
+            model.passwords.automation(action, value: value, command: command)
         case "dump": dump(to: value)
         case "quit": NSApp.terminate(nil)
         default: break
@@ -152,6 +154,7 @@ final class Automation {
             ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "passwords": model.passwords.automationState(),  // passwords (never includes a password)
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)

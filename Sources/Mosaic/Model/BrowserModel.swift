@@ -39,6 +39,7 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -87,6 +88,7 @@ final class BrowserModel: ObservableObject {
         gecko.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &cancellables)
         blocker.start()
+        passwords.attach(to: self)  // passwords: connects to both engines
 
         newTab()
     }
@@ -476,6 +478,7 @@ final class BrowserModel: ObservableObject {
         case "closeTab": closeSelectedTab()
         case "toggleEngine": toggleEngine()
         case "toggleBlocker": toggleBlocker()
+        case "passwords": if let message = event.passwords { passwords.handleGecko(message) }  // passwords
         default: break
         }
     }

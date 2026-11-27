@@ -95,3 +95,6 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 NS_ASSUME_NONNULL_END
+
+// Passwords (area: passwords): save/fill additions, in their own header.
+#import "CEFBridgePasswords.h"

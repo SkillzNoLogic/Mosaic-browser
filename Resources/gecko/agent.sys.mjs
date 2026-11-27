@@ -272,6 +272,16 @@ function extensionPage(id, kind) {
   return /^[a-z-]+:/.test(path) ? path : policy.getURL(path.replace(/^\//, ""));
 }
 
+// ---- Passwords (area: passwords) --------------------------------------------
+//
+// Save and fill live in passwords.sys.mjs and the MosaicPasswords window actors. The agent
+// only hands them its event queue and its tab IDs. Loaded on first use, so a build without
+// those files is unaffected.
+
+function passwords() {
+  return ChromeUtils.importESModule("resource://mosaic/passwords.sys.mjs").MosaicPasswords;
+}
+
 export const Agent = {
   /**
    * Installs Mosaic's hooks in the browser window. Returns "false" until
@@ -579,6 +589,35 @@ export const Agent = {
       return "null";
     }
     return this.openTab(url, true);
+  },
+
+  // ---- Passwords (area: passwords) ----------------------------------------
+
+  /** Starts password support: registers the window actors that watch sign-in forms. */
+  async passwordsStart() {
+    const result = await passwords().start({
+      push: event => pendingEvents.push(event),
+      tabIdFor: browser => {
+        const tab = browserWindow()?.gBrowser?.getTabForBrowser(browser);
+        return tab && !startupTabs.has(tab) ? idOf(tab) : null;
+      },
+    });
+    return JSON.stringify(result);
+  },
+
+  /**
+   * Fills a saved credential into tab `id`, only into frames whose origin is exactly
+   * `origin` (and only if the tab's page has that origin). Returns the fields filled.
+   */
+  async passwordsFill(id, origin, username, password) {
+    const count = await passwords().fill(requireTab(id).browser, origin, "MosaicPasswords:fill", { username, password });
+    return JSON.stringify(count);
+  },
+
+  /** Puts a generated password into the new-password fields of tab `id`. Returns the fields filled. */
+  async passwordsFillGenerated(id, origin, password) {
+    const count = await passwords().fill(requireTab(id).browser, origin, "MosaicPasswords:fillGenerated", { password });
+    return JSON.stringify(count);
   },
 
   /** Sizes of the window's top-level boxes; for diagnosing leftover chrome. */
