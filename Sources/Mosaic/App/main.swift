@@ -8,7 +8,9 @@ import CEFBridge
 let application = MosaicApplication.shared
 
 // One instance only: both engines keep a profile that cannot be shared.
-if let bundleID = Bundle.main.bundleIdentifier {
+// An isolated test profile (MOSAIC_DATA_DIR) has its own engine profiles, so it may run
+// beside the user's copy.
+if !AppPaths.isIsolatedProfile, let bundleID = Bundle.main.bundleIdentifier {
     let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         .filter { $0.processIdentifier != getpid() }
     if let running = others.first {

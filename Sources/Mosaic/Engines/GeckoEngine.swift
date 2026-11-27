@@ -3,9 +3,20 @@ import MosaicCore
 
 /// Where Mosaic keeps its data.
 enum AppPaths {
-    static let support: URL = FileManager.default
+    /// The user's real Mosaic folder in Application Support.
+    static let standardSupport: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Mosaic", isDirectory: true)
+
+    /// Where this instance keeps its data. `MOSAIC_DATA_DIR` points it at another folder:
+    /// an isolated profile for testing, used by the automated checks so that several copies
+    /// can run at once without touching the user's real profile.
+    static let support: URL = ProcessInfo.processInfo.environment["MOSAIC_DATA_DIR"]
+        .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? standardSupport
+
+    /// True when running on an isolated profile (see `support`).
+    static var isIsolatedProfile: Bool { support != standardSupport }
 
     static var geckoProfile: URL { support.appendingPathComponent("Gecko/Profile", isDirectory: true) }
     static var chromiumData: URL { support.appendingPathComponent("Chromium", isDirectory: true) }
@@ -102,7 +113,14 @@ final class GeckoEngine: ObservableObject {
     var processIdentifier: pid_t? { app?.processIdentifier }
 
     init() {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
+    }
+
+    /// An isolated profile has no engine of its own installed, so the user's private copy
+    /// (in the standard Mosaic folder) is used as well, read-only.
+    private static func locateRuntime() -> GeckoRuntime? {
+        GeckoRuntime.locate(applicationSupport: AppPaths.support)
+            ?? (AppPaths.isIsolatedProfile ? GeckoRuntime.locate(applicationSupport: AppPaths.standardSupport) : nil)
     }
 
     // MARK: - Lifecycle
@@ -128,7 +146,7 @@ final class GeckoEngine: ObservableObject {
     }
 
     private func launch() async throws {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
         guard let runtime, let agentDirectory = AppPaths.geckoAgent else { throw GeckoError.noRuntime }
         status = .starting
         generation += 1

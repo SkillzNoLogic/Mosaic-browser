@@ -22,6 +22,16 @@ if [[ ! -f "$CEF/build/libcef_dll_wrapper/libcef_dll_wrapper.a" ]]; then
   exit 1
 fi
 
+# Xcode's toolchain: SwiftUI's macros (@State, @Observable, #Preview) and the Liquid Glass
+# APIs need it; the Command Line Tools alone do not ship the macro plug-ins.
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+if [[ "${DEVELOPER_DIR:-$(xcode-select -p)}" == */CommandLineTools ]]; then
+  echo "Mosaic needs Xcode (27 or later), not just the Command Line Tools: install Xcode, or set DEVELOPER_DIR." >&2
+  exit 1
+fi
+
 cd "$ROOT"
 echo "==> Compiling ($CONFIG)"
 swift build -c "$CONFIG" --arch arm64

@@ -313,13 +313,23 @@ export const Agent = {
     }
     const tabs = [];
     for (const tab of win.gBrowser.tabs) {
-      if (startupTabs.has(tab) || tab.closing) {
+      const browser = tab.linkedBrowser;
+      // A tab being torn down can briefly have no browser left.
+      if (startupTabs.has(tab) || tab.closing || !browser) {
         continue;
       }
-      const browser = tab.linkedBrowser;
       let url = "";
       try {
         url = browser.currentURI?.spec ?? "";
+        // On a brand-new profile the first location change of a tab can fail to
+        // reach the parent process: the page is loaded but currentURI still
+        // reads about:blank. The window global always knows the real document.
+        if (url === "" || url === "about:blank") {
+          const loaded = browser.browsingContext?.currentWindowGlobal?.documentURI?.spec;
+          if (loaded && loaded !== "about:blank") {
+            url = loaded;
+          }
+        }
       } catch (_) {}
       tabs.push({
         id: idOf(tab),
