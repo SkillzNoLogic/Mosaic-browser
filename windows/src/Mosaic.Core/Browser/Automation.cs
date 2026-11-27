@@ -148,6 +148,23 @@ public sealed class Automation
             case "showExtensions":
                 model.ShowExtensions = value != "false";
                 return Success();
+            case "blocker":
+                model.SetBlockerEnabled(value != "off");
+                return Success();
+            case "blockerSite":
+                if (model.SelectedTab is not { } page || ContentBlocker.SiteOfPage(page.Url) is null)
+                {
+                    return Failure("The page in front is not a web page, so the content blocker does not apply to it.");
+                }
+                model.SetBlocking(value != "off", page);
+                return Success();
+            case "showBlocker":
+                model.ShowBlocker = value != "false";
+                return Success();
+            case "updateLists":
+                // Like installing an extension: scripts watch dump's blocker.updating for the outcome.
+                _ = model.Blocker.UpdateListsAsync();
+                return Success();
             case "geckoEval":
                 // {"do": "geckoEval", "value": "<agent method>", "out": "<path>"}
                 var result = await model.Gecko.CallAsync(value);
@@ -184,6 +201,7 @@ public sealed class Automation
                 ["canGoForward"] = tab.CanGoForward,
                 ["geckoId"] = tab.GeckoId ?? -1,
                 ["hasChromiumView"] = tab.Chromium is not null,
+                ["blocked"] = tab.BlockedCount,
                 ["failure"] = tab.Failure ?? "",
                 ["selected"] = ReferenceEquals(tab, model.SelectedTab),
             });
@@ -221,10 +239,22 @@ public sealed class Automation
             ["geckoAttached"] = model.IsGeckoAttached,
             ["notice"] = model.Notice ?? "",
             ["extensions"] = extensions,
+            ["blocker"] = BlockerState(model.Blocker),
             ["extensionError"] = model.Extensions.ErrorMessage ?? "",
             ["extensionsBusy"] = model.Extensions.IsBusy,
         };
     }
+
+    private static JsonObject BlockerState(ContentBlocker blocker) => new()
+    {
+        ["status"] = blocker.Status.ToString().ToLowerInvariant(),
+        ["enabled"] = blocker.IsEnabled,
+        ["allowlist"] = new JsonArray([.. blocker.Settings.Allowlist.Order(StringComparer.Ordinal).Select(site => JsonValue.Create(site))]),
+        ["engineVersion"] = blocker.EngineVersion ?? "",
+        ["updating"] = blocker.IsUpdating,
+        ["filters"] = blocker.FilterCount,
+        ["error"] = blocker.FailureMessage ?? "",
+    };
 
     private static string StatusName(GeckoStatus status) => status switch
     {

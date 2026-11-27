@@ -169,8 +169,8 @@ internal static class Snapshots
 {
     public static GeckoTabState Tab(
         int id, string url, string title = "", bool loading = false, bool canGoBack = false,
-        bool canGoForward = false, bool selected = false) =>
-        new(id, url, title, loading, canGoBack, canGoForward, selected);
+        bool canGoForward = false, bool selected = false, int blocked = 0) =>
+        new(id, url, title, loading, canGoBack, canGoForward, selected, blocked);
 }
 
 internal sealed class FakeChromiumBrowser(string initialUrl) : IChromiumBrowser
@@ -184,6 +184,7 @@ internal sealed class FakeChromiumBrowser(string initialUrl) : IChromiumBrowser
     public event Action<string>? UrlChanged;
     public event Action<ChromiumLoadState>? LoadStateChanged;
     public event Action<string>? NewTabRequested;
+    public event Action<int>? BlockedCountChanged;
     public event Action<string>? Failed;
 
     public void Load(string url) => Loads.Add(url);
@@ -199,6 +200,7 @@ internal sealed class FakeChromiumBrowser(string initialUrl) : IChromiumBrowser
     public void RaiseLoadState(bool loading, bool canGoBack = false, bool canGoForward = false) =>
         LoadStateChanged?.Invoke(new ChromiumLoadState(loading, canGoBack, canGoForward));
     public void RaiseNewTab(string url) => NewTabRequested?.Invoke(url);
+    public void RaiseBlockedCount(int count) => BlockedCountChanged?.Invoke(count);
     public void RaiseFailed(string reason) => Failed?.Invoke(reason);
 }
 

@@ -16,7 +16,8 @@
          compiler checks. Web content (the Gecko host, WebView2) is made of native child windows
          that always draw above WPF content in the same place, so nothing here is ever layered
          over a page: Mosaic's own views take the content area only while the page is hidden, and
-         the one thing that floats above a page, the notice, is a Popup (a window of its own). -->
+         the things that float above a page, the notice and the content blocker's popover, are
+         Popups (windows of their own). -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="38" />
@@ -90,6 +91,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -238,7 +240,91 @@
                 </StackPanel>
             </Border>
 
-            <Button Grid.Column="5"
+            <!-- Content blocker: a shield showing whether the page in front is being filtered and
+                 how much was blocked on it. While the popover is open the button lets clicks
+                 through, so a click on it closes the popover (StaysOpen) instead of reopening it. -->
+            <Button x:Name="BlockerButton"
+                    Grid.Column="5"
+                    Width="Auto"
+                    MinWidth="32"
+                    FontFamily="{x:Static SystemFonts.MessageFontFamily}"
+                    Style="{StaticResource IconButtonStyle}"
+                    IsHitTestVisible="{Binding IsOpen, ElementName=BlockerPopup, Converter={StaticResource InverseBool}}"
+                    Click="Blocker_Click"
+                    ToolTip="{Binding BlockerHelp}"
+                    AutomationProperties.Name="Content blocker"
+                    AutomationProperties.HelpText="{Binding BlockerHelp}">
+                <StackPanel Margin="8,0" Orientation="Horizontal">
+                    <Grid Width="16" Height="16">
+                        <TextBlock x:Name="ShieldGlyph"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontFamily="{StaticResource IconFont}"
+                                   FontSize="14"
+                                   Text="&#xEA18;">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding BlockerShield}" Value="{x:Static browser:BlockerShield.Filtering}">
+                                            <Setter Property="Foreground" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding BlockerShield}" Value="{x:Static browser:BlockerShield.Off}">
+                                            <Setter Property="Opacity" Value="0.55" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <!-- Neither icon font has a crossed-out shield, so the stroke is drawn. -->
+                        <Line X1="2" Y1="14" X2="14" Y2="2"
+                              Stroke="{Binding Foreground, ElementName=ShieldGlyph}"
+                              StrokeThickness="1.5"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round">
+                            <Line.Style>
+                                <Style TargetType="Line">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding BlockerShield}" Value="{x:Static browser:BlockerShield.Off}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Line.Style>
+                        </Line>
+                    </Grid>
+                    <TextBlock Margin="4,0,0,0"
+                               VerticalAlignment="Center"
+                               FontSize="11"
+                               FontWeight="Medium"
+                               Typography.NumeralAlignment="Tabular"
+                               Text="{Binding BlockerBadge}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding BlockerBadge}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Button>
+            <Popup x:Name="BlockerPopup"
+                   Grid.Column="5"
+                   PlacementTarget="{Binding ElementName=BlockerButton}"
+                   Placement="Bottom"
+                   HorizontalOffset="-140"
+                   VerticalOffset="4"
+                   AllowsTransparency="True"
+                   PopupAnimation="Fade"
+                   StaysOpen="False"
+                   Closed="BlockerPopup_Closed">
+                <views:BlockerPopover />
+            </Popup>
+
+            <Button Grid.Column="6"
                     Style="{StaticResource IconButtonStyle}"
                     Content="&#xEA86;"
                     Click="Extensions_Click"

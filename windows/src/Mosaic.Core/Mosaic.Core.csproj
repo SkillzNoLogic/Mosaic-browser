@@ -10,4 +10,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Mosaic.Core.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- V8, to run uBlock Origin's filtering engine for Chromium (WebView2) tabs. The native
+         packages cover the platforms Mosaic ships on plus Apple Silicon, where the tests run. -->
+    <PackageReference Include="Microsoft.ClearScript.V8" Version="7.5.1.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.5.1.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.win-arm64" Version="7.5.1.1" />
+    <PackageReference Include="Microsoft.ClearScript.V8.Native.osx-arm64" Version="7.5.1.1" />
+  </ItemGroup>
 </Project>

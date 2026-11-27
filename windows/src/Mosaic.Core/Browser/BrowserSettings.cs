@@ -16,6 +16,8 @@ public sealed class BrowserSettings
     private const string SearchEngineKey = "searchEngine";
     private const string EngineKey = "engine";
     private const string ChromiumExtensionsKey = "chromiumExtensions";
+    private const string BlockerEnabledKey = "blockerEnabled";
+    private const string BlockerAllowlistKey = "blockerAllowlist";
 
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
@@ -42,6 +44,11 @@ public sealed class BrowserSettings
                 }
             }
         }
+        if (stored[BlockerEnabledKey] is JsonValue enabled && enabled.TryGetValue(out bool isEnabled)) BlockerEnabled = isEnabled;
+        if (stored[BlockerAllowlistKey] is JsonArray sites)
+        {
+            BlockerAllowlist = [.. sites.OfType<JsonValue>().Select(site => site.TryGetValue(out string? text) ? text : null).OfType<string>()];
+        }
     }
 
     /// <summary><see cref="Search.SearchEngine.Id"/> of the chosen search engine; null if never chosen.</summary>
@@ -56,6 +63,12 @@ public sealed class BrowserSettings
     /// between runs, so this is how Mosaic recognises its own extensions next time.
     /// </summary>
     public IReadOnlyDictionary<string, string> ChromiumExtensionIds => chromiumExtensionIds;
+
+    /// <summary>The content blocker's master switch; null if never switched, which means on.</summary>
+    public bool? BlockerEnabled { get; set; }
+
+    /// <summary>Sites the content blocker is switched off for (see <see cref="Blocker.BlockerSettings"/>).</summary>
+    public IReadOnlyList<string> BlockerAllowlist { get; set; } = [];
 
     public void SetChromiumExtensionId(string chromeId, string? chromiumId)
     {
@@ -77,6 +90,11 @@ public sealed class BrowserSettings
                 ids[chromeId] = chromiumId;
             }
             root[ChromiumExtensionsKey] = ids;
+        }
+        if (BlockerEnabled is { } blockerEnabled) root[BlockerEnabledKey] = blockerEnabled;
+        if (BlockerAllowlist.Count > 0)
+        {
+            root[BlockerAllowlistKey] = new JsonArray([.. BlockerAllowlist.Order(StringComparer.Ordinal).Select(site => JsonValue.Create(site))]);
         }
 
         try

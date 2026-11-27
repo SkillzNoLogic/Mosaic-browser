@@ -4,3 +4,4 @@ artifacts/
 publish/
 *.user
 .vs/
+vendor/

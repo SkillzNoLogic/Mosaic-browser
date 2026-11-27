@@ -16,6 +16,14 @@ public sealed class InverseBooleanToVisibilityConverter : IValueConverter
         value is not Visibility.Visible;
 }
 
+/// <summary>Negates a flag: an element that is enabled or hit-testable while something is off.</summary>
+public sealed class InverseBooleanConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value is not true;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => value is not true;
+}
+
 /// <summary>
 /// Turns the path of an extension's icon into an image.
 /// </summary>

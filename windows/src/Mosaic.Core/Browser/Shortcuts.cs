@@ -45,6 +45,7 @@ public static class Shortcuts
         (ShortcutModifiers.Control | ShortcutModifiers.Shift, 'E') => BrowserCommand.ToggleEngine,
         (ShortcutModifiers.Control | ShortcutModifiers.Shift, 'S') => BrowserCommand.NextSearchEngine,
         (ShortcutModifiers.Control | ShortcutModifiers.Shift, 'X') => BrowserCommand.ShowExtensions,
+        (ShortcutModifiers.Control | ShortcutModifiers.Shift, 'B') => BrowserCommand.ToggleBlocker,
         _ => null,
     };
 }

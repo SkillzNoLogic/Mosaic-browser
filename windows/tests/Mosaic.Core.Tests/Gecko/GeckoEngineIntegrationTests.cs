@@ -1,7 +1,12 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Text.Json.Nodes;
+using Mosaic.Core.Browser;
 using Mosaic.Core.Gecko;
+using Mosaic.Core.Tests.Blocker;
 
 namespace Mosaic.Core.Tests.Gecko;
 
@@ -17,6 +22,18 @@ public sealed class GeckoFactAttribute : FactAttribute
         {
             Skip = $"Set {GeckoRuntime.OverrideVariable} to a Firefox executable to run the Gecko integration tests.";
         }
+    }
+}
+
+/// <summary>
+/// A <see cref="GeckoFactAttribute"/> that also needs uBlock Origin's engine bundle
+/// (<see cref="UBlockBundle"/>).
+/// </summary>
+public sealed class GeckoBlockerFactAttribute : FactAttribute
+{
+    public GeckoBlockerFactAttribute()
+    {
+        Skip = new GeckoFactAttribute().Skip ?? new UBlockFactAttribute().Skip;
     }
 }
 
@@ -120,12 +137,21 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
             get { lock (_snapshots) return _snapshots.LastOrDefault(); }
         }
 
-        public async Task<GeckoSnapshot> UntilAsync(Func<GeckoSnapshot, bool> reached, string what)
+        /// <summary>How many snapshots have arrived so far.</summary>
+        public int Count
+        {
+            get { lock (_snapshots) return _snapshots.Count; }
+        }
+
+        /// <param name="reached">The state to wait for.</param>
+        /// <param name="what">Names that state in the failure message.</param>
+        /// <param name="after">Only snapshots that arrive after this many count.</param>
+        public async Task<GeckoSnapshot> UntilAsync(Func<GeckoSnapshot, bool> reached, string what, int after = 0)
         {
             var clock = Stopwatch.StartNew();
             while (true)
             {
-                if (Latest is { } latest && reached(latest)) return latest;
+                if (Count > after && Latest is { } latest && reached(latest)) return latest;
                 Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30),
                     $"Gecko never reported {what}; last tabs: {string.Join(" | ", Latest?.Tabs ?? [])}");
                 await Task.Delay(25);
@@ -367,5 +393,139 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
         engine.Send("quit");
         await Eventually.TrueAsync(() => engine.Status == GeckoStatus.Stopped && Volatile.Read(ref stopped) == 1);
         await Eventually.TrueAsync(() => !IsRunning(processId));
+    }
+
+    /// <summary>
+    /// Serves one page on a loopback port: the blocker only filters web pages, so the page cannot
+    /// be a <c>data:</c> URL. The page asks for a well-known ad script on a host that is never
+    /// contacted (a blocked request is cancelled before any connection) and for an image of its own.
+    /// A bare <see cref="TcpListener"/>, because <see cref="HttpListener"/> needs administrator
+    /// rights (a URL reservation) on Windows.
+    /// </summary>
+    private sealed class PageServer : IDisposable
+    {
+        public const string AdScript = "http://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js";
+
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private int _pageLoads;
+
+        public PageServer()
+        {
+            _listener.Start();
+            Url = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}/";
+            _ = AcceptAsync();
+        }
+
+        public string Url { get; }
+        public string ImageUrl => Url + "pixel.gif";
+        public int PageLoads => Volatile.Read(ref _pageLoads);
+
+        private async Task AcceptAsync()
+        {
+            while (true)
+            {
+                TcpClient client;
+                try
+                {
+                    client = await _listener.AcceptTcpClientAsync();
+                }
+                catch (Exception error) when (error is SocketException or ObjectDisposedException or InvalidOperationException)
+                {
+                    return; // stopped
+                }
+                _ = ServeAsync(client);
+            }
+        }
+
+        private async Task ServeAsync(TcpClient client)
+        {
+            using var _ = client;
+            try
+            {
+                var stream = client.GetStream();
+                using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+                // Browsers open connections ahead of need; one that never sends a request is dropped.
+                using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var requestLine = await reader.ReadLineAsync(patience.Token);
+                while (!string.IsNullOrEmpty(await reader.ReadLineAsync(patience.Token))) { }
+
+                var isPage = requestLine?.StartsWith("GET / ", StringComparison.Ordinal) == true;
+                if (isPage) Interlocked.Increment(ref _pageLoads);
+                var body = Encoding.UTF8.GetBytes(isPage
+                    ? $"<!doctype html><title>Mosaic blocker test</title><script src=\"{AdScript}\"></script><img src=\"{ImageUrl}\">"
+                    : "GIF89a");
+                var head = Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 200 OK\r\nContent-Type: {(isPage ? "text/html; charset=utf-8" : "image/gif")}\r\n" +
+                    $"Content-Length: {body.Length}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
+                await stream.WriteAsync(head);
+                await stream.WriteAsync(body);
+            }
+            catch (Exception error) when (error is IOException or OperationCanceledException or SocketException)
+            {
+                // The browser gave up on the connection; nothing to serve.
+            }
+        }
+
+        public void Dispose() => _listener.Stop();
+    }
+
+    [GeckoBlockerFact]
+    public async Task TheBlockerCancelsAndCountsInGeckoWhatItBlocksInChromium()
+    {
+        using var server = new PageServer();
+        var engine = NewEngine();
+        var watcher = new Watcher(engine);
+        // The real bundle and list snapshot, installed and compiled exactly as the app does it.
+        var blocker = new ContentBlocker(engine, new BrowserSettings(_profile.File("settings.json")), new ContentBlockerOptions
+        {
+            ResourcesDirectory = UBlockBundle.Directory!,
+            ListsDirectory = _profile.File("lists"),
+            RefreshDelay = TimeSpan.FromDays(1), // never during the test: no list downloads
+        });
+        try
+        {
+            blocker.Start();
+            engine.OnStarted = blocker.ConfigureGeckoAsync;
+            await engine.StartAsync();
+
+            var id = (await engine.CallAsync("openTab", server.Url, true))!.GetValue<int>();
+            async Task<GeckoTabState> LoadedAsync(int loads, string what)
+            {
+                await Eventually.TrueAsync(() => server.PageLoads >= loads, 30, $"Gecko never asked for {what}");
+                // A snapshot taken before the request went out describes the previous load.
+                var after = watcher.Count;
+                var loaded = await watcher.UntilAsync(
+                    snapshot => snapshot.Tabs.Any(tab => tab.Id == id && tab.Title == "Mosaic blocker test" && !tab.Loading),
+                    what, after);
+                return loaded.Tabs.Single(tab => tab.Id == id);
+            }
+
+            // Gecko cancelled the ad script, and only that.
+            var page = await LoadedAsync(1, "the page");
+            Assert.Equal(1, page.Blocked);
+
+            // Chromium's engine, the same bundle hosted in V8, decides the same way.
+            await blocker.Building;
+            Assert.Equal(BlockerStatus.Ready, blocker.Status);
+            Assert.True(blocker.Filter.ShouldBlock(PageServer.AdScript, server.Url, "script"));
+            Assert.False(blocker.Filter.ShouldBlock(server.ImageUrl, server.Url, "image"));
+
+            // Off for the site: nothing is blocked after a reload, and the count starts over.
+            blocker.SetBlocking(false, server.Url);
+            await engine.CallAsync("reload", id);
+            Assert.Equal(0, (await LoadedAsync(2, "the page reloaded with the site exempted")).Blocked);
+
+            blocker.SetBlocking(true, server.Url);
+            await engine.CallAsync("reload", id);
+            Assert.Equal(1, (await LoadedAsync(3, "the page reloaded with the blocker back on")).Blocked);
+
+            blocker.SetEnabled(false);
+            await engine.CallAsync("reload", id);
+            Assert.Equal(0, (await LoadedAsync(4, "the page reloaded with the blocker off")).Blocked);
+        }
+        finally
+        {
+            blocker.Shutdown();
+        }
     }
 }

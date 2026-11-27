@@ -28,6 +28,7 @@ public class ShortcutsTests
     [InlineData((int)'E', CtrlShift, BrowserCommand.ToggleEngine)]
     [InlineData((int)'S', CtrlShift, BrowserCommand.NextSearchEngine)]
     [InlineData((int)'X', CtrlShift, BrowserCommand.ShowExtensions)]
+    [InlineData((int)'B', CtrlShift, BrowserCommand.ToggleBlocker)]
     public void ShortcutMapsToItsCommand(int virtualKey, ShortcutModifiers modifiers, BrowserCommand expected) =>
         Assert.Equal(expected, Shortcuts.Match(virtualKey, modifiers));
 
@@ -40,6 +41,7 @@ public class ShortcutsTests
     [InlineData((int)'E', Ctrl)]
     [InlineData((int)'S', Ctrl)]
     [InlineData((int)'X', Ctrl)]
+    [InlineData((int)'B', Ctrl)]
     [InlineData(VkLeft, ShortcutModifiers.None)]
     [InlineData(VkLeft, Ctrl)]
     [InlineData(VkTab, ShortcutModifiers.None)]
@@ -87,5 +89,8 @@ public class ShortcutsTests
 
         model.Execute(BrowserCommand.ShowExtensions);
         Assert.True(model.ShowExtensions);
+
+        model.Execute(BrowserCommand.ToggleBlocker);
+        Assert.False(model.Blocker.IsEnabled);
     });
 }

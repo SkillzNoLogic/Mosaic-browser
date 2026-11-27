@@ -8,6 +8,10 @@
     contains Mosaic.exe with its own copy of the .NET runtime, so the PC that runs it does not
     need .NET installed. It does need the two engines; see bootstrap.ps1.
 
+    The content blocker (uBlock Origin's engine and a snapshot of its filter lists, which
+    bootstrap.ps1 builds into windows\vendor\ublock) is packaged when it has been built; without
+    it the app is built without the blocker, with a warning, as Scripts/build.sh does.
+
 .PARAMETER Runtime
     One or both of win-x64 and win-arm64. Default: the one matching this machine.
     Either can be built on either kind of machine.
@@ -91,6 +95,11 @@ if (-not $Runtime) { $Runtime = @(Get-DefaultRuntime) }
 $Runtime = @($Runtime | Select-Object -Unique)
 $version = Get-MosaicVersion
 
+$blockerBuilt = Test-Path -LiteralPath (Join-Path $windowsRoot 'vendor\ublock\ublock-engine.js')
+if (-not $blockerBuilt) {
+    Write-Warning 'The content blocker has not been built (run scripts\bootstrap.ps1); building without it.'
+}
+
 if (-not $SkipTests) {
     Write-Host '==> Running the unit tests'
     Invoke-DotNet @('test', $testProject, '--configuration', $Configuration)
@@ -110,8 +119,13 @@ foreach ($rid in $Runtime) {
         '--output', $output
     )
 
-    # What the app cannot start without: the executable, and the agent it loads into Gecko.
-    foreach ($required in @('Mosaic.exe', 'gecko\agent.sys.mjs')) {
+    # What the app cannot start without: the executable, and the agent it loads into Gecko; and,
+    # once it has been built, what the content blocker needs and the licence it comes under.
+    $requiredFiles = @('Mosaic.exe', 'gecko\agent.sys.mjs')
+    if ($blockerBuilt) {
+        $requiredFiles += @('blocker\ublock-engine.js', 'blocker\LICENSE-uBlock-Origin.txt', 'blocker\lists\public_suffix_list.dat')
+    }
+    foreach ($required in $requiredFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $output $required))) {
             throw "The published app is incomplete: $required is missing from $output."
         }

@@ -41,6 +41,12 @@ public interface IChromiumBrowser
     event Action<string>? NewTabRequested;
 
     /// <summary>
+    /// The number of requests the content blocker stopped on the current page changed: it went
+    /// up by one, or back to zero because a new page began loading.
+    /// </summary>
+    event Action<int>? BlockedCountChanged;
+
+    /// <summary>
     /// The browser could not be created or its process died. The argument is a user-presentable
     /// reason. The browser is unusable afterwards; the model closes it and shows the reason.
     /// </summary>

@@ -11,11 +11,15 @@
 
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <app:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
+    <app:InverseBooleanConverter x:Key="InverseBool" />
     <app:IconImageConverter x:Key="IconImage" />
 
     <!-- Engine colours: the same two as on macOS. -->
     <SolidColorBrush x:Key="EngineGeckoBrush" Color="#FF731A" />
     <SolidColorBrush x:Key="EngineChromiumBrush" Color="#3385F5" />
+
+    <!-- For warnings; an orange that reads on both light and dark backgrounds. -->
+    <SolidColorBrush x:Key="CautionBrush" Color="#E08A00" />
 
     <!-- Segoe Fluent Icons ships with Windows 11; Segoe MDL2 Assets is its Windows 10
          predecessor and has the same glyphs at the code points used here. -->

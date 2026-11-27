@@ -51,6 +51,9 @@ public partial class App : Application
             settings,
             chromium.IsAvailable ? chromium : null);
         var model = new BrowserModel(gecko, chromium, extensions, settings);
+        // The model has started the blocker, so whether it is part of this build is known; the
+        // first Chromium tab is created later, once the window is up.
+        if (model.Blocker.IsAvailable) chromium.RequestFilter = model.Blocker.Filter;
 
         window = new MainWindow(model, chromium);
         if (e.Args.Contains(OwnedGeckoHostSwitch)) window.GeckoHostMode = GeckoHostMode.Owned;

@@ -54,6 +54,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Set up Node.js (for esbuild, which bundles the content blocker)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
@@ -61,6 +66,11 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
           restore-keys: |
             nuget-${{ runner.os }}-
+
+      - name: Build the content blocker
+        # uBlock Origin's engine bundled from its pinned, checksum-verified source, and today's
+        # snapshot of the filter lists: what the package ships and the engine tests run.
+        run: .\windows\scripts\bootstrap.ps1 -BlockerOnly
 
       - name: Restore
         run: dotnet restore windows/Mosaic.slnx
@@ -79,6 +89,10 @@ jobs:
           }
 
       - name: Unit tests
+        # With the bundle just built, the engine tests run uBlock Origin's real engine, and the
+        # Gecko blocker test runs it inside the runner's Firefox too.
+        env:
+          MOSAIC_UBLOCK_DIR: ${{ github.workspace }}\windows\vendor\ublock
         run: dotnet test windows/tests/Mosaic.Core.Tests --configuration Release --no-build
 
       - name: Gecko process diagnostics
@@ -134,8 +148,9 @@ jobs:
 
       - name: Install the Gecko engine (Firefox ESR)
         # If Mozilla's download is unavailable, smoke.ps1 falls back to the runner's Firefox.
+        # The content blocker comes built in the package.
         continue-on-error: true
-        run: .\windows\scripts\bootstrap.ps1
+        run: .\windows\scripts\bootstrap.ps1 -SkipBlocker
 
       - name: Make sure the WebView2 runtime is installed
         run: |

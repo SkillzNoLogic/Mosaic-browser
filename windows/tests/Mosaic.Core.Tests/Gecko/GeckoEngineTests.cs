@@ -120,8 +120,14 @@ public class GeckoEngineTests
             """);
 
         Assert.True(snapshot!.Ready);
-        Assert.Equal([new GeckoTabState(3, "https://example.com/", "Example", true, true, false, true)], snapshot.Tabs);
+        Assert.Equal([new GeckoTabState(3, "https://example.com/", "Example", true, true, false, true, Blocked: 4)], snapshot.Tabs);
         Assert.Equal(["newTab", "focusAddress"], snapshot.Events);
+        // An agent without the content blocker loaded reports no count.
+        var unfiltered = GeckoEngine.ParseSnapshot("""
+            {"ready":true,"events":[],
+             "tabs":[{"id":1,"url":"","title":"","loading":false,"canGoBack":false,"canGoForward":false,"selected":false}]}
+            """);
+        Assert.Equal(0, Assert.Single(unfiltered!.Tabs).Blocked);
         Assert.Null(GeckoEngine.ParseSnapshot("true"));
         Assert.Null(GeckoEngine.ParseSnapshot("""{"ready":true,"tabs":[{"id":"x"}],"events":[]}"""));
         Assert.Null(GeckoEngine.ParseSnapshot("not json"));

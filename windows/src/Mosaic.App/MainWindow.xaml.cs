@@ -135,8 +135,11 @@ public partial class MainWindow : Window
 
     private void GeckoHost_PageActivated(object? sender, EventArgs e)
     {
-        // The user is in the page now; whatever was half-typed in the address field is over.
+        // The user is in the page now; whatever was half-typed in the address field is over, and
+        // the popover goes too. (A click into Gecko's window, another process's, may not reach the
+        // popup's own close-on-click-outside.)
         model.EndAddressEditing();
+        model.ShowBlocker = false;
     }
 
     // ---- Model requests ----
@@ -147,6 +150,9 @@ public partial class MainWindow : Window
         {
             case nameof(BrowserModel.ShowExtensions):
                 SyncExtensionsWindow();
+                break;
+            case nameof(BrowserModel.ShowBlocker):
+                SyncBlockerPopup();
                 break;
             case nameof(BrowserModel.SelectedTab):
                 // After layout, so a tab that was only just added has its container.
@@ -202,6 +208,21 @@ public partial class MainWindow : Window
         };
         extensionsWindow.Show();
     }
+
+    // ---- Content blocker ----
+
+    private void Blocker_Click(object sender, RoutedEventArgs e) => model.ShowBlocker = !model.ShowBlocker;
+
+    private void SyncBlockerPopup()
+    {
+        // Normally the popover closes at the next click anywhere else. A scripted run opens it
+        // while the window is in the background, where that cannot be relied on, and expects it
+        // to stay until the script closes it.
+        BlockerPopup.StaysOpen = !model.AllowsFocusChanges;
+        BlockerPopup.IsOpen = model.ShowBlocker;
+    }
+
+    private void BlockerPopup_Closed(object? sender, EventArgs e) => model.ShowBlocker = false;
 
     // ---- Notice ----
 
