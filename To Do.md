@@ -1,155 +1,157 @@
 # Mosaic — To Do (macOS)
 
 The working list for the macOS app. Finished items are crossed off (`- [x] ~~…~~`) and
-say how they were verified. Items stay open until they work in the running app, not
-just in code.
+say how they were verified. "Script" means driven in the running app on an isolated
+profile through the automation channel (both engines where it applies), as described in
+`docs/AGENTS.md`. Items stay open until they work in the running app, not just in code.
 
-Owners for the current pass are in brackets (see `docs/AGENTS.md`):
-**shell** (UI shell, Mosaics, Settings), **tabs**, **library**, **engine** (page features),
-**downloads**, **privacy**, **passwords**, **productivity**, **platform** (engines, extensions,
-about), **canvas** (layout editor, Gradient Studio).
+Owners for this pass: **shell**, **tabs**, **library**, **engine**, **downloads**,
+**privacy**, **passwords**, **productivity**, **platform**, **canvas**, **integrator**.
 
 Windows is paused; its requirements are saved in `docs/windows-later.md`.
 
-Legend: `[ ]` open · `[x]` done · *deferred* = parked on purpose, with the reason.
+Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` done ·
+*deferred* = parked on purpose, with the reason.
 
 ---
 
 ## 0. UI pass (ergonomics first)
 
-- [ ] Settings live inside the main window (no second window); every category reachable from one place, searchable [shell]
-- [ ] Complete re-layout modelled on how current browsers arrange their chrome, per Mosaic preset [shell]
-- [ ] No crashes in normal use: launch, tabs, both engines, settings, quit (checked by script on an isolated profile) [all]
-- [ ] Keyboard-first: every action has a shortcut or command-palette entry; focus order is sensible [shell, productivity]
-- [ ] Toolbar density and hit targets suitable for humans (44pt-class targets for primary actions, clear labels/tooltips) [shell]
-- [ ] Accessibility labels on every control; VoiceOver can drive tabs, address bar, settings [shell]
-- [ ] Reduced motion and reduced transparency respected [shell]
+- [x] ~~Settings live inside the main window (no second window); every category reachable from one place, searchable~~ — script: all 14 categories opened and closed; search filters categories and labels
+- [x] ~~Complete re-layout modelled on how current browsers arrange their chrome, per Mosaic preset~~ — composed shell; screenshots in `docs/screenshots/shell-*.png`
+- [~] No crashes in normal use: launch, tabs, both engines, settings, quit — every scripted run of the merged app quit cleanly with no crash report; needs a hands-on session on an unlocked screen [all]
+- [~] Keyboard-first: shortcuts and tooltips on every toolbar action, command palette covers the model's actions; no full-screen menu item yet [shell, productivity]
+- [x] ~~Toolbar density and hit targets suitable for humans~~ — toolbar buttons ≥ 32×32 pt, hit area spans the 44 pt row at regular density
+- [x] ~~Accessibility labels on every control~~ — labels on toolbar, tabs, address field, settings; VoiceOver actions on Speed Dial tiles
+- [x] ~~Reduced motion and reduced transparency respected~~ — system settings plus overrides in Settings › Accessibility
 
 ## 1. Mosaics (appearance presets)
 
-- [ ] Mosaics settings category replaces Appearance/Customisation [shell]
-- [ ] Preset: Zen / Arc — vertical tab sidebar (collapsible/auto-hide), pinned & favourites, workspaces, compact address bar [shell]
-- [ ] Preset: Chrome — horizontal tabs, omnibox, standard toolbar, bookmarks bar [shell]
-- [ ] Preset: Opera / Opera GX — refined horizontal tabs, optional sidebar, Speed Dial, GX dark/neon styling [shell]
-- [ ] Preset: Safari (macOS only) — unified toolbar/address, compact tabs, native feel [shell]
-- [ ] Switching presets is instant: no restart, no page reload, no data loss [shell]
-- [ ] Preview cards with large layout previews; preview before applying; restore a preset to defaults [shell]
-- [ ] Accent colour, light/dark/system, density, corner radius [shell]
-- [ ] **Liquid Glass toggle** (glass materials on/off, with solid fallback) [shell]
-- [ ] **Drag-and-drop Mosaic elements canvas**: rearrange tab strip, address bar, sidebar, toolbar buttons, bookmarks bar by dragging [canvas]
-- [ ] **Gradient Studio** (from Eminence) for window/new-tab/workspace backgrounds [canvas]
-- [ ] Save multiple named configurations; export/import/validate layouts [canvas]
-- [ ] Custom background and new-tab styling [canvas, productivity]
-- *deferred* — community presets, icon packs, Dia/Vivaldi/Brave/Firefox-inspired presets (after the four core presets are solid)
+- [x] ~~Mosaics settings category replaces Appearance/Customisation~~
+- [x] ~~Preset: Zen / Arc~~ — vertical sidebar (shown / collapsible / auto-hide), pinned grid, workspaces, compact address bar
+- [x] ~~Preset: Chrome~~ — tab strip in the title-bar row, omnibox row, bookmarks bar
+- [x] ~~Preset: Opera / Opera GX~~ — refined tabs, sidebar rail, Speed Dial; GX dark/neon variant
+- [x] ~~Preset: Safari (macOS only)~~ — unified toolbar with compact tabs, or separate tab bar
+- [x] ~~Switching presets is instant: no restart, no page reload, no data loss~~ — script: all four presets with a Gecko and a Chromium tab open; same URLs, same Gecko tab, Chromium view kept, Gecko re-docked exactly to the new content area
+- [x] ~~Preview cards; preview before applying; restore a preset to defaults~~
+- [x] ~~Accent colour, light/dark/system, density, corner radius~~
+- [x] ~~**Liquid Glass toggle**~~ — `glassEffect` on chrome surfaces (macOS 26+), solid when off or when Reduce Transparency is on
+- [ ] **Drag-and-drop Mosaic elements canvas** [canvas — in progress]
+- [ ] **Gradient Studio** (from Eminence) [canvas — in progress]
+- [ ] Save multiple named configurations; export/import/validate layouts [canvas — in progress; layout JSON import/export exists via automation]
+- [~] Custom background and new-tab styling — solid/gradient background in the layout model; Speed Dial leaves the background to the shell; full editor comes with the Gradient Studio [canvas]
+- *deferred* — community presets, icon packs, Dia/Vivaldi/Brave/Firefox-inspired presets
 
 ## 2. Engines
 
-- [x] ~~Two real engines: Chromium (CEF 158, in-process) and Gecko (Firefox ESR, docked companion)~~ — v0.1, live
-- [x] ~~Per-tab engine choice; switch a tab between engines (reloads it there)~~ — v0.1, live
-- [ ] Engine settings page: Chromium and Gecko cards, versions, active engine, restart needs, compatibility notes [platform]
-- [ ] Install / update the private Gecko runtime from inside the app (needed by the release build) [platform]
-- [ ] Per-site engine rules (route domains to an engine automatically) [platform]
-- [ ] Safe engine switching: keep the original tab until the new one has loaded [platform]
-- [ ] Default engine for new tabs in settings [platform]
+- [x] ~~Two real engines: Chromium (CEF 158, in-process) and Gecko (Firefox ESR, docked companion)~~ — v0.1
+- [x] ~~Per-tab engine choice; switch a tab between engines~~ — v0.1
+- [x] ~~Engine settings page: Chromium and Gecko cards, versions, status, what each supports~~
+- [x] ~~Install / update / remove the private Gecko runtime from inside the app~~ — script: real download from Mozilla, code signature and Team ID 43AQ936H96 verified, waiting Mozilla tab loaded without relaunch; damaged, tampered and non-Mozilla apps rejected; cancel leaves nothing behind
+- [x] ~~Per-site engine rules~~ — script: address bar and new tabs, exact vs subdomain rules, "always open this site in…"
+- [x] ~~Safe engine switching: keep the original page until the new engine has loaded it~~ — script: both directions with a slow page, and deliberate failures in both directions
+- [x] ~~Default engine for new tabs in settings~~
+- [x] ~~Start in Chromium when no Gecko runtime is installed, and offer the install~~
 
 ## 3. Browsing and navigation
 
-- [x] ~~Address bar: URL or search; back/forward/reload/stop~~ — v0.1, live
-- [x] ~~Search engine picker (Google, DuckDuckGo, Bing, Brave, Startpage, Ecosia, Kagi)~~ — v0.1, live
-- [ ] Home button and custom homepage [shell]
-- [ ] Custom search engines; search suggestions with a privacy switch [library]
-- [ ] Find in page (both engines) [engine]
-- [ ] Zoom per site, text scaling [engine]
+- [x] ~~Address bar: URL or search; back/forward/reload/stop~~ — v0.1
+- [x] ~~Search engine picker~~ — v0.1
+- [x] ~~Home button and custom homepage~~
+- [x] ~~Custom search engines (with keywords); search suggestions with a privacy switch (off by default)~~ — script: `w mosaic browser` → Wikipedia; remote suggestions only when switched on
+- [ ] Find in page (both engines) [engine — in progress]
+- [ ] Zoom per site, text scaling [engine — in progress]
 - [ ] Full-screen browsing and page full-screen API [engine, shell]
-- [ ] Private browsing windows/tabs (separate storage in both engines) [privacy]
-- [ ] Multiple windows [tabs]
-- [ ] Picture-in-Picture where supported [engine]
-- [ ] Print and save as PDF [engine]
-- [ ] Developer tools [engine]
-- [ ] Permission prompts (camera, microphone, location, notifications, clipboard) shown by Mosaic for both engines [engine, privacy]
-- [ ] JavaScript dialogs, context menus and file pickers work in both engines (verify) [engine]
+- [~] Private browsing — private tabs in Chromium (in-memory profile, nothing on disk; verified); Gecko private tabs not supported yet and the UI says so [privacy]
+- [ ] Multiple windows — not attempted: one docked Gecko window would need a redesign [tabs]
+- [ ] Picture-in-Picture where supported [engine — in progress]
+- [ ] Print and save as PDF [engine — in progress]
+- [ ] Developer tools [engine — in progress]
+- [ ] Permission prompts (camera, microphone, location, notifications, clipboard) shown by Mosaic [engine — in progress]
+- [ ] JavaScript dialogs, context menus and file pickers verified in both engines [engine — in progress]
+- [x] ~~Languages for web content applied to both engines~~ — script: `navigator.languages` and Accept-Language in both engines
 
 ## 4. Tabs, workspaces, multitasking
 
-- [x] ~~Tabs with engine dot, close, new tab, ⌘1–9-style switching via ⌘⇧[/]~~ — v0.1
-- [ ] Pin, lock, duplicate, mute tabs [tabs, engine for mute]
-- [ ] Recently closed tabs and windows; reopen (⌘⇧T) [tabs]
-- [ ] Tab search [tabs]
-- [ ] Tab groups (collapsible, named, coloured) [tabs]
-- [ ] Workspaces (named, separate tab sets, switcher) [tabs]
-- [ ] Drag-and-drop tab reordering; move tabs between windows and workspaces [tabs, shell]
-- [ ] Duplicate-tab detection [tabs]
-- [ ] Session save and restore on relaunch; crash recovery [tabs]
-- [ ] Split-screen with adjustable panes [tabs, shell]
-- [ ] Tab previews on hover [shell]
-- [ ] Sleep/unload inactive tabs (both engines), with exceptions for audio/calls/downloads; manual unload [tabs]
-- *deferred* — automatic grouping suggestions (AI-adjacent; see §11)
+- [x] ~~Tabs with engine dot, close, new tab~~ — v0.1
+- [~] Pin, duplicate, mute — pin and duplicate done (script, both engines); mute state done, applying it to the engines is with [engine]; lock not done [tabs]
+- [x] ~~Recently closed tabs; reopen (⌘⇧T)~~ — script: tabs, whole groups and deleted workspaces come back in place; private tabs never recorded
+- [x] ~~Tab search (⌘⇧A)~~
+- [x] ~~Tab groups (collapsible, named, coloured)~~
+- [x] ~~Workspaces (named, separate tab sets, switcher)~~ — script: create, switch (each keeps its selection; Gecko docking follows), delete, restore, move tabs
+- [~] Drag-and-drop tab reordering — model done and wired to the shell's strips; not yet exercised by hand [tabs, shell]
+- [x] ~~Duplicate-tab detection~~ — "already open" notice with Switch to Tab
+- [x] ~~Session save and restore on relaunch; crash recovery~~ — script: quit/relaunch and `kill -9` with tabs in both engines, groups and workspaces; private tabs never saved
+- [ ] Split-screen — not attempted (only one Gecko page can be visible at a time) [shell]
+- [~] Tab previews on hover — tooltip only [shell]
+- [x] ~~Sleep/unload inactive tabs (both engines), with exceptions; manual unload; memory pressure~~ — Chromium tabs lose back/forward history when unloaded; tabs with active downloads not yet exempt
+- *deferred* — automatic grouping suggestions (AI-adjacent)
 
 ## 5. Bookmarks, history, reading
 
-- [ ] Bookmarks: folders, tags, bookmarks bar, manager, search [library]
-- [ ] Import/export bookmarks (Netscape HTML) [library]
-- [ ] History: full, searchable, delete by range/site [library]
-- [ ] Reading list / read later [library]
-- [ ] Reader mode with font/width/spacing/background controls (both engines) [productivity]
-- [ ] Custom new-tab page / Speed Dial [productivity]
-- [ ] Screenshots (visible area; full page where possible) [engine]
+- [x] ~~Bookmarks: folders, tags, bookmarks bar, manager, search~~ — script
+- [x] ~~Import/export bookmarks (Netscape HTML; also Chrome's JSON)~~ — round trip unit-tested; 19-bookmark file imported without duplicates
+- [x] ~~History: full, searchable, delete by visit/site/range~~ — one visit per navigation in both engines, selected or background
+- [x] ~~Reading list~~
+- [x] ~~Reader mode with font/size/width/spacing/background controls (both engines)~~ — Firefox's reader view in Gecko, Readability 0.6.0 in Chromium
+- [x] ~~Custom new-tab page / Speed Dial~~ — pinned sites plus top sites; optional privacy-preserving favicons
+- [ ] Screenshots (visible area; full page) [engine — in progress]
 - *deferred* — PDF annotation, offline page saving, page-change monitoring
 
 ## 6. Downloads
 
-- [ ] Download manager for both engines: progress, pause/resume/cancel/retry, history, search [downloads]
-- [ ] Download folder choice, ask-where-to-save, organisation rules [downloads]
-- [ ] Duplicate and misleading-extension warnings; dangerous-file warnings; quarantine attribute [downloads]
-- [ ] Notifications when downloads finish [downloads]
-- [ ] **Free Download Manager integration**: hand downloads to FDM (always, or per download) when installed [downloads]
+- [x] ~~Download manager for both engines: progress, pause/resume/cancel/retry, history, search~~ — script against a local throttled server; Gecko resume uses range requests
+- [x] ~~Download folder, ask-where-to-save, organisation rules~~
+- [x] ~~Duplicate, misleading-extension and dangerous-file warnings; quarantine attribute~~ — `xattr` checked on every file
+- [~] Notifications when downloads finish — implemented; real system notification not shown during scripted runs
+- [x] ~~**Free Download Manager integration**~~ — off / ask / always; hands over URL, referrer and User-Agent through FDM's own helper; verified with one test file
 
 ## 7. Privacy and security
 
-- [x] ~~Built-in ad/tracker blocker (uBlock Origin's engine, network level) in both engines, global and per-site switches~~ — live, both engines
-- [ ] Cosmetic filtering (hide ad elements) [privacy]
-- [ ] Custom filters; filter-list choice (stricter lists) [privacy]
-- [ ] Blocker dashboard: what was blocked and why, per page [privacy]
-- [ ] Site permissions manager (camera, mic, location, notifications, pop-ups) [privacy]
-- [ ] Cookies and site data: per-site clear, clear on exit, third-party cookie blocking [privacy]
-- [ ] Clear browsing data (history, cookies, cache, downloads) [privacy]
-- [ ] HTTPS-only mode and security indicators [privacy]
-- [ ] Tracking-parameter stripping [privacy]
-- [ ] DNS-over-HTTPS [privacy]
-- [ ] Pop-up blocking [privacy, engine]
+- [x] ~~Built-in ad/tracker blocker (uBlock Origin's engine) in both engines, global and per-site switches~~
+- [x] ~~Cosmetic filtering (hide ad elements)~~ — script on a test page in both engines; procedural filters and scriptlets not supported (stated)
+- [x] ~~Custom filters; filter-list choice~~ — My filters with validation; 15 optional stricter lists
+- [x] ~~Blocker dashboard: what was blocked and why, per page~~
+- [~] Site permissions manager — page done; waits for [engine]'s permission store
+- [x] ~~Cookies and site data: per-site clear, clear on exit, third-party cookie blocking~~
+- [x] ~~Clear browsing data~~ — engines plus Mosaic's history and downloads lists, with time ranges
+- [x] ~~HTTPS-only mode and security indicators~~ — padlock shows secure / not secure / local
+- [x] ~~Tracking-parameter stripping~~ — Firefox's query-stripping list plus `utm_*`
+- [x] ~~DNS-over-HTTPS~~ — both engines, no restart
+- [ ] Pop-up blocking [engine — in progress]
 - *deferred* — containers, fingerprinting protection, network-activity inventory, local download scanning signatures
 
 ## 8. Passwords and autofill
 
-- [ ] Password manager stored in the macOS Keychain [passwords]
-- [ ] Save-password prompt and autofill in both engines [passwords]
-- [ ] Password generator [passwords]
-- [ ] Import (CSV) / export [passwords]
+- [x] ~~Password manager stored in the macOS Keychain~~ — Mosaic's own security domain; reveal behind Touch ID / login password
+- [x] ~~Save-password prompt and autofill in both engines~~ — script: save, update, never-save, cross-origin frames refused, private tabs never offered
+- [x] ~~Password generator~~
+- [x] ~~Import (CSV) / export~~
 
 ## 9. Extensions
 
-- [x] ~~Install Chrome extensions (.crx / Web Store), converted to run on Gecko~~ — v0.1, live
-- [ ] Extensions settings category (manage, enable/disable, remove, permissions, compatibility notes) inside Settings [platform]
-- [ ] Toolbar extension buttons and popups [platform]
+- [x] ~~Install Chrome extensions (.crx / Web Store), converted to run on Gecko~~ — v0.1
+- [x] ~~Extensions settings category inside Settings~~ — replaces the old separate window; permissions view
+- [~] Toolbar extension buttons and popups — buttons done; popups open as a tab, not a panel (stated in the UI)
 - *deferred* — extensions in Chromium tabs (CEF Alloy has no extension support)
 
 ## 10. Productivity
 
-- [ ] Command palette (⌘K): actions, tabs, bookmarks, history, settings [productivity]
-- [ ] Customisable keyboard shortcuts [productivity]
-- [ ] Searchable settings [shell]
+- [x] ~~Command palette (⌘K): actions, tabs, bookmarks, history, settings~~
+- [x] ~~Customisable keyboard shortcuts~~ — changes apply to the menus live, survive relaunch, forwarded from Gecko pages
+- [x] ~~Searchable settings~~
 - *deferred* — mouse gestures, notes, automation API, translation (needs a service)
 
 ## 11. Settings categories (all inside the main window)
 
-- [ ] Mosaics [shell] · Engine [platform] · General [shell] · Tabs & Workspaces [tabs] · Search [library]
-- [ ] Privacy & Security [privacy] · Passwords & Autofill [passwords] · Downloads [downloads] · Extensions [platform]
-- [ ] Shortcuts & Gestures [productivity] · Languages [platform] · Accessibility [shell] · Performance [tabs] · About & Updates [platform]
+- [x] ~~Mosaics · General · Accessibility~~ [shell] · ~~Tabs & Workspaces · Performance~~ [tabs] · ~~Search~~ [library]
+- [x] ~~Privacy & Security~~ [privacy] · ~~Passwords & Autofill~~ [passwords] · ~~Downloads~~ [downloads] · ~~Engine · Extensions · Languages · About & Updates~~ [platform] · ~~Shortcuts & Gestures~~ [productivity]
 
 ## 12. Release
 
 - [ ] Release build zipped and attached to a GitHub release [integrator]
 - [ ] First launch from the zip works on a clean profile (engine install offered in-app) [platform, integrator]
+- [ ] A licence for Mosaic itself (needed before any public distribution; uBlock Origin is GPL v3) [owner decision]
 
 ## Deferred on purpose
 
