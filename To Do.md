@@ -36,10 +36,10 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Preview cards; preview before applying; restore a preset to defaults~~
 - [x] ~~Accent colour, light/dark/system, density, corner radius~~
 - [x] ~~**Liquid Glass toggle**~~ — `glassEffect` on chrome surfaces (macOS 26+), solid when off or when Reduce Transparency is on
-- [ ] **Drag-and-drop Mosaic elements canvas** [canvas — in progress]
-- [ ] **Gradient Studio** (from Eminence) [canvas — in progress]
-- [ ] Save multiple named configurations; export/import/validate layouts [canvas — in progress; layout JSON import/export exists via automation]
-- [~] Custom background and new-tab styling — solid/gradient background in the layout model; Speed Dial leaves the background to the shell; full editor comes with the Gradient Studio [canvas]
+- [x] ~~**Drag-and-drop Mosaic elements canvas**~~ — Settings › Mosaics › Customise Layout: drag between regions, palette of unplaced components, refused drops explain why, keyboard editing, undo/redo, live without reloads; script-verified, real mouse drags not yet tried by hand
+- [x] ~~**Gradient Studio** (from Eminence)~~ — ported: free-form mesh in OKLab, linear/radial/angular, colour editor, grain, presets; for the window, the new-tab page and workspaces
+- [x] ~~Save multiple named configurations; export/import/validate layouts~~ — validated JSON import/export
+- [x] ~~Custom background and new-tab styling~~ — Gradient Studio backgrounds for the window, new-tab page and each workspace
 - *deferred* — community presets, icon packs, Dia/Vivaldi/Brave/Firefox-inspired presets
 
 ## 2. Engines
@@ -59,22 +59,22 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Search engine picker~~ — v0.1
 - [x] ~~Home button and custom homepage~~
 - [x] ~~Custom search engines (with keywords); search suggestions with a privacy switch (off by default)~~ — script: `w mosaic browser` → Wikipedia; remote suggestions only when switched on
-- [ ] Find in page (both engines) [engine — in progress]
-- [ ] Zoom per site, text scaling [engine — in progress]
-- [ ] Full-screen browsing and page full-screen API [engine, shell]
+- [x] ~~Find in page (both engines)~~ — ⌘F / ⌘G, match count
+- [~] Zoom per site, text scaling — per-site zoom shared between engines done; text-only zoom not built [engine]
+- [~] Full-screen browsing and page full-screen API — page full screen implemented for Chromium, not verified by hand; Gecko page full screen and Mosaic window full screen not done [engine, shell]
 - [~] Private browsing — private tabs in Chromium (in-memory profile, nothing on disk; verified); Gecko private tabs not supported yet and the UI says so [privacy]
 - [ ] Multiple windows — not attempted: one docked Gecko window would need a redesign [tabs]
-- [ ] Picture-in-Picture where supported [engine — in progress]
-- [ ] Print and save as PDF [engine — in progress]
-- [ ] Developer tools [engine — in progress]
-- [ ] Permission prompts (camera, microphone, location, notifications, clipboard) shown by Mosaic [engine — in progress]
-- [ ] JavaScript dialogs, context menus and file pickers verified in both engines [engine — in progress]
+- [x] ~~Picture-in-Picture where supported~~
+- [x] ~~Print and save as PDF~~ — both engines
+- [x] ~~Developer tools~~ — both engines
+- [~] Permission prompts (camera, microphone, location, notifications, clipboard) shown by Mosaic — Mosaic's own prompts, remembered per site; clipboard prompts and Gecko microphone streams not verified [engine]
+- [~] JavaScript dialogs, context menus and file pickers verified in both engines — dialogs done in both; Gecko file picker not verified [engine]
 - [x] ~~Languages for web content applied to both engines~~ — script: `navigator.languages` and Accept-Language in both engines
 
 ## 4. Tabs, workspaces, multitasking
 
 - [x] ~~Tabs with engine dot, close, new tab~~ — v0.1
-- [~] Pin, duplicate, mute — pin and duplicate done (script, both engines); mute state done, applying it to the engines is with [engine]; lock not done [tabs]
+- [~] Pin, duplicate, mute — pin, duplicate and mute done in both engines; lock not done [tabs]
 - [x] ~~Recently closed tabs; reopen (⌘⇧T)~~ — script: tabs, whole groups and deleted workspaces come back in place; private tabs never recorded
 - [x] ~~Tab search (⌘⇧A)~~
 - [x] ~~Tab groups (collapsible, named, coloured)~~
@@ -95,7 +95,7 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Reading list~~
 - [x] ~~Reader mode with font/size/width/spacing/background controls (both engines)~~ — Firefox's reader view in Gecko, Readability 0.6.0 in Chromium
 - [x] ~~Custom new-tab page / Speed Dial~~ — pinned sites plus top sites; optional privacy-preserving favicons
-- [ ] Screenshots (visible area; full page) [engine — in progress]
+- [x] ~~Screenshots (visible area; full page)~~ — both engines
 - *deferred* — PDF annotation, offline page saving, page-change monitoring
 
 ## 6. Downloads
@@ -112,13 +112,13 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Cosmetic filtering (hide ad elements)~~ — script on a test page in both engines; procedural filters and scriptlets not supported (stated)
 - [x] ~~Custom filters; filter-list choice~~ — My filters with validation; 15 optional stricter lists
 - [x] ~~Blocker dashboard: what was blocked and why, per page~~
-- [~] Site permissions manager — page done; waits for [engine]'s permission store
+- [x] ~~Site permissions manager~~ — shares the engine's SitePermissionStore
 - [x] ~~Cookies and site data: per-site clear, clear on exit, third-party cookie blocking~~
 - [x] ~~Clear browsing data~~ — engines plus Mosaic's history and downloads lists, with time ranges
 - [x] ~~HTTPS-only mode and security indicators~~ — padlock shows secure / not secure / local
 - [x] ~~Tracking-parameter stripping~~ — Firefox's query-stripping list plus `utm_*`
 - [x] ~~DNS-over-HTTPS~~ — both engines, no restart
-- [ ] Pop-up blocking [engine — in progress]
+- [x] ~~Pop-up blocking~~ — with a notice to allow the pop-up
 - *deferred* — containers, fingerprinting protection, network-activity inventory, local download scanning signatures
 
 ## 8. Passwords and autofill
@@ -149,8 +149,8 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 
 ## 12. Release
 
-- [ ] Release build zipped and attached to a GitHub release [integrator]
-- [ ] First launch from the zip works on a clean profile (engine install offered in-app) [platform, integrator]
+- [x] ~~Release build zipped and attached to a GitHub release~~ — v0.2.0, `Scripts/release.sh`
+- [x] ~~First launch from the zip works on a clean profile (engine install offered in-app)~~ — script: unzipped copy, signature verified, starts in Chromium with no Gecko runtime, loads a page, quits cleanly
 - [ ] A licence for Mosaic itself (needed before any public distribution; uBlock Origin is GPL v3) [owner decision]
 
 ## Deferred on purpose
