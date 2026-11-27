@@ -1,0 +1,170 @@
+# Mosaic for Windows: build, unit-test and package the app, then try it for real.
+#
+# Kept cheap on purpose (the repository is private and Windows minutes count double):
+# one runner image, no matrix, superseded runs are cancelled, NuGet packages are cached,
+# artifacts expire after a week.
+name: Windows
+
+on:
+  push:
+    branches: [main, windows]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Windows PowerShell 5.1, not PowerShell 7: the scripts under windows/scripts promise to
+    # run on a stock Windows installation, so CI runs them the same way.
+    shell: powershell
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  build:
+    name: Build, test, publish
+    # A pull request from one of the branches that are built on push would otherwise be
+    # built twice for every commit.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name != github.repository
+      || !contains(fromJSON('["main", "windows"]'), github.head_ref)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore windows/Mosaic.slnx
+
+      - name: Build
+        run: dotnet build windows/Mosaic.slnx --configuration Release --no-restore
+
+      - name: Use the runner's Firefox for the Gecko integration tests
+        run: |
+          $firefox = Join-Path $env:ProgramFiles 'Mozilla Firefox\firefox.exe'
+          if (Test-Path -LiteralPath $firefox) {
+            "MOSAIC_GECKO_EXE=$firefox" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "Gecko integration tests will use $firefox"
+          } else {
+            Write-Host "::warning::No Firefox on this runner; the Gecko integration tests will not run."
+          }
+
+      - name: Unit tests
+        run: dotnet test windows/tests/Mosaic.Core.Tests --configuration Release --no-build
+
+      - name: Publish win-x64
+        run: .\windows\scripts\build.ps1 -Runtime win-x64 -Zip -SkipTests
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: Mosaic-win-x64
+          path: windows/publish/Mosaic-*-win-x64.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0   # it is a zip already
+
+  smoke:
+    name: Smoke test (may fail)
+    needs: build
+    # This drives UI code that could not be run where it was written. A failure here is
+    # information, not a broken build: look at the uploaded screenshots and logs.
+    continue-on-error: true
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the scripts
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            windows/scripts
+
+      - name: Download the package
+        uses: actions/download-artifact@v8
+        with:
+          name: Mosaic-win-x64
+          path: windows/publish
+
+      - name: Unpack
+        run: |
+          $package = Get-ChildItem -Path windows\publish -Filter 'Mosaic-*-win-x64.zip' | Select-Object -First 1
+          if (-not $package) { throw 'The package was not downloaded.' }
+          Expand-Archive -LiteralPath $package.FullName -DestinationPath windows\publish\win-x64 -Force
+
+      - name: Install the Gecko engine (Firefox ESR)
+        # If Mozilla's download is unavailable, smoke.ps1 falls back to the runner's Firefox.
+        continue-on-error: true
+        run: .\windows\scripts\bootstrap.ps1
+
+      - name: Make sure the WebView2 runtime is installed
+        run: |
+          $client = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $keys = @(
+            "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$client",
+            "Registry::HKEY_CURRENT_USER\Software\Microsoft\EdgeUpdate\Clients\$client"
+          )
+          function Get-WebView2Version {
+            foreach ($key in $keys) {
+              $entry = Get-ItemProperty -LiteralPath $key -Name pv -ErrorAction SilentlyContinue
+              if ($entry -and $entry.pv -and $entry.pv -ne '0.0.0.0') { return $entry.pv }
+            }
+          }
+          $version = Get-WebView2Version
+          if (-not $version) {
+            Write-Host 'WebView2 runtime not found; installing the Evergreen runtime.'
+            $ProgressPreference = 'SilentlyContinue'
+            $setup = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+            Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $setup -UseBasicParsing
+            $signature = Get-AuthenticodeSignature -LiteralPath $setup
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+              throw "The WebView2 bootstrapper is not validly signed by Microsoft ($($signature.Status))."
+            }
+            $install = Start-Process -FilePath $setup -ArgumentList '/silent', '/install' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "WebView2 setup failed with exit code $($install.ExitCode)." }
+            $version = Get-WebView2Version
+            if (-not $version) { throw 'WebView2 setup finished but the runtime is still not registered.' }
+          }
+          Write-Host "WebView2 runtime $version"
+
+      - name: Smoke test
+        run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\win-x64\Mosaic.exe -OutputDirectory windows\artifacts\smoke
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-test-output
+          path: |
+            windows/artifacts/smoke
+            !windows/artifacts/smoke/data/**
+          if-no-files-found: warn
+          retention-days: 7
