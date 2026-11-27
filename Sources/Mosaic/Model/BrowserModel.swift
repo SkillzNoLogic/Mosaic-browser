@@ -195,6 +195,10 @@ final class BrowserModel: ObservableObject {
     func load(_ url: String, in tab: BrowserTab) {
         // Mosaic's own pages are drawn by the shell; no engine is involved.
         if let page = InternalPage(url: url) {
+            // Otherwise the engine's next report would put the old page's address back.
+            detachFromEngine(tab)
+            tab.canGoBack = false
+            tab.canGoForward = false
             tab.url = page.url
             tab.title = page.title
             tab.failure = nil
