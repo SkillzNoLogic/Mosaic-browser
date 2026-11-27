@@ -49,6 +49,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var workspaceID: UUID?
     @Published var groupID: UUID?
 
+    // Engine area: the page's zoom (1 = 100 %), remembered per site (Features/Engine/PageFeatures.swift).
+    @Published var zoomFactor: Double = 1
+    /// Set by engines that can tell. (Also declared by the tabs area on `next`: keep one.)
+    @Published var isPlayingAudio = false
+
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
     /// Gecko: the agent's ID for this tab, once Gecko has created it.

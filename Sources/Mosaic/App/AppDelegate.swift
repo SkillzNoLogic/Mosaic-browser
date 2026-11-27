@@ -172,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         main.addItem(submenu: windowMenu, title: "Window")
         NSApp.windowsMenu = windowMenu
 
+        model.pageFeatures.installMenuItems(in: main)  // engine area: find, zoom, print, screenshots…
         return main
     }
 

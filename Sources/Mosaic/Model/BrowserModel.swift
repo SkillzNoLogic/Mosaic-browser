@@ -39,6 +39,8 @@ final class BrowserModel: ObservableObject {
 
     // MARK: Feature services
     // Feature areas add their service objects here, one line each (see docs/AGENTS.md).
+    let sitePermissions = SitePermissionStore(fileURL: AppPaths.sitePermissions)  // engine (privacy edits it)
+    lazy var pageFeatures = PageFeatures(model: self)  // engine: find, zoom, print, permissions, pop-ups…
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.

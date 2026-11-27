@@ -35,6 +35,10 @@ enum AppPaths {
     /// Filter lists of the built-in content blocker.
     static var blockerLists: URL { support.appendingPathComponent("Blocker/lists", isDirectory: true) }
 
+    // Engine area: per-site decisions and zoom, shared by both engines.
+    static var sitePermissions: URL { support.appendingPathComponent("SitePermissions.json") }
+    static var siteZoom: URL { support.appendingPathComponent("SiteZoom.json") }
+
     /// Folder inside the app bundle holding `agent.sys.mjs`.
     static var geckoAgent: URL? { Bundle.main.resourceURL?.appendingPathComponent("gecko", isDirectory: true) }
 }
@@ -89,6 +93,9 @@ final class GeckoEngine: ObservableObject {
 
     struct Event: Decodable, Equatable {
         let type: String
+        // Engine area: the agent tab the event concerns, and its payload as a JSON string.
+        var tab: Int?
+        var detail: String?
     }
 
     struct Snapshot: Decodable {
@@ -106,6 +113,14 @@ final class GeckoEngine: ObservableObject {
     var onStopped: (() -> Void)?
     /// Gecko finished starting; the place to re-install extensions.
     var onStarted: (() async -> Void)?
+
+    // MARK: Feature hooks (engine area)
+    // Feature areas watch Gecko here without touching BrowserModel: every snapshot (tab
+    // state and events) after the model has applied it, and every start.
+    private var snapshotObservers: [(Snapshot) -> Void] = []
+    private var startObservers: [() async -> Void] = []
+    func addSnapshotObserver(_ observer: @escaping (Snapshot) -> Void) { snapshotObservers.append(observer) }
+    func addStartObserver(_ observer: @escaping () async -> Void) { startObservers.append(observer) }
 
     private var client: RDPClient?
     private var app: NSRunningApplication?
@@ -218,6 +233,7 @@ final class GeckoEngine: ObservableObject {
         applyDock()
         startPolling(generation: launchGeneration)
         await onStarted?()
+        for observer in startObservers { await observer() }  // engine area
     }
 
     /// Polls `attempt` until it returns a value.
@@ -403,6 +419,16 @@ final class GeckoEngine: ObservableObject {
         return value is NSNull ? nil : value
     }
 
+    /// `call` with the arguments as an array (engine area: scripted checks).
+    @discardableResult
+    func callWithArguments(_ method: String, _ arguments: [Any]) async throws -> Any? {
+        guard status == .running, let client else { throw GeckoError.notRunning }
+        let result = try await client.evaluate(Self.agentCall(method, arguments))
+        guard let text = try Self.unwrapAgentResult(result), let data = text.data(using: .utf8) else { return nil }
+        let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        return value is NSNull ? nil : value
+    }
+
     /// Fire-and-forget variant for UI actions.
     func send(_ method: String, _ arguments: Any...) {
         guard status == .running, let client else { return }
@@ -422,6 +448,7 @@ final class GeckoEngine: ObservableObject {
                    self.generation == polled, snapshot.ready
                 {
                     self.onSnapshot?(snapshot)
+                    for observer in self.snapshotObservers { observer(snapshot) }  // engine area
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
