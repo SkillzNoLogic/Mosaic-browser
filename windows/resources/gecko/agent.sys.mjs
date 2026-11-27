@@ -65,6 +65,86 @@ function browserWindow() {
   return Services.wm.getMostRecentWindow("navigator:browser");
 }
 
+// ---- Content blocker --------------------------------------------------------
+//
+// Mosaic's built-in blocker is uBlock Origin's network filtering engine, bundled
+// from uBO's source (Resources/blocker/engine.js). The same bundle runs inside
+// the Mosaic app for Chromium tabs; here it runs in a sandbox in Gecko's parent
+// process, and every HTTP request a tab makes is put to it before it is sent.
+
+const blocker = {
+  /** The loaded engine (the sandbox's `MosaicBlocker`), or null. */
+  engine: null,
+  enabled: true,
+  /** Normalised hostnames blocking is switched off for (subdomains included). */
+  allowlist: new Set(),
+  observing: false,
+  /** Requests blocked since each tab's current page started loading. */
+  blocked: new WeakMap(),
+};
+
+function isAllowlisted(hostname) {
+  let host = hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+  for (;;) {
+    if (blocker.allowlist.has(host)) {
+      return true;
+    }
+    const dot = host.indexOf(".");
+    if (dot === -1) {
+      return false;
+    }
+    host = host.slice(dot + 1);
+  }
+}
+
+/** `http-on-modify-request` observer: the last point a request can be stopped. */
+function onHttpRequest(subject) {
+  try {
+    const channel = subject.QueryInterface(Ci.nsIHttpChannel);
+    // Only requests that belong to a tab. Gecko's own traffic and extensions'
+    // background requests have no tab and are left alone.
+    const browser = channel.loadInfo?.browsingContext?.top?.embedderElement;
+    // Looked up through the browser window itself: `gBrowser` is not reachable
+    // from the element's `ownerGlobal` as seen from this module.
+    const tab = browser ? browserWindow()?.gBrowser?.getTabForBrowser(browser) : null;
+    if (!tab) {
+      return;
+    }
+    const request = ChannelWrapper.get(channel);
+    // Gecko reports <img srcset> loads as "imageset"; filters know them as images.
+    const type = request.type === "imageset" ? "image" : request.type;
+    if (type === "main_frame") {
+      // A page's own document is never blocked; restart its count. This runs
+      // even while blocking is off, so a stale count does not linger.
+      blocker.blocked.set(tab, 0);
+      return;
+    }
+    if (!blocker.enabled || blocker.engine === null) {
+      return;
+    }
+    const page = browser.currentURI;
+    if (!page || !page.schemeIs("http") && !page.schemeIs("https")) {
+      return;
+    }
+    if (isAllowlisted(page.host)) {
+      return;
+    }
+    if (blocker.engine.match(request.finalURL, page.spec, type) !== 1) {
+      return;
+    }
+    channel.cancel(Cr.NS_ERROR_ABORT);
+    blocker.blocked.set(tab, (blocker.blocked.get(tab) ?? 0) + 1);
+  } catch (error) {
+    // A request the blocker cannot classify is let through.
+    console.error("Mosaic blocker:", error);
+  }
+}
+
+/** Gives the main thread a turn, so loading filter lists does not freeze Gecko. */
+function nextTick() {
+  return new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+}
+
 function requireWindow() {
   const win = browserWindow();
   if (!win || !win.gBrowser) {
@@ -249,6 +329,7 @@ export const Agent = {
         canGoBack: !!browser.canGoBack,
         canGoForward: !!browser.canGoForward,
         selected: tab.selected,
+        blocked: blocker.blocked.get(tab) ?? 0,
       });
     }
     return JSON.stringify({ ready: true, tabs, events: pendingEvents.splice(0) });
@@ -372,6 +453,64 @@ export const Agent = {
   focusContent() {
     const win = requireWindow();
     win.gBrowser.selectedBrowser.focus();
+    return "true";
+  },
+
+  // ---- Content blocker ----------------------------------------------------
+
+  /**
+   * Loads the blocking engine and its filter lists, replacing any engine
+   * already in use (which keeps working until the new one is ready).
+   *   bundlePath      ublock-engine.js
+   *   suffixListPath  public_suffix_list.dat
+   *   listPaths       filter list files
+   * Returns the number of network filters in effect.
+   */
+  async configureBlocker(bundlePath, suffixListPath, listPaths, enabled, allowlist) {
+    blocker.enabled = !!enabled;
+    blocker.allowlist = new Set(allowlist);
+
+    // A sandbox of its own: the bundle installs a few globals, which must not
+    // leak into the global that all of Gecko's system modules share.
+    const sandbox = Cu.Sandbox(SYSTEM_PRINCIPAL, {
+      sandboxName: "Mosaic content blocker",
+      wantGlobalProperties: ["TextDecoder", "TextEncoder", "URL", "structuredClone", "atob", "btoa"],
+      freshCompartment: true,
+    });
+    // Privileged code may not load scripts from file: URLs, so the bundle's
+    // folder is mapped to resource://mosaic-blocker/, the way the agent's own
+    // folder is mapped to resource://mosaic/.
+    const bundle = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+    bundle.initWithPath(bundlePath);
+    Services.io
+      .getProtocolHandler("resource")
+      .QueryInterface(Ci.nsISubstitutingProtocolHandler)
+      .setSubstitution("mosaic-blocker", Services.io.newFileURI(bundle.parent));
+    Services.scriptloader.loadSubScript(`resource://mosaic-blocker/${bundle.leafName}`, sandbox);
+    const engine = sandbox.MosaicBlocker;
+
+    engine.init(await IOUtils.readUTF8(suffixListPath));
+    engine.beginLists();
+    for (const path of listPaths) {
+      const text = await IOUtils.readUTF8(path);
+      await nextTick();
+      engine.addList(PathUtils.filename(path), text);
+      await nextTick();
+    }
+    const count = engine.commitLists();
+
+    blocker.engine = engine;
+    if (!blocker.observing) {
+      Services.obs.addObserver(onHttpRequest, "http-on-modify-request");
+      blocker.observing = true;
+    }
+    return JSON.stringify({ filters: count, version: engine.version });
+  },
+
+  /** Updates the master switch and the per-site exceptions. */
+  setBlockerOptions(enabled, allowlist) {
+    blocker.enabled = !!enabled;
+    blocker.allowlist = new Set(allowlist);
     return "true";
   },
 
