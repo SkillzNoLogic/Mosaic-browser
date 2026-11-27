@@ -42,7 +42,8 @@ struct SiteIcon: View {
         .overlay(alignment: .bottomTrailing) {
             if !tab.isStartPage, tab.internalPage == nil {
                 Circle()
-                    .fill(ShellColors.tint(for: tab.engine))
+                    // Private tabs carry the private colour instead of the engine's (privacy area).
+                    .fill(tab.isPrivate ? PrivateBrowsingBadge.tint : ShellColors.tint(for: tab.engine))
                     .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.2))
                     .frame(width: size * 0.48, height: size * 0.48)
                     .offset(x: size * 0.18, y: size * 0.18)

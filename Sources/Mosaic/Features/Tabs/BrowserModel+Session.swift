@@ -125,7 +125,8 @@ extension BrowserModel {
             workspaces: workspaces.map(SessionWorkspace.init),
             selectedWorkspaceID: selectedWorkspaceID,
             groups: groups.map(SessionGroup.init),
-            tabs: tabs.map { tab in
+            // Private tabs are never written to disk.
+            tabs: tabs.filter { !$0.isPrivate }.map { tab in
                 SessionTab(
                     id: tab.id, engine: tab.engine.rawValue, url: tab.url, title: tab.title,
                     isPinned: tab.isPinned, isMuted: tab.isMuted, workspaceID: workspaceID(of: tab),

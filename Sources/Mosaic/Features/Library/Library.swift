@@ -397,7 +397,12 @@ final class Library: ObservableObject {
     }
 
     func clearHistory(_ range: ClearRange) {
-        perform(history: true) { try $0.clearHistory(since: range.start) }
+        clearHistory(since: range.start)
+    }
+
+    /// Clears visits from `since` onwards (nil: all history).
+    func clearHistory(since: Date?) {
+        perform(history: true) { try $0.clearHistory(since: since) }
     }
 
     func deleteVisits(_ ids: [Int64]) {

@@ -26,6 +26,7 @@ final class Productivity {
         speedDial = SpeedDialModel(store: SpeedDialStore(fileURL: Self.directory.appendingPathComponent("speed-dial.json")))
         favicons = FaviconCache(directory: Self.directory.appendingPathComponent("Favicons", isDirectory: true))
         palette.register("mosaic.builtin") { model in BuiltInPaletteActions.actions(model) }
+        palette.register("mosaic.integration") { model in IntegrationPaletteActions.actions(model) }
     }
 
     /// Called once the main menu exists: applies the user's shortcuts and starts watching tabs.

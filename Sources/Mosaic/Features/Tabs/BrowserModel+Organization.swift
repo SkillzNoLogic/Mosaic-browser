@@ -421,7 +421,8 @@ extension BrowserModel {
 
     /// Adds `tab` to Recently Closed (or to the entry being collected).
     func recordClosed(_ tab: BrowserTab) {
-        guard !tab.isStartPage else { return }
+        // Private tabs leave no trace, not even in Recently Closed.
+        guard !tab.isStartPage, !tab.isPrivate else { return }
         let workspace = workspaceID(of: tab)
         let record = ClosedTabRecord(
             engine: tab.engine.rawValue, url: tab.url, title: tab.title, workspaceID: workspace,

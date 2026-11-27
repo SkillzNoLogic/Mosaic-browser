@@ -64,6 +64,9 @@ struct AddressField: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: fieldRadius, style: .continuous)
         HStack(spacing: 6) {
+            if model.selectedTab?.isPrivate == true {
+                PrivateBrowsingBadge(compact: true)  // privacy area
+            }
             LeadingMenu()
             ZStack(alignment: style == .unified ? .center : .leading) {
                 TextField(placeholder, text: $model.addressText)
@@ -96,6 +99,10 @@ struct AddressField: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            PasswordsToolbarButton()  // passwords area: takes no space unless the site has saved logins
+            if let tab = model.selectedTab, tab.isReaderAvailable || tab.isReaderActive {
+                ReaderButton(tab: tab)  // productivity area
+            }
             if embedsBookmarkStar { BookmarkStarButton(compact: true) }
             if style == .unified, let tab = model.selectedTab, !tab.isStartPage {
                 Button {
@@ -271,11 +278,13 @@ private struct LeadingMenu: View {
     private var symbol: String {
         guard let tab = model.selectedTab, !tab.isStartPage, !model.isEditingAddress else { return "magnifyingglass" }
         if tab.internalPage != nil { return "square.grid.2x2" }
-        return tab.url.hasPrefix("https://") ? "lock.fill" : "globe"
+        return tab.connectionSecurity.symbol ?? "globe"  // privacy area: secure / not secure / local
     }
 
     private var accessibility: String {
-        symbol == "lock.fill" ? "Secure connection; search and engine options" : "Search and engine options"
+        guard let tab = model.selectedTab, !tab.isStartPage, !model.isEditingAddress,
+              tab.connectionSecurity != .notApplicable else { return "Search and engine options" }
+        return "\(tab.connectionSecurity.label); search and engine options"
     }
 }
 
@@ -456,5 +465,25 @@ struct SearchEngineButton: View {
         .help("Search engine: \(model.searchEngine.name) (⌘⇧S cycles)")
         .accessibilityLabel("Search engine")
         .accessibilityValue(model.searchEngine.name)
+    }
+}
+
+/// Reader View toggle shown in the address field while the page has an article
+/// (productivity area's reader mode).
+private struct ReaderButton: View {
+    @EnvironmentObject private var model: BrowserModel
+    @ObservedObject var tab: BrowserTab
+    @Environment(\.shellMetrics) private var metrics
+
+    var body: some View {
+        Button {
+            model.toggleReaderMode()
+        } label: {
+            Image(systemName: tab.isReaderActive ? "doc.plaintext.fill" : "doc.plaintext")
+                .font(.system(size: metrics.icon - 3, weight: .medium))
+        }
+        .buttonStyle(ToolbarButtonStyle(width: 24, height: 24))
+        .help(tab.isReaderActive ? "Leave Reader View (⇧⌘R)" : "Reader View (⇧⌘R)")
+        .accessibilityLabel(tab.isReaderActive ? "Leave Reader View" : "Reader View")
     }
 }

@@ -34,6 +34,10 @@ struct ContentCard: View {
             // Engine area's find bar, over the top of the page.
             if model.settingsCategory == nil { FindBar() }
         }
+        .overlay(alignment: .topTrailing) {
+            // Passwords area: save / update / fill prompts (draws nothing when idle).
+            if model.settingsCategory == nil { PasswordPromptOverlay().padding(10) }
+        }
         .overlay {
             if theme.appearance.glow {
                 shape.strokeBorder(theme.accent.opacity(0.85), lineWidth: 1.5)

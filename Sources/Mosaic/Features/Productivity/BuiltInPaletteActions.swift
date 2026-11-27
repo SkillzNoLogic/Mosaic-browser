@@ -22,7 +22,7 @@ enum BuiltInPaletteActions {
                                        symbol: "xmark.square", shortcut: key("closeTab")) { model.close(tab) })
             if !tab.isStartPage {
                 items.append(PaletteAction(id: "tab.duplicate", title: "Duplicate Tab", keywords: ["copy", "clone"],
-                                           symbol: "plus.square.on.square") { model.newTab(url: tab.url, engine: tab.engine) })
+                                           symbol: "plus.square.on.square") { _ = model.duplicate(tab) })
             }
         }
         if model.tabs.count > 1 {

@@ -102,6 +102,12 @@ final class BrowserModel: ObservableObject {
         _ = downloads // downloads area: starts receiving both engines' downloads
         passwords.attach(to: self)  // passwords: connects to both engines
         privacy.start { [weak self] in self?.tabs.filter { !$0.isPrivate }.map(\.url) ?? [] }  // privacy area
+        // Integration: private tabs stay out of history and password saving; Mosaic's own
+        // history and downloads lists take part in Clear Browsing Data.
+        library.isPrivateTab = { $0.isPrivate }
+        PasswordManager.isPrivateTab = { $0.isPrivate }
+        BrowsingDataRegistry.shared.register(library)
+        BrowsingDataRegistry.shared.register(downloads)
 
         startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
