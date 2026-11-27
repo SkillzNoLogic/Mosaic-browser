@@ -893,6 +893,9 @@ public sealed class BrowserModel : ObservableObject
             case "toggleEngine":
                 ToggleEngine();
                 break;
+            case "toggleBlocker":
+                ToggleBlocker();
+                break;
         }
     }
 

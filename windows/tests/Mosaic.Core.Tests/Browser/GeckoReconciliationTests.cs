@@ -292,6 +292,10 @@ public class GeckoReconciliationTests
         Assert.Equal(2, model.Tabs.Count);
         Assert.Same(page, model.SelectedTab);
 
+        var blocking = model.Blocker.IsEnabled;
+        fixture.Gecko.ReportEvents(tabs, "toggleBlocker");
+        Assert.NotEqual(blocking, model.Blocker.IsEnabled);
+
         fixture.Gecko.ReportEvents(tabs, "toggleEngine", "somethingNew");
         Assert.Equal(EngineKind.Chromium, page.Engine);
         Assert.Single(fixture.Chromium.Created);

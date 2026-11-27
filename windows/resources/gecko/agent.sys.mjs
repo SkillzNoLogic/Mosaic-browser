@@ -216,7 +216,7 @@ function hasShortcutModifier(event) {
 
 /** Shortcuts that belong to Mosaic's UI even while Gecko has focus. */
 const FORWARDED = { l: "focusAddress", t: "newTab", n: "newTab", w: "closeTab" };
-const FORWARDED_WITH_SHIFT = { e: "toggleEngine" };
+const FORWARDED_WITH_SHIFT = { e: "toggleEngine", b: "toggleBlocker" };
 
 /**
  * Gecko's own shortcuts for whole windows: close window, reopen closed window,

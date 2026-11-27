@@ -82,9 +82,9 @@ the page in front, and opens a popover with the global switch, the switch for th
 front, and **Update Lists**. Ctrl+Shift+B switches the blocker on or off.
 
 While a Mozilla page has the keyboard, key presses go to Gecko, not to Mosaic. Ctrl+L
-(address bar), Ctrl+T and Ctrl+N (new tab), Ctrl+W (close tab) and Ctrl+Shift+E (switch
-engine) are forwarded to Mosaic from inside Gecko; other shortcuts act on Gecko directly
-(Ctrl+Shift+B among them: click the address bar or the toolbar first).
+(address bar), Ctrl+T and Ctrl+N (new tab), Ctrl+W (close tab), Ctrl+Shift+E (switch
+engine) and Ctrl+Shift+B (content blocker) are forwarded to Mosaic from inside Gecko; other
+shortcuts act on Gecko directly.
 
 ## How it works
 
@@ -336,7 +336,6 @@ wrong, most likely first:
   a network error, which is what WebView2 offers; a page script can tell the difference.
   WebView2 only reports `http`, `https` and `file` requests, so WebSocket connections are
   probably not filtered there (not yet checked).
-- Ctrl+Shift+B does not reach Mosaic while a Mozilla page has the keyboard (see Using it).
 - Like everything here, the Chromium half has not been run on Windows yet (Status above).
 
 **Extensions**

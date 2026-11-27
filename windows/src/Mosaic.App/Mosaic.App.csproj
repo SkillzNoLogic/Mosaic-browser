@@ -17,6 +17,17 @@
   <ItemGroup>
     <ProjectReference Include="..\Mosaic.Core\Mosaic.Core.csproj" />
   </ItemGroup>
+  <!-- The content blocker, as scripts\bootstrap.ps1 builds it: uBlock Origin's engine, its
+       licence and the filter-list snapshot, loaded from blocker\ next to the executable.
+       Without it the app builds without the blocker, which then reports itself unavailable. -->
+  <ItemGroup Condition="Exists('..\..\vendor\ublock\ublock-engine.js')">
+    <Content Include="..\..\vendor\ublock\ublock-engine.js;..\..\vendor\ublock\LICENSE-uBlock-Origin.txt" Link="blocker\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\vendor\ublock\lists\*" Link="blocker\lists\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
   <ItemGroup>
     <!-- Mosaic's agent inside Gecko, loaded from next to the executable. -->
     <Content Include="..\..\resources\gecko\**\*" Link="gecko\%(RecursiveDir)%(Filename)%(Extension)">

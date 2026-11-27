@@ -75,7 +75,7 @@ Called through `IGeckoEngine.CallAsync(method, args…)`; every method returns J
 | `setBlockerOptions(enabled, allowlist[])` | `true` | the content blocker's switches |
 
 Keyboard shortcuts forwarded from inside Gecko as snapshot events use **Ctrl** on Windows
-(Ctrl+L `focusAddress`, Ctrl+T / Ctrl+N `newTab`, Ctrl+W `closeTab`, Ctrl+Shift+E `toggleEngine`).
+(Ctrl+L `focusAddress`, Ctrl+T / Ctrl+N `newTab`, Ctrl+W `closeTab`, Ctrl+Shift+E `toggleEngine`, Ctrl+Shift+B `toggleBlocker`).
 
 ### Automation (for end-to-end checks)
 
