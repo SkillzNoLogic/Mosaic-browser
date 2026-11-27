@@ -47,6 +47,7 @@ final class BrowserModel: ObservableObject {
     let mosaics = MosaicStore()             // shell: active Mosaic layout and presets
     let shellSettings = ShellSettings()     // shell: General and Accessibility preferences
     let passwords = PasswordManager()  // passwords: Keychain store, save prompt, fill (Features/Passwords)
+    private(set) lazy var privacy = PrivacyController(gecko: gecko, blocker: blocker)
 
     /// True while the user is typing in the address field; page-driven URL
     /// changes must not overwrite what they are typing.
@@ -89,6 +90,7 @@ final class BrowserModel: ObservableObject {
         gecko.onStarted = { [weak self] in
             // The blocker first, so the very first page is already filtered.
             await self?.blocker.configureGecko()
+            await self?.privacy.configureGecko()  // privacy area
             await self?.extensions.loadAllIntoGecko()
         }
         // Re-render dependents when the engine's or the blocker's status changes.
@@ -98,6 +100,7 @@ final class BrowserModel: ObservableObject {
         platform.attach(to: self)  // platform: before the first tab, which may pick Chromium if Gecko is missing
         _ = downloads // downloads area: starts receiving both engines' downloads
         passwords.attach(to: self)  // passwords: connects to both engines
+        privacy.start { [weak self] in self?.tabs.filter { !$0.isPrivate }.map(\.url) ?? [] }  // privacy area
 
         startTabs()  // tabs: restores the session (or opens a new tab); Features/Tabs
     }
@@ -144,6 +147,12 @@ final class BrowserModel: ObservableObject {
         tab.onChange = { [weak self] in self?.tabChanged($0) }
         tab.onNewTabRequest = { [weak self] source, url in
             self?.openLinkedTab(url: url, from: source)  // tabs: next to its opener, in its group
+            // privacy area: a private tab's links open in private tabs.
+            if source.isPrivate {
+                self?.newPrivateTab(url: url)
+                return
+            }
+            self?.newTab(url: url, engine: source.engine)
         }
         return tab
     }
@@ -247,6 +256,7 @@ final class BrowserModel: ObservableObject {
                 view.loadURL(url)
             } else {
                 let view = MCEFBrowserView(url: url)
+                view.isPrivate = tab.isPrivate  // privacy area: in-memory profile
                 view.delegate = tab
                 tab.chromiumView = view
                 objectWillChange.send()
@@ -361,6 +371,11 @@ final class BrowserModel: ObservableObject {
             return
         }
         if beginSafeEngineSwitch(to: kind) { return }  // platform: keeps the page until the other engine has loaded it
+        // privacy area: private tabs exist only in Chromium.
+        if kind == .gecko, selectedTab?.isPrivate == true {
+            notice = PrivacyController.geckoPrivateNotice
+            return
+        }
         setEnginePreference(kind, remember: true)
         guard let tab = selectedTab, tab.engine != kind else { return }
         let url = tab.url
@@ -501,6 +516,7 @@ final class BrowserModel: ObservableObject {
         case "toggleBookmarksBar": library.showsBookmarksBar.toggle()  // ⇧⌘B pressed inside a Gecko page
         case let type where type.hasPrefix("tabs."): handleTabsEvent(type)  // tabs: ⌘⇧T, ⌘⇧A, ⌘1–9…
         case "passwords": if let message = event.passwords { passwords.handleGecko(message) }  // passwords
+        case "newPrivateTab": newPrivateTab()  // privacy area
         default: break
         }
     }

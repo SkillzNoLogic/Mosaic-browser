@@ -143,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
         let file = NSMenu(title: "File")
         file.addItem(item("New Tab", #selector(newTab), "t"))
-        // [tabs] New Window, New Private Window (privacy)
+        file.addItem(item("New Private Tab", #selector(newPrivateTab), "n", [.command, .shift]))  // privacy area
         file.addItem(item("Open Location…", #selector(focusAddress), "l"))
         file.addItem(.separator())
         file.addItem(item("Close Tab", #selector(closeTab), "w"))
@@ -200,6 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let tabsMenu = TabsMenuController(model: model)
         self.tabsMenu = tabsMenu
         tabsMenu.addHistoryItems(to: history)
+        history.addItem(.separator())  // privacy area
+        history.addItem(item("Clear Browsing Data…", #selector(clearBrowsingData), "\u{8}", [.command, .shift]))
         main.addItem(submenu: history, title: "History")
         // library: Show All History, recently visited, the Bookmarks menu (Features/Library/LibraryMenus.swift)
         let libraryMenus = LibraryMenus(model: model)
@@ -259,6 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard let raw = sender.representedObject as? String, let preset = MosaicPresetID(rawValue: raw) else { return }
         model.applyMosaic(preset)
     }
+    @objc private func newPrivateTab() { model.newPrivateTab() }  // privacy area
+    @objc private func clearBrowsingData() { model.showClearBrowsingData() }  // privacy area
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {

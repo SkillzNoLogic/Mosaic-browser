@@ -90,6 +90,7 @@ final class Automation {
         case "hitTest": hitTest(to: value)
         case let action where action.hasPrefix("passwords"):  // passwords: see PasswordsAutomation.swift
             model.passwords.automation(action, value: value, command: command)
+        case _ where action.hasPrefix("privacy."): model.handlePrivacyAutomation(action, command)  // privacy area
         case "dump": dump(to: value)
         // Tabs area: pin, mute, duplicate, workspaces, groups, sleeping tabs… (Features/Tabs/TabsAutomation.swift)
         case let tabs where TabsAutomation.commands.contains(tabs):
@@ -170,6 +171,7 @@ final class Automation {
             "library": LibraryAutomation.dumpFields(model),  // library
             "downloads": model.downloads.automationState(), // downloads area
             "passwords": model.passwords.automationState(),  // passwords (never includes a password)
+            "privacy": model.privacyDump(),  // privacy area
         ]
         state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
         state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell

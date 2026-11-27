@@ -119,3 +119,5 @@ NS_ASSUME_NONNULL_END
 
 // Passwords (area: passwords): save/fill additions, in their own header.
 #import "CEFBridgePasswords.h"
+// Privacy area: private browsers, HTTPS-only, cosmetic filtering, site data.
+#import "CEFBridgePrivacy.h"

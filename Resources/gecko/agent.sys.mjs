@@ -117,6 +117,7 @@ function onHttpRequest(subject) {
       // A page's own document is never blocked; restart its count. This runs
       // even while blocking is off, so a stale count does not linger.
       blocker.blocked.set(tab, 0);
+      privacyResetBlocked(tab); // privacy area: blocker dashboard
       return;
     }
     if (!blocker.enabled || blocker.engine === null) {
@@ -134,6 +135,7 @@ function onHttpRequest(subject) {
     }
     channel.cancel(Cr.NS_ERROR_ABORT);
     blocker.blocked.set(tab, (blocker.blocked.get(tab) ?? 0) + 1);
+    privacyNoteBlocked(tab, request.finalURL, type, page.spec); // privacy area: blocker dashboard
   } catch (error) {
     // A request the blocker cannot classify is let through.
     console.error("Mosaic blocker:", error);
@@ -1134,3 +1136,476 @@ Object.assign(Agent, {
     return JSON.stringify(tabs);
   },
 });
+// ---- Privacy (privacy area) -------------------------------------------------
+//
+// Additive section owned by the privacy area: cosmetic filtering, the blocker
+// dashboard's request log, privacy preferences (HTTPS-Only, query stripping,
+// cookies, DNS over HTTPS), site data and clearing browsing data. Platform-
+// neutral; nothing above depends on it apart from two hook calls in
+// `onHttpRequest`. Methods are added to `Agent` at the end.
+
+const privacy = {
+  cosmeticEnabled: true,
+  /** The engine whose generic stylesheet content processes currently have. */
+  cosmeticEngine: null,
+  cosmeticGeneration: 0,
+  /** hostname -> { css, exceptions }, for the current engine. */
+  cosmeticHosts: new Map(),
+  cosmeticListening: false,
+  /** tab -> blocked requests of its current page: [{ url, type, page, count }] */
+  blockedLog: new WeakMap(),
+  options: null,
+};
+
+const COSMETIC_GENERIC_KEY = "mosaic:cosmetic-generic";
+
+function privacyNoteBlocked(tab, url, type, page) {
+  let entries = privacy.blockedLog.get(tab);
+  if (!entries) {
+    entries = [];
+    privacy.blockedLog.set(tab, entries);
+  }
+  const existing = entries.find(entry => entry.url === url && entry.type === type);
+  if (existing) {
+    existing.count += 1;
+  } else if (entries.length < 500) {
+    entries.push({ url, type, page, count: 1 });
+  }
+}
+
+function privacyResetBlocked(tab) {
+  privacy.blockedLog.delete(tab);
+}
+
+/**
+ * Runs in every content process (a process script, so no files need to be
+ * readable from the content sandbox). On each new http(s) document it asks the
+ * parent which cosmetic CSS applies, then adds it as an author sheet through
+ * nsIDOMWindowUtils, which page CSP does not restrict. The generic sheet comes
+ * through sharedData and is parsed once per process.
+ */
+function mosaicCosmeticProcessScript() {
+  "use strict";
+  const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+  const AUTHOR = Ci.nsIStyleSheetService.AUTHOR_SHEET;
+  const service = Cc["@mozilla.org/content/style-sheet-service;1"].getService(Ci.nsIStyleSheetService);
+  const preload = css =>
+    service.preloadSheet(Services.io.newURI("data:text/css;charset=utf-8," + encodeURIComponent(css)), AUTHOR);
+  let generic = { generation: -1, sheet: null };
+  const sheets = new Map();
+  const sheetFor = css => {
+    let sheet = sheets.get(css);
+    if (!sheet) {
+      sheet = preload(css);
+      sheets.set(css, sheet);
+      if (sheets.size > 64) {
+        sheets.delete(sheets.keys().next().value);
+      }
+    }
+    return sheet;
+  };
+  const pending = new Map();
+  let nextId = 1;
+  Services.obs.addObserver(
+    {
+      observe(doc) {
+        try {
+          const win = doc.defaultView;
+          const url = doc.documentURI || "";
+          if (!win || !/^https?:/.test(url)) {
+            return;
+          }
+          const id = nextId++;
+          pending.set(id, Cu.getWeakReference(doc));
+          const context = win.browsingContext;
+          sendAsyncMessage("Mosaic:Cosmetic", {
+            id,
+            url,
+            host: doc.location?.hostname ?? "",
+            top: context?.top?.id ?? 0,
+            isTop: !context?.parent,
+          });
+        } catch (_) {}
+      },
+    },
+    "document-element-inserted"
+  );
+  addMessageListener("Mosaic:CosmeticReply", ({ data }) => {
+    try {
+      const ref = pending.get(data.id);
+      pending.delete(data.id);
+      const utils = ref?.get()?.defaultView?.windowUtils;
+      if (!utils) {
+        return;
+      }
+      if (data.generic) {
+        const shared = Services.cpmm.sharedData.get("mosaic:cosmetic-generic");
+        if (shared && shared.generation !== generic.generation) {
+          generic = { generation: shared.generation, sheet: shared.css ? preload(shared.css) : null };
+        }
+        if (generic.sheet) {
+          utils.addSheet(generic.sheet, AUTHOR);
+        }
+      }
+      if (data.genericCSS) {
+        utils.addSheet(sheetFor(data.genericCSS), AUTHOR);
+      }
+      if (data.css) {
+        utils.addSheet(sheetFor(data.css), AUTHOR);
+      }
+    } catch (_) {}
+  });
+}
+
+/** Makes content processes see the current engine's generic stylesheet. */
+function publishCosmeticGeneric(engine) {
+  if (privacy.cosmeticEngine === engine) {
+    return;
+  }
+  privacy.cosmeticEngine = engine;
+  privacy.cosmeticHosts.clear();
+  privacy.cosmeticGeneration += 1;
+  Services.ppmm.sharedData.set(COSMETIC_GENERIC_KEY, {
+    generation: privacy.cosmeticGeneration,
+    css: engine.cosmeticGeneric([]),
+  });
+  Services.ppmm.sharedData.flush();
+}
+
+function cosmeticRulesFor(engine, hostname) {
+  let rules = privacy.cosmeticHosts.get(hostname);
+  if (!rules) {
+    const result = engine.cosmeticFor(hostname);
+    rules = { css: String(result.css || ""), exceptions: Array.from(result.exceptions || [], String) };
+    privacy.cosmeticHosts.set(hostname, rules);
+    if (privacy.cosmeticHosts.size > 256) {
+      privacy.cosmeticHosts.delete(privacy.cosmeticHosts.keys().next().value);
+    }
+  }
+  return rules;
+}
+
+/** Hostname of the top-level page a document belongs to. */
+function topHostname(data) {
+  if (data.isTop) {
+    return data.host;
+  }
+  try {
+    const context = BrowsingContext.get(data.top);
+    const uri = context?.currentWindowGlobal?.documentURI ?? context?.currentURI;
+    if (uri && (uri.schemeIs("http") || uri.schemeIs("https"))) {
+      return uri.host;
+    }
+  } catch (_) {}
+  return data.host;
+}
+
+function onCosmeticRequest(message) {
+  const data = message.data;
+  const reply = { id: data.id, generic: false, css: "", genericCSS: "" };
+  try {
+    const engine = blocker.engine;
+    if (
+      engine &&
+      typeof engine.cosmeticFor === "function" &&
+      blocker.enabled &&
+      privacy.cosmeticEnabled &&
+      !isAllowlisted(topHostname(data))
+    ) {
+      publishCosmeticGeneric(engine);
+      const rules = cosmeticRulesFor(engine, data.host);
+      reply.css = rules.css;
+      if (rules.exceptions.length) {
+        reply.genericCSS = engine.cosmeticGeneric(rules.exceptions);
+      } else {
+        reply.generic = true;
+      }
+    }
+  } catch (error) {
+    console.error("Mosaic cosmetic filtering:", error);
+  }
+  message.target.sendAsyncMessage("Mosaic:CosmeticReply", reply);
+}
+
+function startCosmeticFiltering() {
+  if (privacy.cosmeticListening) {
+    return;
+  }
+  privacy.cosmeticListening = true;
+  Services.ppmm.addMessageListener("Mosaic:Cosmetic", onCosmeticRequest);
+  const source = `(${mosaicCosmeticProcessScript.toString()})();`;
+  Services.ppmm.loadProcessScript(`data:application/javascript;charset=utf-8,${encodeURIComponent(source)}`, true);
+}
+
+function setPref(name, value) {
+  if (typeof value === "boolean") {
+    Services.prefs.setBoolPref(name, value);
+  } else if (typeof value === "number") {
+    Services.prefs.setIntPref(name, value);
+  } else {
+    Services.prefs.setStringPref(name, String(value));
+  }
+}
+
+function readPref(name) {
+  switch (Services.prefs.getPrefType(name)) {
+    case Services.prefs.PREF_BOOL: return Services.prefs.getBoolPref(name);
+    case Services.prefs.PREF_INT: return Services.prefs.getIntPref(name);
+    case Services.prefs.PREF_STRING: return Services.prefs.getStringPref(name);
+    default: return null;
+  }
+}
+
+const PRIVACY_PREFS = [
+  "dom.security.https_only_mode",
+  "dom.security.https_only_mode_pbm",
+  "privacy.query_stripping.enabled",
+  "privacy.query_stripping.enabled.pbmode",
+  "privacy.query_stripping.strip_list",
+  "network.cookie.cookieBehavior",
+  "network.cookie.cookieBehavior.pbmode",
+  "privacy.sanitize.sanitizeOnShutdown",
+  "privacy.clearOnShutdown_v2.cookiesAndStorage",
+  "network.trr.mode",
+  "network.trr.uri",
+];
+
+function clearDataFlags(kinds) {
+  const I = Ci.nsIClearDataService;
+  const siteData = I.CLEAR_COOKIES_AND_SITE_DATA ??
+    (I.CLEAR_COOKIES | I.CLEAR_DOM_STORAGES | I.CLEAR_SECURITY_SETTINGS | I.CLEAR_EME | I.CLEAR_MEDIA_DEVICES);
+  let flags = 0;
+  for (const kind of kinds) {
+    switch (kind) {
+      case "history": flags |= I.CLEAR_HISTORY | (I.CLEAR_SESSION_HISTORY ?? 0); break;
+      case "cookiesAndSiteData": flags |= siteData; break;
+      case "cache": flags |= I.CLEAR_ALL_CACHES; break;
+      case "downloads": flags |= I.CLEAR_DOWNLOADS; break;
+      case "formData": flags |= I.CLEAR_FORMDATA; break;
+    }
+  }
+  return flags;
+}
+
+function schemelessSite(host) {
+  const bare = host.replace(/^\./, "");
+  try {
+    if (typeof Services.eTLD.getSchemelessSiteFromHost === "function") {
+      return Services.eTLD.getSchemelessSiteFromHost(bare);
+    }
+    return Services.eTLD.getBaseDomainFromHost(bare);
+  } catch (_) {
+    return bare; // an IP address or a single-label name is its own site
+  }
+}
+
+const PrivacyAgent = {
+  /**
+   * Applies Mosaic's privacy settings to Gecko's preferences (see
+   * PrivacyController.configureGecko for the shape of `options`). Also starts
+   * cosmetic filtering. Returns the preferences' values afterwards.
+   */
+  configurePrivacy(options) {
+    privacy.options = options;
+    privacy.cosmeticEnabled = options.cosmetic !== false;
+    setPref("dom.security.https_only_mode", !!options.httpsOnly);
+    setPref("dom.security.https_only_mode_pbm", !!options.httpsOnly);
+    setPref("privacy.query_stripping.enabled", !!options.stripTracking);
+    setPref("privacy.query_stripping.enabled.pbmode", !!options.stripTracking);
+    setPref("privacy.query_stripping.strip_list", (options.stripList ?? []).join(" "));
+    // 1 = reject third-party cookies; 5 = Firefox's default, which partitions them.
+    setPref("network.cookie.cookieBehavior", options.blockThirdPartyCookies ? 1 : 5);
+    setPref("network.cookie.cookieBehavior.pbmode", options.blockThirdPartyCookies ? 1 : 5);
+    // Clear on exit: cookies and site data only, never history or form data.
+    const onExit = !!options.clearOnExit;
+    setPref("privacy.sanitize.sanitizeOnShutdown", onExit);
+    setPref("privacy.clearOnShutdown_v2.cookiesAndStorage", onExit);
+    setPref("privacy.clearOnShutdown.cookies", onExit);
+    setPref("privacy.clearOnShutdown.offlineApps", onExit);
+    for (const name of [
+      "privacy.clearOnShutdown_v2.cache",
+      "privacy.clearOnShutdown_v2.browsingHistoryAndDownloads",
+      "privacy.clearOnShutdown_v2.historyFormDataAndDownloads",
+      "privacy.clearOnShutdown_v2.formdata",
+      "privacy.clearOnShutdown_v2.siteSettings",
+      "privacy.clearOnShutdown.history",
+      "privacy.clearOnShutdown.formdata",
+      "privacy.clearOnShutdown.downloads",
+      "privacy.clearOnShutdown.sessions",
+      "privacy.clearOnShutdown.cache",
+      "privacy.clearOnShutdown.siteSettings",
+    ]) {
+      setPref(name, false);
+    }
+    const dnsBefore = JSON.stringify([readPref("network.trr.mode"), readPref("network.trr.uri")]);
+    for (const [name, value] of Object.entries(options.dnsPreferences ?? {})) {
+      setPref(name, value);
+    }
+    if (dnsBefore !== JSON.stringify([readPref("network.trr.mode"), readPref("network.trr.uri")])) {
+      // Names resolved through the previous resolver must not linger.
+      try {
+        Services.dns.clearCache(true);
+      } catch (_) {}
+    }
+    // Sites allowed over plain HTTP.
+    const type = "https-only-load-insecure";
+    for (const permission of Services.perms.getAllByTypes([type])) {
+      Services.perms.removePermission(permission);
+    }
+    for (const host of options.httpsExceptions ?? []) {
+      for (const scheme of ["http", "https"]) {
+        const principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(`${scheme}://${host}`);
+        Services.perms.addFromPrincipal(principal, type, Ci.nsIPermissionManager.ALLOW_ACTION);
+      }
+    }
+    startCosmeticFiltering();
+    return this.privacyStatus();
+  },
+
+  /** Turns cosmetic filtering on or off; affects documents loaded afterwards. */
+  setCosmeticOptions(enabled) {
+    privacy.cosmeticEnabled = !!enabled;
+    startCosmeticFiltering();
+    return "true";
+  },
+
+  /** The privacy preferences' current values, for checks and the settings page. */
+  privacyStatus() {
+    const prefs = {};
+    for (const name of PRIVACY_PREFS) {
+      prefs[name] = readPref(name);
+    }
+    let selfTest = null;
+    try {
+      selfTest = blocker.engine?.match("https://www.google-analytics.com/analytics.js", "https://example.com/", "script") ?? null;
+    } catch (error) {
+      selfTest = String(error);
+    }
+    const dns = {};
+    for (const name of ["currentTrrMode", "currentTrrURI", "currentTrrConfirmationState"]) {
+      try {
+        dns[name] = Services.dns[name];
+      } catch (_) {}
+    }
+    return JSON.stringify({
+      prefs,
+      dns,
+      blocker: {
+        engine: !!blocker.engine,
+        enabled: blocker.enabled,
+        observing: blocker.observing,
+        allowlist: blocker.allowlist.size,
+        selfTest,
+      },
+      cosmetic: {
+        enabled: privacy.cosmeticEnabled,
+        listening: privacy.cosmeticListening,
+        generation: privacy.cosmeticGeneration,
+        hostsCached: privacy.cosmeticHosts.size,
+      },
+    });
+  },
+
+  /**
+   * Requests the blocker stopped on a tab's current page, with the filter that
+   * matched each: [{ url, type, count, filter }].
+   */
+  blockedRequests(id) {
+    const { tab } = requireTab(id);
+    const engine = blocker.engine;
+    const entries = privacy.blockedLog.get(tab) ?? [];
+    return JSON.stringify(
+      entries.map(entry => ({
+        url: entry.url,
+        type: entry.type,
+        count: entry.count,
+        filter:
+          engine && typeof engine.matchDetails === "function"
+            ? String(engine.matchDetails(entry.url, entry.page, entry.type).filter || "")
+            : "",
+      }))
+    );
+  },
+
+  /**
+   * Hosts with cookies or storage: [{ host, cookies, bytes }]. Private-browsing
+   * data is not included (Mosaic has no private Gecko windows).
+   */
+  async siteData() {
+    const hosts = new Map();
+    const add = (host, cookies, bytes) => {
+      const key = host.replace(/^\./, "").toLowerCase();
+      if (!key) {
+        return;
+      }
+      const entry = hosts.get(key) ?? { host: key, cookies: 0, bytes: 0 };
+      entry.cookies += cookies;
+      entry.bytes += bytes;
+      hosts.set(key, entry);
+    };
+    for (const cookie of Services.cookies.cookies) {
+      if (!cookie.originAttributes?.privateBrowsingId) {
+        add(cookie.rawHost ?? cookie.host, 1, 0);
+      }
+    }
+    const usage = await new Promise(resolve => {
+      try {
+        Services.qms.getUsage(request => resolve(request.resultCode === Cr.NS_OK ? request.result : []), false);
+      } catch (_) {
+        resolve([]);
+      }
+    });
+    for (const item of usage ?? []) {
+      try {
+        const principal = Services.scriptSecurityManager.createContentPrincipalFromOrigin(item.origin);
+        if (principal.schemeIs("http") || principal.schemeIs("https")) {
+          add(principal.host, 0, Number(item.usage) || 0);
+        }
+      } catch (_) {}
+    }
+    return JSON.stringify([...hosts.values()]);
+  },
+
+  /** Deletes cookies, storage and cache of the site `host` belongs to. */
+  async clearSiteData(host) {
+    const site = schemelessSite(host);
+    const flags = clearDataFlags(["cookiesAndSiteData", "cache"]);
+    await new Promise(resolve => {
+      if (typeof Services.clearData.deleteDataFromSite === "function") {
+        Services.clearData.deleteDataFromSite(site, {}, true, flags, resolve);
+      } else {
+        Services.clearData.deleteDataFromBaseDomain(site, true, flags, resolve);
+      }
+    });
+    return JSON.stringify(site);
+  },
+
+  /**
+   * Clears browsing data. `kinds`: history, cookiesAndSiteData, cache,
+   * downloads, formData. `sinceMs`: start of the range (ms since 1970), or 0
+   * for everything.
+   */
+  async clearBrowsingData(kinds, sinceMs) {
+    const flags = clearDataFlags(kinds);
+    if (!flags) {
+      return "true";
+    }
+    await new Promise(resolve => {
+      if (sinceMs > 0) {
+        Services.clearData.deleteDataInTimeRange(sinceMs * 1000, Date.now() * 1000, true, flags, resolve);
+      } else {
+        Services.clearData.deleteData(flags, resolve);
+      }
+    });
+    return "true";
+  },
+};
+
+// ⇧⌘N opens a private tab in Mosaic (Gecko's own private window is swallowed above).
+if (IS_MAC) {
+  FORWARDED_WITH_SHIFT.n = "newPrivateTab";
+}
+
+Object.assign(Agent, PrivacyAgent);
+
+// ---- end privacy area -------------------------------------------------------

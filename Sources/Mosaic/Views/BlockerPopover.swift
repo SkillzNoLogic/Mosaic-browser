@@ -45,6 +45,8 @@ struct BlockerButton: View {
 
 private struct BlockerPopover: View {
     @EnvironmentObject private var model: BrowserModel
+    @State private var requests: [ContentBlocker.BlockedRequest] = []
+    @State private var showDetails = true
 
     var body: some View {
         let blocker = model.blocker
@@ -80,12 +82,12 @@ private struct BlockerPopover: View {
                     ))
                     .toggleStyle(.switch)
                     .disabled(!blocker.isEnabled)
+                    .help("Turn the blocker off for \(site) if the page does not work")
 
                     if blocker.isFiltering(pageURL: tab.url) {
-                        Text(tab.blockedCount == 1
-                             ? "1 request blocked on this page"
-                             : "\(tab.blockedCount) requests blocked on this page")
-                            .font(.callout)
+                        dashboard(tab)
+                    } else if blocker.isEnabled {
+                        troubleshootingAfterAllowing(site)
                     }
                 }
 
@@ -105,14 +107,97 @@ private struct BlockerPopover: View {
                     }
                 }
 
-                Text("Blocks network requests. It does not yet hide leftover page elements or run uBlock Origin’s scriptlets, so some ads (video ads in particular) can still appear.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(blocker.cosmeticEnabled
+                         ? "Also hides leftover ad elements. Scriptlets are not supported, so some video ads can still appear."
+                         : "Element hiding is off; empty ad spaces may remain.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("Settings…") {
+                        model.showBlocker = false
+                        model.openSettings(.privacy)
+                    }
+                    .controlSize(.small)
+                    .help("Filter lists, My filters and sites where the blocker is off")
+                }
             }
         }
         .padding(14)
-        .frame(width: 320)
+        .frame(width: 380)
+    }
+
+    /// What was blocked on this page, and by which filter.
+    @ViewBuilder private func dashboard(_ tab: BrowserTab) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                showDetails.toggle()
+            } label: {
+                HStack {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(showDetails ? 90 : 0))
+                        .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
+                    Text(tab.blockedCount == 1
+                         ? "1 request blocked on this page"
+                         : "\(tab.blockedCount) requests blocked on this page")
+                        .font(.callout)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(tab.blockedCount == 0)
+            .accessibilityHint("Shows which requests were blocked and by which filter")
+
+            if showDetails, tab.blockedCount > 0 {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(requests) { request in
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 4) {
+                                    Text(request.host).font(.callout.weight(.medium)).lineLimit(1)
+                                    Text(request.type).font(.caption2).padding(.horizontal, 4)
+                                        .background(.quaternary, in: Capsule())
+                                    if request.count > 1 {
+                                        Text("×\(request.count)").font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(request.url).font(.caption2).foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .help(request.url)
+                                if !request.filter.isEmpty {
+                                    Text(request.filter + (request.list.map { "  ·  \($0)" } ?? ""))
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.orange)
+                                        .lineLimit(1).truncationMode(.tail)
+                                        .help("Blocked by \(request.filter)" + (request.list.map { " (\($0))" } ?? ""))
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 220)
+                .task(id: tab.blockedCount) {
+                    requests = await model.blocker.blockedRequests(in: tab)
+                }
+            }
+            Label("Page not working? Switch the blocker off for this site above; the page reloads without filtering. If that fixes it, a filter was in the way.",
+                  systemImage: "lightbulb")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func troubleshootingAfterAllowing(_ site: String) -> some View {
+        Text("The blocker is off for \(site). If the page works now and you want the blocker back, turn it on above.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var statusLine: String {

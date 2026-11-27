@@ -207,3 +207,165 @@ import Testing
         }
     }
 }
+
+/// Cosmetic filtering, filter details and validation, on uBO's real parser.
+/// Needs the bundle Scripts/bootstrap.sh builds; skipped when it is absent.
+@Suite struct CosmeticFilteringTests {
+    static let filters = """
+    ! Title: Mosaic cosmetic test list
+    ||ads.example^
+    ##.ad-banner
+    ##div[id^="sponsor-"]
+    ###top-ad
+    example.com##.promo
+    example.com#@#.ad-banner
+    news.example.com##.newsletter
+    ~shop.example.com,example.com##.sidebar-ad
+    example.*##.entity-ad
+    #@#.globally-excepted
+    ##.globally-excepted
+    example.com##.styled:style(opacity: 0.5 !important)
+    example.com##.text:has-text(Sponsored)
+    example.com##+js(nobab)
+    other.org##.promo
+    """
+
+    private func makeEngine() throws -> BlockerEngine {
+        try BlockerEngine(
+            bundle: BlockerEngineTests.bundle,
+            suffixList: try String(contentsOf: BlockerEngineTests.suffixList, encoding: .utf8),
+            lists: [BlockerEngine.List(name: "test", text: Self.filters)])
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func networkEngineIsUnaffected() throws {
+        let engine = try makeEngine()
+        #expect(engine.filterCount == 1)
+        #expect(engine.verdict(url: "https://ads.example/x.js", documentURL: "https://a.com/", type: "script") == .block)
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func genericStylesheet() throws {
+        let engine = try makeEngine()
+        let css = engine.genericCosmeticCSS()
+        let rules = css.split(separator: "\n").map(String.init)
+        #expect(rules.contains(".ad-banner{display:none!important;}"))
+        #expect(rules.contains(#"div[id^="sponsor-"]{display:none!important;}"#))
+        #expect(rules.contains("#top-ad{display:none!important;}"))
+        // Excepted everywhere by #@#, so never part of the generic sheet.
+        #expect(!css.contains("globally-excepted"))
+        // Site-specific filters are not generic.
+        #expect(!css.contains(".promo"))
+        #expect(engine.genericCosmeticCSS(excluding: [".ad-banner"]).contains(".ad-banner") == false)
+        #expect(engine.cosmeticStats.generic == 4)
+        #expect(engine.cosmeticStats.unsupported >= 2)  // :has-text and +js
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func siteSpecificRules() throws {
+        let engine = try makeEngine()
+        let example = engine.cosmeticRules(forHostname: "www.example.com")
+        #expect(example.css.contains(".promo"))
+        #expect(example.css.contains(".sidebar-ad"))
+        #expect(example.css.contains(".entity-ad"))                // example.* entity filter
+        #expect(example.css.contains(".styled\n{opacity: 0.5 !important}"))  // cssable :style()
+        #expect(!example.css.contains("Sponsored"))                // procedural: not applied
+        #expect(!example.css.contains(".newsletter"))              // other subdomain only
+        #expect(example.genericExceptions == [".ad-banner"])      // example.com#@#.ad-banner
+
+        let news = engine.cosmeticRules(forHostname: "news.example.com")
+        #expect(news.css.contains(".newsletter"))
+        #expect(news.css.contains(".promo"))                       // parent domain applies
+
+        let shop = engine.cosmeticRules(forHostname: "shop.example.com")
+        #expect(!shop.css.contains(".sidebar-ad"))                 // ~shop.example.com
+        #expect(shop.css.contains(".promo"))
+
+        let unrelated = engine.cosmeticRules(forHostname: "unrelated.net")
+        #expect(unrelated.css.isEmpty)
+        #expect(unrelated.genericExceptions.isEmpty)
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func styleCacheCombinesGenericAndSpecific() throws {
+        let cache = CosmeticStyleCache(engine: try makeEngine())
+        let page = cache.stylesheet(forHostname: "example.com", includeGeneric: true)
+        #expect(page.contains("#top-ad"))
+        #expect(page.contains(".promo"))
+        #expect(!page.contains(".ad-banner"))                      // the site's generic exception
+        let frame = cache.stylesheet(forHostname: "other.org", includeGeneric: false)
+        #expect(frame.contains(".promo"))
+        #expect(!frame.contains("#top-ad"))
+        #expect(cache.rules(forHostname: "EXAMPLE.com") == cache.rules(forHostname: "example.com"))
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func detailsNameTheFilter() throws {
+        let engine = try BlockerEngine(
+            bundle: BlockerEngineTests.bundle,
+            suffixList: try String(contentsOf: BlockerEngineTests.suffixList, encoding: .utf8),
+            lists: [BlockerEngine.List(name: "test", text: BlockerEngineTests.filters)])
+        let page = "https://news.example.com/"
+        let blocked = engine.details(url: "https://ads.example/x.js", documentURL: page, type: "script")
+        #expect(blocked.verdict == .block)
+        #expect(blocked.filter == "||ads.example^")
+        let allowed = engine.details(url: "https://ads.example/allowed.js", documentURL: page, type: "script")
+        #expect(allowed.verdict == .allow)
+        #expect(allowed.filter.hasPrefix("@@||ads.example/allowed.js"))
+        let image = engine.details(url: "https://cdn.example.net/banner/1.png", documentURL: page, type: "image")
+        #expect(image.filter.contains("/banner/"))
+        #expect(engine.details(url: "https://ok.example/", documentURL: page, type: "script").filter.isEmpty)
+    }
+
+    @Test(.enabled(if: BlockerEngineTests.available)) func validatesUserFilters() throws {
+        let engine = try makeEngine()
+        let checks = engine.validate(filters: """
+        ! my filters
+        ||tracker.example^$third-party
+        example.com##.cookie-banner
+
+        ##.everywhere > .ad
+        ||x.example^$bogus
+        example.com##+js(set-constant, x, 1)
+        example.com##div:has-text(Ad)
+        ##[unclosed
+        ||y.example^$removeparam=utm_source
+        ||z.example^$redirect=noopjs
+        """)
+        let byLine = Dictionary(uniqueKeysWithValues: checks.map { ($0.line, $0) })
+        #expect(byLine[1]?.kind == .comment)
+        #expect(byLine[2]?.kind == .network)
+        #expect(byLine[3]?.kind == .cosmetic)
+        #expect(byLine[4] == nil)                                 // blank lines are skipped
+        #expect(byLine[5]?.kind == .cosmetic)
+        #expect(byLine[6]?.kind == .error)
+        #expect(byLine[6]?.message.contains("bogus") == true)
+        #expect(byLine[7]?.kind == .unsupported)
+        #expect(byLine[8]?.kind == .unsupported)
+        #expect(byLine[9]?.kind == .error)
+        #expect(byLine[10]?.kind == .unsupported)
+        #expect(byLine[11]?.kind == .network)
+        #expect(byLine[11]?.message.isEmpty == false)             // blocks instead of redirecting
+        #expect(checks.filter(\.isEffective).count == 4)
+    }
+
+    @Test func userFiltersAreLoadedAfterTheLists() throws {
+        let root = try Fixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lists = Array(FilterListCatalog.defaults.prefix(1))
+        let store = FilterListStore(directory: root, lists: lists)
+        try Data("! list".utf8).write(to: store.fileURL(for: lists[0]))
+        #expect(store.loadLists().map(\.name) == [lists[0].id])
+        try store.saveUserFilters("||mine.example^\nexample.com##.mine")
+        #expect(store.loadLists().map(\.name) == [lists[0].id, FilterListCatalog.userFiltersName])
+        #expect(store.availableListPaths().last == store.userFiltersURL.path)
+        #expect(store.listContaining(filter: "||mine.example^") == "My filters")
+        #expect(store.listContaining(filter: "||nothing.example^") == nil)
+        try store.saveUserFilters("")
+        #expect(store.loadLists().count == 1)
+    }
+
+    @Test func catalogueOffersStricterListsWithoutClashes() {
+        let ids = FilterListCatalog.all.map(\.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(FilterListCatalog.optional.contains { $0.id == "fanboy-cookiemonster" && $0.group == "annoyances" })
+        #expect(FilterListCatalog.optional.allSatisfy { $0.url.scheme == "https" && !$0.summary.isEmpty })
+        let enabled: Set<String> = ["easylist", "adguard-cookies"]
+        #expect(FilterListCatalog.lists(enabled: enabled).map(\.id) == ["easylist", "adguard-cookies"])
+    }
+}
