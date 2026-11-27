@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using Mosaic.App.Chromium;
 using Mosaic.App.Hosting;
@@ -25,6 +26,7 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        EnableTraceFile();
         var automated = e.Args.Contains(Automation.Flag);
 
         instance = new SingleInstance(AppPaths.DataRoot);
@@ -87,5 +89,26 @@ public partial class App : Application
         geckoJob?.Dispose();
         instance?.Dispose();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// A GUI process has nowhere to show <see cref="Trace"/> output, and the Gecko window host
+    /// reports every Win32 step it takes through it. Setting <c>MOSAIC_TRACE_FILE</c> sends those
+    /// diagnostics to a file, which is what someone debugging a real PC (or the CI smoke test)
+    /// needs in order to see why a Mozilla page did not appear.
+    /// </summary>
+    private static void EnableTraceFile()
+    {
+        if (Environment.GetEnvironmentVariable("MOSAIC_TRACE_FILE") is not { Length: > 0 } path) return;
+        try
+        {
+            Trace.Listeners.Add(new TextWriterTraceListener(path) { TraceOutputOptions = TraceOptions.DateTime });
+            Trace.AutoFlush = true;
+            Trace.WriteLine($"Mosaic {typeof(App).Assembly.GetName().Version} trace started");
+        }
+        catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException)
+        {
+            // Diagnostics are optional; an unwritable path must not stop the browser.
+        }
     }
 }

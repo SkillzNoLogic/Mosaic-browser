@@ -160,7 +160,7 @@ chrome.runtime.onInstalled.addListener(() => {
 function Assert-AppRunning {
     if ($null -eq $script:App) { throw 'Mosaic has not been started.' }
     if ($script:App.HasExited) {
-        throw "Mosaic exited unexpectedly (exit code $($script:App.ExitCode)). See mosaic-stderr.log and events.txt in the output folder."
+        throw "Mosaic exited unexpectedly (exit code $($script:App.ExitCode)). See mosaic-trace.log, mosaic-stderr.log and events.txt in the output folder."
     }
 }
 
@@ -355,6 +355,7 @@ New-Item -ItemType Directory -Path $dataDirectory, $fixtures -Force | Out-Null
 
 $savedDataDir = $env:MOSAIC_DATA_DIR
 $savedGeckoExe = $env:MOSAIC_GECKO_EXE
+$savedTraceFile = $env:MOSAIC_TRACE_FILE
 $started = Get-Date
 $snapshot = @()
 $failure = $null
@@ -383,6 +384,8 @@ try {
     # lives in the real data folder), so the engine is named explicitly.
     $env:MOSAIC_DATA_DIR = $dataDirectory
     $env:MOSAIC_GECKO_EXE = $gecko
+    # The Gecko window host's step-by-step diagnostics, the first thing to read on a failure.
+    $env:MOSAIC_TRACE_FILE = Join-Path $OutputDirectory 'mosaic-trace.log'
     $arguments = @('--mosaic-automation')
     if ($GeckoHostMode -eq 'owned') { $arguments += '--gecko-host=owned' }
     $script:App = Start-Process -FilePath $appExe -ArgumentList $arguments -PassThru `
@@ -508,6 +511,7 @@ finally {
     # Clean up whatever is still there, however the run ended.
     $env:MOSAIC_DATA_DIR = $savedDataDir
     $env:MOSAIC_GECKO_EXE = $savedGeckoExe
+    $env:MOSAIC_TRACE_FILE = $savedTraceFile
     try {
         if ($null -ne $script:App) {
             if ($snapshot.Count -eq 0) {

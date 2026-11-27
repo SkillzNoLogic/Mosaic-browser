@@ -187,6 +187,10 @@ scripts\drive.ps1 quit
 `drive.ps1` prints Mosaic's one-line JSON reply and exits non-zero if the command was
 refused. The commands and the protocol are specified in [`CONTRACT.md`](CONTRACT.md).
 
+When something goes wrong with a Mozilla page, set `MOSAIC_TRACE_FILE` to a file path before
+starting Mosaic: the Gecko window host writes each Win32 step it takes (and why one failed)
+there. The smoke test does this and uploads the file as `mosaic-trace.log`.
+
 `scripts\smoke.ps1` is the end-to-end check to run first on a real PC. It starts the
 published app with a throw-away data folder and verifies, through `dump`, that a page loads
 on the Mozilla engine with Gecko's window attached, that the tab can be switched to Chromium,
