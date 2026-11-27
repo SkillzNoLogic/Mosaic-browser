@@ -22,7 +22,7 @@ A privacy-first, two-engine web browser for Apple Silicon Macs, written in Swift
   Settings › About (filter-list updates, engine install/update checks, extension downloads,
   optional favicons and search suggestions).
 
-Status: **v0.2, pre-release.** Built and verified by scripted runs in both engines on
+Status: **v0.2.** Built and verified by scripted runs in both engines on
 isolated profiles; see [Known limitations](#known-limitations) and `To Do.md` for what is
 partial or missing. Requirements: Apple Silicon Mac, macOS 14 or later (Liquid Glass needs
 macOS 26 or later; older systems get solid materials).
@@ -170,7 +170,6 @@ in the background.
 - Chromium runs without its sandbox.
 - Gecko is driven over a remote-debugging socket that only your user can reach; any
   process running as you could drive it.
-- Mosaic itself has no licence yet; see [Third-party software](#third-party-software).
 
 ## Project layout
 
@@ -212,15 +211,24 @@ swift Scripts/drive.swift quit
 Each feature area adds its own commands and `dump` fields (see `Sources/Mosaic/App/Automation.swift`
 and the `*Automation.swift` files).
 
+## Licence
+
+Copyright © 2026 the Mosaic contributors.
+
+Mosaic is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. It is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [`LICENSE`](LICENSE) for the full
+text. (GPL is required because Mosaic includes uBlock Origin's engine, which is GPL v3.)
+
 ## Third-party software
 
 - **Chromium Embedded Framework** (BSD) and Chromium (its licences: `chrome://credits`).
 - **Firefox ESR** (MPL 2.0), run unmodified as a separate program.
 - **uBlock Origin**'s filtering engine, Copyright (C) Raymond Hill and contributors,
   **GNU GPL v3** (licence copied into the app as `blocker/LICENSE-uBlock-Origin.txt`). Filter
-  lists have their own licences (see each list's header). Distributing a build that includes
-  the blocker means complying with the GPL, which in practice means releasing Mosaic's own
-  source under a GPL-compatible licence.
+  lists have their own licences (see each list's header).
 - **Readability.js** 0.6.0 (Apache 2.0), Mozilla, for Chromium reader view (`Resources/reader/`).
 - Tracking-parameter list from Firefox's query-stripping list.
 

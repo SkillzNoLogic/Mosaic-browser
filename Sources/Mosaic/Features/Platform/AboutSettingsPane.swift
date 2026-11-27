@@ -158,7 +158,8 @@ private struct LicencesSection: View {
     var body: some View {
         LicenceRow(
             title: "Mosaic",
-            summary: "Mosaic’s own licence has not been published yet. Because Mosaic includes uBlock Origin’s engine (GPL v3), any distributed build must be released under a GPL-compatible licence.")
+            summary: "Mosaic is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 or (at your option) any later version. It comes with no warranty. Source: github.com/SkillzNoLogic/Mosaic-browser",
+            text: Licences.mosaic ?? "The licence file is missing from this build (LICENSE). The GPL v3 is at https://www.gnu.org/licenses/gpl-3.0.txt")
 
         LicenceRow(
             title: "Chromium Embedded Framework",
@@ -232,6 +233,13 @@ private struct LicenceRow<Extra: View>: View {
 }
 
 enum Licences {
+    /// Mosaic's own licence (GPL v3 or later), copied into the app by the build.
+    static var mosaic: String? {
+        Bundle.main.resourceURL
+            .map { $0.appendingPathComponent("LICENSE") }
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+    }
+
     /// uBlock Origin's licence (GPL v3), copied into the app by the build.
     static var uBlockOrigin: String? {
         Bundle.main.resourceURL

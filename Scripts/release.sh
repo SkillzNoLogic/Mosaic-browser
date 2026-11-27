@@ -24,6 +24,7 @@ MOSAIC_VERSION="$VERSION" Scripts/build.sh release
 
 APP="$ROOT/build/Mosaic.app"
 [[ -f "$APP/Contents/Resources/blocker/ublock-engine.js" ]] || { echo "the content blocker is missing from the build" >&2; exit 1; }
+[[ -f "$APP/Contents/Resources/LICENSE" ]] || { echo "Mosaic's licence is missing from the build" >&2; exit 1; }
 [[ -d "$APP/Contents/Frameworks/Chromium Embedded Framework.framework" ]] || { echo "Chromium is missing from the build" >&2; exit 1; }
 codesign --verify --strict "$APP"
 

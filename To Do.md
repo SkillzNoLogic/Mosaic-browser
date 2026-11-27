@@ -151,7 +151,7 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 
 - [x] ~~Release build zipped and attached to a GitHub release~~ — v0.2.0, `Scripts/release.sh`
 - [x] ~~First launch from the zip works on a clean profile (engine install offered in-app)~~ — script: unzipped copy, signature verified, starts in Chromium with no Gecko runtime, loads a page, quits cleanly
-- [ ] A licence for Mosaic itself (needed before any public distribution; uBlock Origin is GPL v3) [owner decision]
+- [x] ~~A licence for Mosaic itself~~ — GNU GPL v3 or later (`LICENSE`), required by the bundled uBlock Origin engine; shown in Settings › About & Updates and shipped in the app
 
 ## Deferred on purpose
 

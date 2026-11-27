@@ -52,6 +52,8 @@ cp "$ROOT/Resources/gecko/"* "$APP/Contents/Resources/gecko/"
 # Reader view for Chromium tabs: Mozilla's Readability (Apache 2.0, with its licence) and
 # Mosaic's reader page.
 cp -R "$ROOT/Resources/reader" "$APP/Contents/Resources/"
+# Mosaic's own licence (GPL v3 or later), shown in Settings › About & Updates.
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 
 # Built-in content blocker: uBlock Origin's engine (bundled from source by
 # bootstrap.sh), a snapshot of its filter lists for first launch, and its licence.

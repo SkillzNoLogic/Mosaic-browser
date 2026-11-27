@@ -47,6 +47,6 @@
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Mosaic embeds Chromium (CEF) and runs Mozilla Gecko.</string>
+	<string>Copyright © 2026 the Mosaic contributors. Licensed under the GNU GPL v3 or later.</string>
 </dict>
 </plist>
