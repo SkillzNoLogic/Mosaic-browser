@@ -87,7 +87,7 @@ public interface IPageFeaturesHost
     /// <summary>Where screenshots go without asking: Pictures\Screenshots.</summary>
     string ScreenshotsFolder { get; }
 
-    bool CopyImage(byte[] png);
+    Task<bool> CopyImageAsync(byte[] png);
 
     void CopyText(string text);
 
@@ -121,4 +121,14 @@ internal static class PageText
         if (name.Length > 80) name = name[..80].TrimEnd();
         return suffix is null ? name : $"{name} ({suffix})";
     }
+}
+
+/// <summary>
+/// Optional for the winui area's Chromium browser: the native control behind an
+/// <see cref="IChromiumBrowser"/> (WinUI's <c>WebView2</c>), so the engine area can hook its
+/// page features. Without it the engine area looks for a public <c>WebView2</c> member.
+/// </summary>
+public interface IChromiumViewSource
+{
+    object View { get; }
 }

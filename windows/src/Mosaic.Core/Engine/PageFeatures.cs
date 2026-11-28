@@ -631,7 +631,7 @@ public sealed partial class PageFeatures : ObservableObject
         var note = capture.Cropped ? " (cut off: the page is very long)" : "";
         if (target == ScreenshotTarget.Clipboard)
         {
-            var copied = Host?.CopyImage(capture.Png) ?? false;
+            var copied = Host is { } clipboard && await clipboard.CopyImageAsync(capture.Png);
             model.Notice = copied ? "Screenshot copied" + note : "Couldn’t copy the screenshot.";
             return copied ? (capture, null) : null;
         }

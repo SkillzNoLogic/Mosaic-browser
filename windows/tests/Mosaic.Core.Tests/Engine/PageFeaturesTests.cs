@@ -59,10 +59,10 @@ internal sealed class FakeHost : IPageFeaturesHost
         return Task.FromResult(SavePath);
     }
 
-    public bool CopyImage(byte[] png)
+    public Task<bool> CopyImageAsync(byte[] png)
     {
         Events.Add($"copy image {png.Length}");
-        return true;
+        return Task.FromResult(true);
     }
 
     public void CopyText(string text) => Events.Add($"copy {text}");
