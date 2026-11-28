@@ -305,6 +305,8 @@ function Invoke-Mosaic {
     catch {
         $original = $_.Exception.Message
         Test-MosaicHung -During "'$Do'"
+        # Not hung, but the pipe is stuck: the next scenario gets a fresh Mosaic.
+        $script:Session.Hung = $true
         throw "Pipe error on '$Do': $original"
     }
     if ((Get-Field $reply 'ok') -ne $true) {

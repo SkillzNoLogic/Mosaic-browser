@@ -168,7 +168,12 @@ $timer.Add_Tick({
         if ($script:QuitAfterReply) { $timer.Stop(); $form.Close(); return }
         if ($script:CrashAfterReply) { [System.Environment]::FailFast('FakeMosaic: crash requested by the e2e self-test') }
         $script:Pending = $pipe.BeginWaitForConnection($null, $null)
-        if ($script:HangAfterReply) { $script:HangAfterReply = $false; Start-Sleep -Seconds 90 }
+        if ($script:HangAfterReply) {
+            # A real hang: Start-Sleep would pump messages on this STA thread.
+            $script:HangAfterReply = $false
+            $until = [DateTime]::UtcNow.AddSeconds(90)
+            while ([DateTime]::UtcNow -lt $until) { }
+        }
     })
 $timer.Start()
 [System.Windows.Forms.Application]::Run($form)

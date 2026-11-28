@@ -67,6 +67,13 @@ function Get-UiaScan {
         if ($elements.Count -ge $MaxElements) { $truncated = $true; break }
         try { $current = $element.Current } catch { continue }
         $type = Get-ControlTypeName $current.ControlType
+        # Plain Win32 controls without a UIA proxy show up as panes; their class says what they are.
+        if ($type -eq 'Pane') {
+            $class = [string]$current.ClassName
+            if ($class -match '(?i)(^|\.)BUTTON(\.|$)') { $type = 'Button' }
+            elseif ($class -match '(?i)(^|\.)EDIT(\.|$)') { $type = 'Edit' }
+            elseif ($class -match '(?i)(^|\.)COMBOBOX(\.|$)') { $type = 'ComboBox' }
+        }
         $name = [string]$current.Name
         $label = $type
         if ($name) { $label += "('" + $name + "')" } elseif ($current.AutomationId) { $label += "#" + $current.AutomationId }
