@@ -96,7 +96,7 @@ public sealed partial class BrowserModel
     private string LibraryResolveKeyword(string input) => Library.KeywordSearchUrl(input) ?? input;
 
     /// <summary>Library shortcuts pressed while a Gecko page has focus (the agent forwards them as events).</summary>
-    private bool LibraryHandleGeckoEvent(string eventType) => Library.HandleGeckoEvent(eventType);
+    private bool LibraryHandleGeckoEvent(string eventType) => Library.HandleCommand(eventType);
 
     /// <summary>On quit: visits still waiting for their title are written.</summary>
     private void LibraryShutdown() => library?.FlushPendingVisits();

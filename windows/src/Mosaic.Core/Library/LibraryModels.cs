@@ -174,7 +174,7 @@ public static class LibraryUrl
     }
 
     /// <summary>The scheme, when <paramref name="url"/> starts with a valid one followed by ':'.</summary>
-    internal static string? Scheme(string url)
+    public static string? Scheme(string url)
     {
         var colon = url.IndexOf(':');
         if (colon <= 0 || !char.IsAsciiLetter(url[0])) return null;

@@ -5,18 +5,26 @@ using Mosaic.Core.Tests.Browser;
 
 namespace Mosaic.Core.Tests.Library;
 
-/// <summary>The library's automation commands (macOS names) and its <c>dump</c> key, through the pipe's handler.</summary>
+/// <summary>
+/// The library's automation commands (macOS names) and its <c>dump</c> fields. The handler is
+/// called directly: registering it globally (<see cref="LibraryAutomation.Register"/>, which the
+/// app does) would add a "library" key to every other test's dump.
+/// </summary>
 public class LibraryAutomationTests
 {
-    private static async Task<JsonObject> RunAsync(Automation automation, string command, string value = "", string? output = null)
+    private sealed class Driver(BrowserModel model)
     {
-        var request = new JsonObject { ["do"] = command, ["value"] = value };
-        if (output is not null) request["out"] = output;
-        var reply = await automation.HandleAsync(request.ToJsonString());
-        return JsonNode.Parse(reply.Json)!.AsObject();
+        public BrowserModel Model => model;
     }
 
-    private static async Task OkAsync(Automation automation, string command, string value = "", string? output = null)
+    private static async Task<JsonObject> RunAsync(Driver automation, string command, string value = "", string? output = null)
+    {
+        var reply = await LibraryAutomation.HandleAsync(automation.Model, command, value, output);
+        Assert.NotNull(reply);
+        return JsonNode.Parse(reply!.Json)!.AsObject();
+    }
+
+    private static async Task OkAsync(Driver automation, string command, string value = "", string? output = null)
     {
         var reply = await RunAsync(automation, command, value, output);
         Assert.True(reply["ok"]!.GetValue<bool>(), reply.ToJsonString());
@@ -25,11 +33,10 @@ public class LibraryAutomationTests
     [Fact]
     public void CommandsChangeTheLibraryAndDumpShowsIt() => TestLoop.Run(async () =>
     {
-        LibraryAutomation.Register();
-        LibraryAutomation.Register();  // once only
         using var fixture = new BrowserFixture();
         using var folder = new TempFolder();
-        var automation = new Automation(fixture.Model, _ => Task.CompletedTask);
+        var automation = new Driver(fixture.Model);
+        Assert.Null(await LibraryAutomation.HandleAsync(fixture.Model, "navigate", "", null));  // not a library command
         fixture.OpenGeckoTab("https://example.com/");
 
         var bookmarked = await RunAsync(automation, "libraryBookmark");
@@ -40,8 +47,7 @@ public class LibraryAutomationTests
         await OkAsync(automation, "libraryBar", "hide");
         await OkAsync(automation, "libraryRemoteSuggestions", "off");
 
-        var state = fixture.Model.Library.DumpState();
-        var dump = (await RunAsync(automation, "dump"))["state"]!["library"]!;
+        var dump = fixture.Model.Library.DumpState();
         Assert.True(dump["loaded"]!.GetValue<bool>());
         Assert.Equal(1, dump["bookmarks"]!.GetValue<int>());
         Assert.Equal("example.com", dump["bookmarksBar"]![0]!.GetValue<string>());
@@ -50,7 +56,6 @@ public class LibraryAutomationTests
         Assert.Equal(1, dump["readingList"]!.GetValue<int>());
         Assert.Equal(1, dump["historyVisits"]!.GetValue<int>());
         Assert.Equal(["w=Wikipedia", "mdn=MDN"], dump["customEngines"]!.AsArray().Select(e => e!.GetValue<string>()));
-        Assert.Equal(state.ToJsonString(), dump.ToJsonString());
 
         var path = folder.File("bookmarks.json");
         await OkAsync(automation, "libraryBookmarks", path);
@@ -78,10 +83,9 @@ public class LibraryAutomationTests
     [Fact]
     public void BadInputIsReported() => TestLoop.Run(async () =>
     {
-        LibraryAutomation.Register();
         using var fixture = new BrowserFixture();
         using var folder = new TempFolder();
-        var automation = new Automation(fixture.Model, _ => Task.CompletedTask);
+        var automation = new Driver(fixture.Model);
         Assert.False((await RunAsync(automation, "libraryBookmark"))["ok"]!.GetValue<bool>());  // the start page
         Assert.False((await RunAsync(automation, "libraryAddEngine", "X|w|https://x.test/?q=%s"))["ok"]!.GetValue<bool>());
         Assert.False((await RunAsync(automation, "libraryAddEngine", "X|x|https://x.test/"))["ok"]!.GetValue<bool>());
@@ -119,4 +123,20 @@ public class LibraryAutomationTests
         Send("showBookmarks");
         Assert.Equal("mosaic://bookmarks", model.SelectedTab!.Url);
     });
+}
+
+public class LibraryShortcutsTests
+{
+    [Fact]
+    public void WindowsConventions()
+    {
+        Assert.Equal("bookmarkPage", LibraryShortcuts.Match('D', control: true, shift: false));
+        Assert.Equal("showHistory", LibraryShortcuts.Match('H', control: true, shift: false));
+        Assert.Equal("showBookmarks", LibraryShortcuts.Match('O', control: true, shift: true));
+        Assert.Equal("toggleBookmarksBar", LibraryShortcuts.Match('B', control: true, shift: true));
+        Assert.Null(LibraryShortcuts.Match('D', control: true, shift: true));
+        Assert.Null(LibraryShortcuts.Match('D', control: false, shift: false));
+        Assert.Null(LibraryShortcuts.Match('D', control: true, shift: false, alt: true));  // AltGr
+        Assert.Null(LibraryShortcuts.Match('O', control: true, shift: false));
+    }
 }

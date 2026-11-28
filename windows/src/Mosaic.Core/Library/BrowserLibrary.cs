@@ -1011,8 +1011,13 @@ public sealed class BrowserLibrary : ObservableObject
     /// <summary>Opens Settings › Search through whoever listens (the library's UI mounts).</summary>
     public void OpenSearchSettings() => SearchSettingsRequested?.Invoke();
 
-    /// <summary>Events the Gecko agent forwards for library shortcuts. True when handled.</summary>
-    internal bool HandleGeckoEvent(string type)
+    /// <summary>
+    /// Runs a library command by name: <c>bookmarkPage</c> (Ctrl+D), <c>showHistory</c> (Ctrl+H),
+    /// <c>showBookmarks</c> (Ctrl+Shift+O), <c>toggleBookmarksBar</c> (Ctrl+Shift+B). These are
+    /// the events the Gecko agent forwards; the Chromium side gets the same names from
+    /// <see cref="LibraryShortcuts.Match"/>. True when handled.
+    /// </summary>
+    public bool HandleCommand(string type)
     {
         switch (type)
         {
