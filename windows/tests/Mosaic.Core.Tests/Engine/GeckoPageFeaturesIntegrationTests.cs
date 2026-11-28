@@ -12,7 +12,8 @@ namespace Mosaic.Core.Tests.Engine;
 /// The engine area's agent methods (find, zoom, PDF, screenshots, mute, permission requests,
 /// blocked pop-ups) against the real Gecko named by <c>MOSAIC_GECKO_EXE</c>: headless, on a
 /// throwaway profile, over the transport Windows uses. On CI this runs on the Windows runner
-/// with its Firefox, which is how the Gecko side of these features is verified there.
+/// with its Firefox, which is how the Gecko side of these features is verified there. (The
+/// agent lives outside windows/, so a change to it alone does not start the Windows workflow.)
 /// </summary>
 public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
 {
