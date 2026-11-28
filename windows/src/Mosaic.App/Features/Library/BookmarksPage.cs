@@ -195,7 +195,7 @@ internal sealed class BookmarksPage : Grid
         menu.Items.Add(LibraryUi.MenuItem("New Folder Inside…", () => _ = BookmarkEditor.NewFolderAsync(model, this, folder.Id), "folder.badge.plus"));
         if (!folder.IsRoot)
         {
-            menu.Items.Add(LibraryUi.MenuItem("Rename…", () => BookmarkEditor.Show(model, folder.Id, null, anchor), "pencil"));
+            menu.Items.Add(LibraryUi.MenuItem("Rename…", () => BookmarkEditor.Show(model, folder.Id, null, anchor), "edit"));
             menu.Items.Add(LibraryUi.MenuItem("Delete…", () => _ = DeleteAsync([folder.Id]), "trash"));
         }
         return menu;
@@ -376,7 +376,7 @@ internal sealed class BookmarksPage : Grid
             menu.Items.Add(LibraryUi.MenuItem("Open All in New Tabs", () => OpenAll(library.Children(bookmark.Id)), "plus.square.on.square"));
         }
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(LibraryUi.MenuItem(bookmark.IsFolder ? "Rename…" : "Edit…", () => BookmarkEditor.Show(model, bookmark.Id, null, row), "pencil"));
+        menu.Items.Add(LibraryUi.MenuItem(bookmark.IsFolder ? "Rename…" : "Edit…", () => BookmarkEditor.Show(model, bookmark.Id, null, row), "edit"));
         var move = new MenuFlyoutSubItem { Text = "Move To", Icon = LibraryUi.Icon("folder") };
         foreach (var (folder, depth) in library.FolderTree())
         {

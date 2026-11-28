@@ -201,7 +201,7 @@ internal sealed class SearchSettingsPage : Grid
             var actions = new DropDownButton { Content = LibraryUi.Icon("ellipsis", 12), VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(actions, $"Actions for {name}");
             var menu = new MenuFlyout();
-            menu.Items.Add(LibraryUi.MenuItem("Edit…", () => _ = EditAsync(custom), "pencil"));
+            menu.Items.Add(LibraryUi.MenuItem("Edit…", () => _ = EditAsync(custom), "edit"));
             menu.Items.Add(LibraryUi.MenuItem("Make Default", () => model.SearchEngine = custom.SearchEngine, "checkmark"));
             menu.Items.Add(new MenuFlyoutSeparator());
             menu.Items.Add(LibraryUi.MenuItem("Delete", () => _ = library.DeleteEngineAsync(custom), "trash"));

@@ -245,7 +245,7 @@ internal sealed class BookmarksBarView : Grid
                 foreach (var child in library.Children(bookmark.Id).Where(c => c.Url is not null)) model.OpenFromLibrary(child.Url!, newTab: true, select: false);
             }, "plus.square.on.square"));
         }
-        menu.Items.Add(LibraryUi.MenuItem(bookmark.IsFolder ? "Rename…" : "Edit…", () => BookmarkEditor.Show(model, bookmark.Id, null, anchor), "pencil"));
+        menu.Items.Add(LibraryUi.MenuItem(bookmark.IsFolder ? "Rename…" : "Edit…", () => BookmarkEditor.Show(model, bookmark.Id, null, anchor), "edit"));
         menu.Items.Add(LibraryUi.MenuItem("Delete", () => _ = library.DeleteBookmarksAsync([bookmark.Id]), "trash"));
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var item in BarMenuItems()) menu.Items.Add(item);

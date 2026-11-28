@@ -24,37 +24,8 @@ internal static class LibraryUi
     /// <summary>Mosaic's window, for file pickers (set by the library's start-up hook).</summary>
     public static Window? MainWindow { get; set; }
 
-    /// <summary>
-    /// Icons the library uses that the system area's table may not have yet. Each is added only
-    /// when <see cref="Icons"/> does not already know the name (the system area's glyph wins).
-    /// </summary>
-    private static readonly (string Name, string Glyph)[] FallbackGlyphs =
-    [
-        ("folder", ""), ("folder.badge.plus", ""), ("clock", ""), ("book", ""),
-        ("eyeglasses", ""), ("tag", ""), ("trash", ""), ("plus.square.on.square", ""),
-        ("doc.on.doc", ""), ("pencil", ""), ("checkmark", ""), ("checkmark.circle", ""),
-        ("circle", ""), ("square.and.arrow.down", ""), ("square.and.arrow.up", ""),
-        ("globe", ""), ("chevron.down", ""), ("keyboard", ""), ("chevron.right.2", ""),
-    ];
-
-    private static bool iconsAdded;
-
-    public static void AddFallbackIcons()
-    {
-        if (iconsAdded) return;
-        iconsAdded = true;
-        var unknown = Icons.Glyph("library.no-such-icon");
-        foreach (var (name, glyph) in FallbackGlyphs)
-        {
-            if (Icons.Glyph(name) == unknown) Icons.Add(name, glyph);
-        }
-    }
-
-    public static FontIcon Icon(string name, double size = 16)
-    {
-        AddFallbackIcons();
-        return Icons.Make(name, size);
-    }
+    /// <summary>A Fluent icon from the system area's table (<see cref="Icons"/>).</summary>
+    public static FontIcon Icon(string name, double size = 16) => Icons.Make(name, size);
 
     // ---- Theme ----
 
