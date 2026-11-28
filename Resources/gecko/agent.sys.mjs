@@ -39,6 +39,13 @@ const hookedWindows = new WeakSet();
 const pendingEvents = [];
 
 /**
+ * Password events kept apart from pendingEvents when passwordsStart was asked to
+ * (Windows, whose snapshot reader keeps only event types); read with passwordsTake().
+ */
+const passwordEvents = [];
+const MAX_PASSWORD_EVENTS = 200;
+
+/**
  * Converted extensions are re-installed every time Gecko starts, so each start
  * looks like a first install to them and many open their welcome page again.
  * While this deadline is in the future, tabs Mosaic did not ask for are closed
@@ -1263,10 +1270,26 @@ export const Agent = {
 
   // ---- Passwords (area: passwords) ----------------------------------------
 
-  /** Starts password support: registers the window actors that watch sign-in forms. */
-  async passwordsStart() {
+  /**
+   * Starts password support: registers the window actors that watch sign-in forms.
+   * With `options.separateQueue` (Windows), each password event goes into a queue of its
+   * own, read with passwordsTake(), and state() reports only a bare "passwords" marker.
+   * Without options (macOS) events go into state() whole, as before.
+   */
+  async passwordsStart(options) {
+    const separate = !!options?.separateQueue;
     const result = await passwords().start({
-      push: event => pendingEvents.push(event),
+      push: event => {
+        if (!separate) {
+          pendingEvents.push(event);
+          return;
+        }
+        passwordEvents.push(event.passwords);
+        if (passwordEvents.length > MAX_PASSWORD_EVENTS) {
+          passwordEvents.splice(0, passwordEvents.length - MAX_PASSWORD_EVENTS);
+        }
+        pendingEvents.push({ type: "passwords" });
+      },
       tabIdFor: browser => {
         const tab = browserWindow()?.gBrowser?.getTabForBrowser(browser);
         return tab && !startupTabs.has(tab) ? idOf(tab) : null;
@@ -1282,6 +1305,11 @@ export const Agent = {
   async passwordsFill(id, origin, username, password) {
     const count = await passwords().fill(requireTab(id).browser, origin, "MosaicPasswords:fill", { username, password });
     return JSON.stringify(count);
+  },
+
+  /** The password events queued since the last call (see passwordsStart's `separateQueue`). */
+  passwordsTake() {
+    return JSON.stringify(passwordEvents.splice(0));
   },
 
   /** Puts a generated password into the new-password fields of tab `id`. Returns the fields filled. */
