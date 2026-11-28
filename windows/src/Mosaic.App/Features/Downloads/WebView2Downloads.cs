@@ -32,7 +32,9 @@ internal sealed class WebView2Downloads(DownloadManager manager, nint window) : 
     private CoreWebView2Profile? profile;
     private CoreWebView2Controller? helper;
     private Task<CoreWebView2Controller?>? creatingHelper;
-    private readonly Dictionary<string, DateTimeOffset> helperStarts = [];
+    private readonly SemaphoreSlim helperTurn = new(1, 1);
+    /// <summary>The URL the helper is fetching, and what became of it (true: a download started).</summary>
+    private (string Url, TaskCompletionSource<bool> Outcome)? helperJob;
 
     public string? UserAgent { get; private set; }
 
@@ -72,9 +74,14 @@ internal sealed class WebView2Downloads(DownloadManager manager, nint window) : 
             var download = new WebView2Download(operation);
             var suggested = DownloadFileName.FromContentDisposition(operation.ContentDisposition)
                 ?? (string.IsNullOrEmpty(args.ResultFilePath) ? null : Path.GetFileName(args.ResultFilePath));
-            var page = ReferenceEquals(sender, helper?.CoreWebView2) ? null : sender.Source;
-            if (ReferenceEquals(sender, helper?.CoreWebView2)) helperStarts.Remove(operation.Uri);
-            var path = await manager.ChromiumStartingAsync(download, suggested, page);
+            var fromHelper = helper is not null && ReferenceEquals(sender, helper.CoreWebView2);
+            string? requested = null;
+            if (fromHelper && helperJob is { } job)
+            {
+                requested = job.Url;
+                job.Outcome.TrySetResult(true);
+            }
+            var path = await manager.ChromiumStartingAsync(download, suggested, fromHelper ? null : sender.Source, requested);
             if (path is null)
             {
                 args.Cancel = true;
@@ -100,24 +107,34 @@ internal sealed class WebView2Downloads(DownloadManager manager, nint window) : 
     public bool StartDownload(string url)
     {
         if (environment is null || window == 0) return false;
-        helperStarts[url] = DateTimeOffset.UtcNow;
-        _ = NavigateHelperAsync(url);
+        _ = FetchWithHelperAsync(url);
         return true;
     }
 
-    private async Task NavigateHelperAsync(string url)
+    /// <summary>One URL at a time: navigate the helper and wait for a download, a page, or nothing.</summary>
+    private async Task FetchWithHelperAsync(string url)
     {
-        var controller = await (creatingHelper ??= CreateHelperAsync());
-        if (controller is null)
+        await helperTurn.WaitAsync();
+        try
         {
-            helperStarts.Remove(url);
-            manager.ChromiumStartFailed(url);
-            return;
+            var controller = await (creatingHelper ??= CreateHelperAsync());
+            if (controller is null)
+            {
+                manager.ChromiumStartFailed(url);
+                return;
+            }
+            var outcome = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            helperJob = (url, outcome);
+            controller.CoreWebView2.Navigate(url);
+            var finished = await Task.WhenAny(outcome.Task, Task.Delay(HelperPatience));
+            // A URL that is a page (not a file), or that never answered, is downloaded by Gecko.
+            if (finished != outcome.Task || !outcome.Task.Result) manager.ChromiumStartFailed(url);
         }
-        controller.CoreWebView2.Navigate(url);
-        // A URL that is a page (not a file) never raises DownloadStarting.
-        await Task.Delay(HelperPatience);
-        if (helperStarts.Remove(url)) manager.ChromiumStartFailed(url);
+        finally
+        {
+            helperJob = null;
+            helperTurn.Release();
+        }
     }
 
     private async Task<CoreWebView2Controller?> CreateHelperAsync()
@@ -130,13 +147,11 @@ internal sealed class WebView2Downloads(DownloadManager manager, nint window) : 
             controller.IsVisible = false;
             controller.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
             controller.CoreWebView2.NewWindowRequested += (_, args) => args.Handled = true;
-            controller.CoreWebView2.NavigationCompleted += (core, args) =>
+            controller.CoreWebView2.NavigationCompleted += (_, args) =>
             {
-                // A page that loaded (rather than a file) is not a download.
-                if (args.IsSuccess && args.HttpStatusCode is >= 200 and < 400 && helperStarts.Remove(core.Source))
-                {
-                    manager.ChromiumStartFailed(core.Source);
-                }
+                // A page that loaded (rather than a file) is not a download. A navigation that turns
+                // into a download completes unsuccessfully, after DownloadStarting has answered.
+                if (args.IsSuccess) helperJob?.Outcome.TrySetResult(false);
             };
             Attach(controller.CoreWebView2);
             helper = controller;

@@ -21,11 +21,16 @@ public sealed partial class DownloadManager
     /// <param name="suggestedName">The name the server or page suggested (raw, from Content-Disposition
     /// or the path WebView2 proposes); null to derive it from the URL.</param>
     /// <param name="pageUrl">The page it was started from, if known.</param>
-    public async Task<string?> ChromiumStartingAsync(IChromiumDownload download, string? suggestedName, string? pageUrl)
+    /// <param name="requestedUrl">The URL Mosaic asked Chromium to fetch (<see cref="StartInChromium"/>),
+    /// when this download is the answer; it may differ from the download's URL after redirects.</param>
+    public async Task<string?> ChromiumStartingAsync(
+        IChromiumDownload download, string? suggestedName, string? pageUrl, string? requestedUrl = null)
     {
         var suggested = !string.IsNullOrWhiteSpace(suggestedName) ? suggestedName : DownloadFileName.Suggested(download.Url);
         var fileName = DownloadFileName.Sanitize(suggested);
-        Guid? retryId = pendingRetries.Remove(download.Url, out var pending) && pending != Guid.Empty ? pending : null;
+        var key = requestedUrl ?? download.Url;
+        Guid? retryId = pendingRetries.Remove(key, out var pending) && pending != Guid.Empty ? pending : null;
+        var original = requestedUrl is not null && requestedUrl != download.Url ? requestedUrl : null;
 
         Guid id;
         if (retryId is { } retry && Record(retry) is not null)
@@ -47,6 +52,7 @@ public sealed partial class DownloadManager
             var record = new DownloadRecord
             {
                 Url = download.Url,
+                OriginalUrl = original,
                 Referrer = string.IsNullOrEmpty(pageUrl) || pageUrl == "about:blank" ? null : pageUrl,
                 FileName = fileName,
                 SuggestedName = suggested,

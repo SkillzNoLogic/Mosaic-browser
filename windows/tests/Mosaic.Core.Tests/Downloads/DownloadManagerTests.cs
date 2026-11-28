@@ -246,6 +246,37 @@ public class DownloadManagerChromiumTests
     });
 
     [Fact]
+    public void RecognisesARetryThatWasRedirected() => TestLoop.Run(async () =>
+    {
+        using var f = new DownloadsFixture();
+        var (download, path) = await f.StartChromiumAsync(url: "https://x.org/get/latest");
+        download.State = ChromiumDownloadState.Cancelled;
+        f.Manager.ChromiumUpdated(download);
+        f.Manager.Retry(f.Only.Id);
+        // The helper asked for /get/latest; the server redirected to the file itself.
+        var redirected = new FakeChromiumDownload("https://cdn.x.org/app-2.0.zip", "");
+        var again = await f.Manager.ChromiumStartingAsync(redirected, null, null, requestedUrl: "https://x.org/get/latest");
+        Assert.Equal(path, again);
+        Assert.Single(f.Manager.Items);
+        Assert.Equal(DownloadState.InProgress, f.Only.State);
+    });
+
+    [Fact]
+    public void ChromiumStartFailureMovesToGecko() => TestLoop.Run(async () =>
+    {
+        using var f = new DownloadsFixture();
+        f.Gecko.Handlers["startDownload"] = _ => JsonValue.Create(3);
+        f.Manager.StartInChromium("https://x.org/page.html");
+        Assert.Empty(f.Manager.Items); // Chromium has not answered yet
+        f.Manager.ChromiumStartFailed("https://x.org/page.html");
+        await TestLoop.Settle();
+        Assert.Equal(DownloadEngine.Gecko, f.Only.Engine);
+        Assert.Single(f.Gecko.CallsTo("startDownload"));
+        f.Manager.ChromiumStartFailed("https://x.org/page.html"); // only once
+        Assert.Single(f.Manager.Items);
+    });
+
+    [Fact]
     public void FallsBackToGeckoWhenChromiumCannotStart() => TestLoop.Run(async () =>
     {
         using var f = new DownloadsFixture();
