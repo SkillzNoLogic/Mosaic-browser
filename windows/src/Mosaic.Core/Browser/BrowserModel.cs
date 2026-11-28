@@ -881,6 +881,7 @@ public sealed partial class BrowserModel : ObservableObject
     /// <summary>Keyboard shortcuts pressed inside Gecko arrive here as snapshot events.</summary>
     private void Handle(string eventType)
     {
+        if (LibraryHandleGeckoEvent(eventType)) return;  // library: Ctrl+D, Ctrl+H, Ctrl+Shift+O/B pressed in a Gecko page
         switch (eventType)
         {
             case "focusAddress":

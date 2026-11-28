@@ -958,6 +958,81 @@ public sealed class BrowserLibrary : ObservableObject
         });
     }
 
+    // ---- Commands (shortcuts, menus, automation) ----
+
+    /// <summary>
+    /// Asks the UI to show the bookmark editor for a bookmark id; the flag says whether the
+    /// bookmark was just added ("Bookmark added") rather than already there ("Edit bookmark").
+    /// </summary>
+    public event Action<string, bool>? BookmarkEditorRequested;
+
+    /// <summary>Asks the UI to open Settings › Search (the shell owns Settings).</summary>
+    public event Action? SearchSettingsRequested;
+
+    /// <summary>
+    /// Ctrl+D: bookmarks the current page (in the folder used last) and shows the editor so it
+    /// can be renamed or filed; if it is already bookmarked, just shows the editor. The editor is
+    /// only shown when focus changes are allowed, or when <paramref name="forceEditor"/> (automation).
+    /// Returns the bookmark, or null when the page cannot be bookmarked.
+    /// </summary>
+    public async Task<Bookmark?> BookmarkCurrentPageAsync(bool showEditor = true, bool forceEditor = false)
+    {
+        if (model.SelectedTab is not { } tab || !LibraryUrl.IsRecordable(tab.Url))
+        {
+            model.Notice = "Only web pages can be bookmarked.";
+            return null;
+        }
+        await WhenLoaded;
+        var existing = BookmarksForUrl(tab.Url).FirstOrDefault();
+        var bookmark = existing ?? await AddBookmarkAsync(tab.Url, tab.DisplayTitle);
+        if (bookmark is null) return null;
+        if (existing is null)
+        {
+            var folder = BookmarkById(bookmark.ParentId ?? "")?.DisplayTitle ?? "Bookmarks";
+            model.Notice = $"Bookmarked in {folder}";
+        }
+        if (showEditor && (model.AllowsFocusChanges || forceEditor)) BookmarkEditorRequested?.Invoke(bookmark.Id, existing is null);
+        return bookmark;
+    }
+
+    /// <summary>Adds the current page to the reading list.</summary>
+    public async Task<bool> AddCurrentPageToReadingListAsync()
+    {
+        if (model.SelectedTab is not { } tab || !LibraryUrl.IsRecordable(tab.Url))
+        {
+            model.Notice = "Only web pages can be added to the Reading List.";
+            return false;
+        }
+        await AddToReadingListAsync(tab.Url, tab.DisplayTitle);
+        model.Notice = "Added to Reading List";
+        return true;
+    }
+
+    /// <summary>Opens Settings › Search through whoever listens (the library's UI mounts).</summary>
+    public void OpenSearchSettings() => SearchSettingsRequested?.Invoke();
+
+    /// <summary>Events the Gecko agent forwards for library shortcuts. True when handled.</summary>
+    internal bool HandleGeckoEvent(string type)
+    {
+        switch (type)
+        {
+            case "bookmarkPage":
+                _ = BookmarkCurrentPageAsync();
+                return true;
+            case "showHistory":
+                model.OpenLibraryPage(LibraryPage.History);
+                return true;
+            case "showBookmarks":
+                model.OpenLibraryPage(LibraryPage.Bookmarks);
+                return true;
+            case "toggleBookmarksBar":
+                ShowsBookmarksBar = !ShowsBookmarksBar;
+                return true;
+            default:
+                return false;
+        }
+    }
+
     // ---- Reading list ----
 
     public Task AddToReadingListAsync(string url, string title)

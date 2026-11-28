@@ -95,6 +95,9 @@ public sealed partial class BrowserModel
     /// <summary>"w swift" → the keyword engine's search address; anything else unchanged.</summary>
     private string LibraryResolveKeyword(string input) => Library.KeywordSearchUrl(input) ?? input;
 
+    /// <summary>Library shortcuts pressed while a Gecko page has focus (the agent forwards them as events).</summary>
+    private bool LibraryHandleGeckoEvent(string eventType) => Library.HandleGeckoEvent(eventType);
+
     /// <summary>On quit: visits still waiting for their title are written.</summary>
     private void LibraryShutdown() => library?.FlushPendingVisits();
 }

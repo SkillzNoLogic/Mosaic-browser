@@ -224,6 +224,13 @@ if (IS_MAC) {
   Object.assign(FORWARDED, { f: "find", g: "findNext" });
   Object.assign(FORWARDED_WITH_SHIFT, { g: "findPrevious" });
 }
+// Library area (Windows app only): Ctrl+D bookmarks the page, Ctrl+H shows Mosaic's history
+// and Ctrl+Shift+O its bookmarks. Firefox's own would use its hidden bookmarks, its sidebar or
+// a separate Library window. (On macOS the menu bar takes these keys before Gecko sees them.)
+if (Services.appinfo.OS === "WINNT") {
+  Object.assign(FORWARDED, { d: "bookmarkPage", h: "showHistory" });
+  Object.assign(FORWARDED_WITH_SHIFT, { o: "showBookmarks" });
+}
 
 /**
  * Gecko's own shortcuts for whole windows: close window, reopen closed window,
