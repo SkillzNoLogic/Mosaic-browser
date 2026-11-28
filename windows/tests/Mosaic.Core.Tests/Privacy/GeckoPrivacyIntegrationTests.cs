@@ -106,7 +106,13 @@ public sealed class GeckoPrivacyIntegrationTests : IDisposable
                 await Task.Delay(100);
                 title = (await engine.CallAsync("pageStatus", id))?["title"]?.GetValue<string>() ?? "";
             }
-            Assert.Equal("cosmetic:hidden,hidden", title);
+            if (title != "cosmetic:hidden,hidden")
+            {
+                // What the parent saw: whether content processes asked for cosmetic rules at all.
+                var after = await engine.CallAsync("privacyStatus");
+                var version = await engine.CallAsync("version");
+                Assert.Fail($"cosmetic filtering did not hide the decoys ({title}); Gecko {version?.ToJsonString()}; status {after?.ToJsonString()}");
+            }
 
             var tab = new BrowserTab(EngineKind.Gecko) { GeckoId = id };
             var blocked = await blocker.BlockedRequestsAsync(tab);
