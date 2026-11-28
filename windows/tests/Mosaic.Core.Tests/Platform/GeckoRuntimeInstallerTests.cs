@@ -499,7 +499,8 @@ public class WindowsSignatureTests
     [LiveWindowsFact]
     public void InstallsTheRealFirefoxEsrFromMozilla() => TestLoop.Run(async () =>
     {
-        var root = UpdatePackageTests.TestFolder();
+        // A short folder, like %LOCALAPPDATA%\Mosaic: the test output folder is too deep for Firefox's installer.
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "mz-" + Guid.NewGuid().ToString("N")[..8])).FullName;
         try
         {
             var installer = new GeckoRuntimeInstaller(new PlatformStore(null), new GeckoInstallerOptions

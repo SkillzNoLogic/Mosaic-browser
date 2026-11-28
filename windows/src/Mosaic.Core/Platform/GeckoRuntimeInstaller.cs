@@ -211,7 +211,9 @@ public sealed class GeckoRuntimeInstaller : ObservableObject
     {
         // A cancelled attempt may still be cleaning up.
         try { await previous; } catch { /* reported by that attempt */ }
-        var attempt = Path.Combine(StagingRoot, Guid.NewGuid().ToString("N"));
+        // Short names: Firefox's 7-Zip stub cannot unpack below MAX_PATH (260 characters), and the
+        // engine's own files are up to ~60 characters deep.
+        var attempt = Path.Combine(StagingRoot, Guid.NewGuid().ToString("N")[..8]);
         try
         {
             await Task.Run(() =>
@@ -386,7 +388,7 @@ public sealed class GeckoRuntimeInstaller : ObservableObject
         }
         token.ThrowIfCancellationRequested();
 
-        var staging = Path.Combine(attempt, "extracted");
+        var staging = Path.Combine(attempt, "x");
         Directory.CreateDirectory(staging);
         var exitCode = options.Extractor.Extract(installer, staging, token);
         token.ThrowIfCancellationRequested();
