@@ -13,11 +13,14 @@ namespace Mosaic.Core.Tests.Downloads;
 /// </summary>
 public sealed class DownloadsEndToEndFactAttribute : FactAttribute
 {
+    /// <summary>Off until the WinUI app runs (the winui area's first milestone in win-next).</summary>
+    private const bool RunOnBranchCI = false;
+
     public DownloadsEndToEndFactAttribute()
     {
         if (!OperatingSystem.IsWindows()) Skip = "Drives the Windows app.";
         else if (Environment.GetEnvironmentVariable("MOSAIC_DOWNLOADS_E2E") != "1" &&
-                 Environment.GetEnvironmentVariable("GITHUB_REF_NAME") != "win2/downloads")
+                 !(RunOnBranchCI && Environment.GetEnvironmentVariable("GITHUB_REF_NAME") == "win2/downloads"))
         {
             Skip = "Set MOSAIC_DOWNLOADS_E2E=1 to drive the app's downloads end to end.";
         }
