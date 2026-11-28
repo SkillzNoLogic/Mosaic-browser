@@ -123,6 +123,35 @@ jobs:
       - name: Check the budgets
         run: .\windows\scripts\perf\check-budgets.ps1 -Results windows\artifacts\perf\results.json
 
+      # A reference while the WinUI port catches up: the v0.1 WPF app (src/Mosaic.App.Wpf, kept
+      # until the winui area deletes it) measured the same way. No budgets; it shows what the
+      # port is compared with, and that the harness works end to end on both architectures.
+      - name: Publish the v0.1 WPF app (reference)
+        id: wpf
+        if: always() && hashFiles('windows/src/Mosaic.App.Wpf/Mosaic.App.csproj') != ''
+        continue-on-error: true
+        run: |
+          dotnet publish windows/src/Mosaic.App.Wpf/Mosaic.App.csproj --configuration Release --runtime ${{ matrix.rid }} `
+            --self-contained true --output windows\publish\wpf-${{ matrix.rid }} -nologo -clp:ErrorsOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Measure the v0.1 WPF app (reference, no budgets)
+        if: always() && steps.wpf.outcome == 'success'
+        continue-on-error: true
+        run: |
+          .\windows\scripts\perf\run-perf.ps1 -AppPath windows\publish\wpf-${{ matrix.rid }}\Mosaic.exe `
+            -OutputDirectory windows\artifacts\perf-wpf -Label 'v0.1-wpf' `
+            -FirstRunIterations 2 -ColdIterations 3 -WarmIterations 5 -MemoryIterations 1
+
+      - name: Upload the reference results
+        if: always() && steps.wpf.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-wpf-${{ matrix.arch }}
+          path: windows/artifacts/perf-wpf
+          if-no-files-found: warn
+          retention-days: 30
+
   publish-settings:
     name: Publish settings (${{ matrix.arch }})
     if: github.ref == 'refs/heads/win2/perf' || github.event.inputs.publish_settings == 'true'

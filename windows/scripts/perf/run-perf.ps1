@@ -125,6 +125,8 @@ $results = [ordered]@{
 }
 $script:Runs = New-Object System.Collections.ArrayList
 $script:AutomationMissing = $false
+$script:FailuresInARow = 0
+$runStarted = Get-Date
 $script:Notes = New-Object System.Collections.ArrayList
 
 function Add-Note {
@@ -222,6 +224,24 @@ function Invoke-StartupLaunch {
     Start-Sleep -Seconds 2   # let the engines' last writes and exits finish
 }
 
+function Invoke-Launch {
+    # Runs one launch; a launch that fails (Mosaic crashing, a timeout) is recorded and the
+    # run goes on, unless three in a row fail.
+    param([string]$Name, [int]$Iteration, [scriptblock]$Body)
+    try {
+        & $Body
+        $script:FailuresInARow = 0
+    }
+    catch {
+        $script:FailuresInARow++
+        $message = $_.Exception.Message
+        Write-Host "    $Name #$Iteration FAILED: $message"
+        [void]$script:Runs.Add([ordered]@{ kind = 'failed'; scenario = $Name; iteration = $Iteration; error = $message })
+        Add-Note "Launches failed: $message"
+        if ($script:FailuresInARow -ge 3) { throw "Three launches in a row failed; the last one: $message" }
+    }
+}
+
 function New-SeedData {
     # A data folder that has been through one launch (profiles created), optionally with
     # Chromium chosen as the engine for new tabs.
@@ -241,6 +261,9 @@ function New-SeedData {
             Start-Sleep -Seconds 5
         }
     }
+    catch {
+        Add-Note "Preparing the data folder '$Name' failed: $($_.Exception.Message)"
+    }
     finally { Stop-PerfMosaic $launch | Out-Null }
     Start-Sleep -Seconds 2
     $directory
@@ -252,19 +275,19 @@ try {
         Write-Host '==> Start-up'
         for ($i = 1; $i -le $FirstRunIterations; $i++) {
             $directory = Join-Path $dataRoot "first-$i"
-            Invoke-StartupLaunch -Name 'firstRun' -Iteration $i -DataDirectory $directory
+            Invoke-Launch 'firstRun' $i { Invoke-StartupLaunch -Name 'firstRun' -Iteration $i -DataDirectory $directory }
             Remove-PerfData $directory
         }
         if ($ColdIterations + $WarmIterations -gt 0) {
             $seed = New-SeedData -Name 'seed-gecko'
-            for ($i = 1; $i -le $ColdIterations; $i++) { Invoke-StartupLaunch -Name 'cold' -Iteration $i -DataDirectory $seed -Cold }
-            for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-StartupLaunch -Name 'warm' -Iteration $i -DataDirectory $seed }
+            for ($i = 1; $i -le $ColdIterations; $i++) { Invoke-Launch 'cold' $i { Invoke-StartupLaunch -Name 'cold' -Iteration $i -DataDirectory $seed -Cold } }
+            for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-Launch 'warm' $i { Invoke-StartupLaunch -Name 'warm' -Iteration $i -DataDirectory $seed } }
             Remove-PerfData $seed
         }
         $chromiumUsable = @($script:Runs | Where-Object { $_['automation'] }).Count -gt 0 -and $results.machine.webView2
         if ($WarmIterations -gt 0 -and $chromiumUsable) {
             $seed = New-SeedData -Name 'seed-chromium' -Engine 'chromium'
-            for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-StartupLaunch -Name 'warmChromium' -Iteration $i -DataDirectory $seed }
+            for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-Launch 'warmChromium' $i { Invoke-StartupLaunch -Name 'warmChromium' -Iteration $i -DataDirectory $seed } }
             Remove-PerfData $seed
         }
     }
@@ -408,6 +431,18 @@ $results.runs = @($script:Runs)
 $results.notes = @($script:Notes)
 $results['finishedUtc'] = [DateTime]::UtcNow.ToString('o')
 if ($failure) { $results['error'] = $failure.Exception.Message }
+
+# Crashes show up in the Application event log: unhandled .NET exceptions and native faults.
+try {
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $runStarted; Level = 1, 2 } -ErrorAction Stop |
+            Where-Object { $_.ProviderName -eq '.NET Runtime' -or $_.ProviderName -eq 'Application Error' -or $_.ProviderName -eq 'Windows Error Reporting' })
+    if ($events.Count -gt 0) {
+        Write-PerfText (Join-Path $OutputDirectory 'events.txt') ($events | Format-List TimeCreated, ProviderName, Id, Message | Out-String -Width 4096)
+        Add-Note "$($events.Count) error event(s) in the Application log during the run (events.txt)."
+        $results['crashEvents'] = @($events | Select-Object -First 5 | ForEach-Object { $_.Message.Substring(0, [Math]::Min(1500, $_.Message.Length)) })
+    }
+}
+catch { }
 
 $resultsPath = Join-Path $OutputDirectory 'results.json'
 Write-PerfText $resultsPath (ConvertTo-PerfJson $results)

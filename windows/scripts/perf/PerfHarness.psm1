@@ -298,7 +298,10 @@ function Wait-PerfWindow {
     # Milliseconds from process creation to a shown (visible, uncloaked) window; $null on timeout.
     param([Parameter(Mandatory = $true)] $Launch, [int]$TimeoutSeconds = 60)
     $seen = [MosaicPerf.Native]::WaitForShownWindow($Launch.Process, $TimeoutSeconds * 1000)
-    if ($seen -eq -1) { throw "Mosaic exited during start-up (exit code $($Launch.Process.ExitCode))." }
+    if ($seen -eq -1) {
+        $code = $Launch.Process.ExitCode
+        throw ("Mosaic exited during start-up (exit code {0}, 0x{1:X8})." -f $code, $code)
+    }
     if ($seen -le 0) { return $null }
     ($seen - $Launch.Created) / 10000.0
 }
