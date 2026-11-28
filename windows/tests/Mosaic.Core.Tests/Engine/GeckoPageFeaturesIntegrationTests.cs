@@ -84,14 +84,21 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
     private static async Task WaitForTitleAsync(GeckoEngine engine, int tab, string title) =>
         await TitleAsync(engine, tab, candidate => candidate == title, $"the page titled {title}");
 
-    private static async Task<string> TitleAsync(GeckoEngine engine, int tab, Func<string, bool> wanted, string what) =>
-        await Eventually(async () =>
+    private static async Task<string> TitleAsync(GeckoEngine engine, int tab, Func<string, bool> wanted, string what)
+    {
+        var last = "(none)";
+        var clock = Stopwatch.StartNew();
+        while (true)
         {
             var state = await engine.CallAsync("state");
             var entry = (state?["tabs"] as JsonArray)?.FirstOrDefault(t => t!["id"]!.GetValue<int>() == tab);
             var title = entry?["title"]?.GetValue<string>();
-            return title is not null && wanted(title) && entry?["loading"]?.GetValue<bool>() == false ? title : null;
-        }, what);
+            if (title is not null) last = title;
+            if (title is not null && wanted(title) && entry?["loading"]?.GetValue<bool>() == false) return title;
+            Assert.True(clock.Elapsed.TotalSeconds < 30, $"Gecko never got to: {what} (the page's title is “{last}”)");
+            await Task.Delay(100);
+        }
+    }
 
     [GeckoFact]
     public async Task FindZoomPdfScreenshotsAndMuteWorkThroughTheAgent()
@@ -159,21 +166,25 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
         Assert.True((await engine.CallAsync("answerPermission", detail["id"]!.GetValue<int>(), false))!.GetValue<bool>());
         await WaitForTitleAsync(engine, tab, "denied");
 
-        // A remembered decision answers without asking.
-        await engine.CallAsync("setSitePermissions", new JsonArray(new JsonObject
-        {
-            ["origin"] = detail["origin"]!.GetValue<string>(),
-            ["permission"] = "location",
-            ["decision"] = "allow",
-        }));
+        // Allowing: the page gets a position, or (where even the fixed test location is
+        // unavailable) any error but "permission denied". Gecko asks Mosaic again; a remembered
+        // decision is Mosaic's to apply (PageFeatures answers from its store without a prompt).
         lock (events) events.Clear();
         await engine.CallAsync("navigate", tab, server.Url + "location?again");
-        // Allowed: the page gets a position, or (on a machine where even the fixed test location
-        // is unavailable) any error but "permission denied". Either way Mosaic was not asked.
+        var again = (await PageEventsAsync(engine, "permissionRequest")).First(entry => entry!["type"]!.GetValue<string>() == "permissionRequest")!;
+        var againId = JsonNode.Parse(again["detail"]!.GetValue<string>())!["id"]!.GetValue<int>();
+        Assert.True((await engine.CallAsync("answerPermission", againId, true))!.GetValue<bool>());
         var outcome = await TitleAsync(engine, tab, title => title == "allowed" || title.StartsWith("unavailable", StringComparison.Ordinal),
-            "an answer to the remembered location request");
-        lock (events) Assert.DoesNotContain("permissionRequest", events);
-        Console.WriteLine($"Remembered location request answered: {outcome}");
+            "an answer to the allowed location request");
+        Console.WriteLine($"Allowed location request: {outcome}");
+
+        // Mosaic's decisions mirrored into Gecko's permission manager (what Notification.permission reads).
+        Assert.True((await engine.CallAsync("setSitePermissions", new JsonArray(new JsonObject
+        {
+            ["origin"] = detail["origin"]!.GetValue<string>(),
+            ["permission"] = "notifications",
+            ["decision"] = "allow",
+        })))!.GetValue<bool>());
 
         // A pop-up without a click: blocked, and reported with its address.
         await engine.CallAsync("navigate", tab, server.Url + "popup");
