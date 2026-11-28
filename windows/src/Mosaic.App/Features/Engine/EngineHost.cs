@@ -75,6 +75,13 @@ internal sealed partial class EngineHost(BrowserModel model, Window window) : IP
 
     public void SetPageFullScreen(bool fullScreen)
     {
+        // The winui area's window API (it keeps the overlapped presenter, so a maximised window
+        // comes back maximised, and tells the shell to hide its chrome).
+        if (window is MainWindow main)
+        {
+            main.SetPageFullScreen(fullScreen);
+            return;
+        }
         var appWindow = window.AppWindow;
         if (fullScreen)
         {

@@ -65,6 +65,7 @@ internal sealed class PageOverlayView : Grid
         pages.FindFocusRequested += FocusFindField;
         model.PropertyChanged += ModelChanged;
         SizeChanged += (_, _) => Place();
+        LayoutUpdated += (_, _) => { if (leading.IsOpen || trailing.IsOpen || centre.IsOpen) Place(); };
         Loaded += (_, _) =>
         {
             loaded = true;
@@ -168,18 +169,47 @@ internal sealed class PageOverlayView : Grid
         Place();
     }
 
+    /// <summary>
+    /// Positions the cards over the page area. The shell may give this view no size of its own
+    /// (it stacks overlays at the top trailing corner), so the area is the nearest ancestor
+    /// that is wide enough, measured from this view's own position.
+    /// </summary>
     private void Place()
     {
+        var (left, top, width) = PageArea();
         foreach (var popup in new[] { leading, trailing, centre })
         {
             if (popup.Child is not FrameworkElement child) continue;
-            child.RequestedTheme = ActualTheme;
+            if (child.RequestedTheme != ActualTheme) child.RequestedTheme = ActualTheme;
             child.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-            var width = child.DesiredSize.Width;
-            popup.VerticalOffset = Gap;
-            popup.HorizontalOffset = popup == leading ? Gap
-                : popup == trailing ? Math.Max(Gap, ActualWidth - width - Gap)
-                : Math.Max(Gap, (ActualWidth - width) / 2);
+            var cardWidth = child.DesiredSize.Width;
+            var y = top + Gap;
+            var x = left + (popup == leading ? Gap
+                : popup == trailing ? Math.Max(Gap, width - cardWidth - Gap)
+                : Math.Max(Gap, (width - cardWidth) / 2));
+            // Only real moves: this also runs on LayoutUpdated.
+            if (Math.Abs(popup.VerticalOffset - y) > 0.5) popup.VerticalOffset = y;
+            if (Math.Abs(popup.HorizontalOffset - x) > 0.5) popup.HorizontalOffset = x;
+        }
+    }
+
+    /// <summary>The page area's left and top edges relative to this view, and its width.</summary>
+    private (double Left, double Top, double Width) PageArea()
+    {
+        FrameworkElement area = this;
+        for (var parent = VisualTreeHelper.GetParent(this) as FrameworkElement; parent is not null; parent = VisualTreeHelper.GetParent(parent) as FrameworkElement)
+        {
+            area = parent;
+            if (parent.ActualWidth >= 320 && parent.ActualHeight >= 200) break;
+        }
+        try
+        {
+            var origin = area.TransformToVisual(this).TransformPoint(new Windows.Foundation.Point(0, 0));
+            return (origin.X, origin.Y, area.ActualWidth);
+        }
+        catch (ArgumentException)
+        {
+            return (0, 0, ActualWidth); // not in the same tree yet
         }
     }
 
