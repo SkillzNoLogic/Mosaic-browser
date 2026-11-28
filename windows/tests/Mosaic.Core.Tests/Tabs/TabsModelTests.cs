@@ -778,14 +778,22 @@ public class TabsAutomationTests
     [Fact]
     public void CommandsAndDumpUseTheMacOSNames() => TestLoop.Run(async () =>
     {
-        TabsAutomation.Register();
+        // Through the handler directly: registering in AutomationRegistry is process-wide and
+        // would add "tabsArea" to every other test's dump.
         using var f = new TabsFixture();
         var m = f.Model;
         await f.StartAsync();
         var automation = new Automation(m, _ => Task.CompletedTask);
         async Task<System.Text.Json.Nodes.JsonObject> Run(string command, string value = "")
         {
-            var reply = await automation.HandleAsync(new System.Text.Json.Nodes.JsonObject { ["do"] = command, ["value"] = value }.ToJsonString());
+            if (command == "dump")
+            {
+                var state = automation.DumpState();
+                state["tabsArea"] = TabsAutomation.State(m);
+                return new System.Text.Json.Nodes.JsonObject { ["ok"] = true, ["state"] = state };
+            }
+            var reply = await TabsAutomation.HandleAsync(m, command, value, null)
+                ?? await automation.HandleAsync(new System.Text.Json.Nodes.JsonObject { ["do"] = command, ["value"] = value }.ToJsonString());
             return System.Text.Json.Nodes.JsonNode.Parse(reply.Json)!.AsObject();
         }
 
@@ -824,5 +832,38 @@ public class TabsAutomationTests
         Assert.Equal(3, m.Tabs.Count);
         await Run("saveSession");
         Assert.True(File.Exists(f.Store.SessionPath));
+    });
+}
+
+public class TabsShortcutsTests
+{
+    [Fact]
+    public void KeysMatchTheMacOSShortcutsWithCtrl()
+    {
+        Assert.Equal("tabs.reopenClosed", TabsShortcuts.Match('T', ShortcutModifiers.Control | ShortcutModifiers.Shift));
+        Assert.Equal("tabs.search", TabsShortcuts.Match('A', ShortcutModifiers.Control | ShortcutModifiers.Shift));
+        Assert.Equal("tabs.select3", TabsShortcuts.Match('3', ShortcutModifiers.Control));
+        Assert.Equal("workspaces.next", TabsShortcuts.Match(0x27, ShortcutModifiers.Control | ShortcutModifiers.Alt));
+        // Ctrl+T stays the new-tab shortcut; AltGr (Ctrl+Alt) never triggers a Ctrl shortcut.
+        Assert.Null(TabsShortcuts.Match('T', ShortcutModifiers.Control));
+        Assert.Null(TabsShortcuts.Match('3', ShortcutModifiers.Control | ShortcutModifiers.Alt));
+    }
+
+    [Fact]
+    public void HandlingRunsTheCommand() => TestLoop.Run(() =>
+    {
+        using var f = new TabsFixture();
+        var m = f.Model;
+        var a = m.Tabs[0];
+        m.NewTab("https://b.example/");
+        Assert.True(TabsShortcuts.Handle(m, '1', ShortcutModifiers.Control));
+        Assert.Same(a, m.SelectedTab);
+        Assert.True(TabsShortcuts.Handle(m, 'A', ShortcutModifiers.Control | ShortcutModifiers.Shift));
+        Assert.True(m.IsTabSearchVisible);
+        Assert.True(TabsShortcuts.Handle(m, 'N', ShortcutModifiers.Control | ShortcutModifiers.Alt));
+        Assert.Equal(2, m.Workspaces.Count);
+        Assert.True(TabsShortcuts.Handle(m, 0x25, ShortcutModifiers.Control | ShortcutModifiers.Alt));
+        Assert.Same(m.Workspaces[0], m.SelectedWorkspace);
+        Assert.False(TabsShortcuts.Handle(m, 'Q', ShortcutModifiers.Control));
     });
 }
