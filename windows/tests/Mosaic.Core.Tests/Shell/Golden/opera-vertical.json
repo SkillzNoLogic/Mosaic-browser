@@ -1,0 +1,120 @@
+{
+  "addressBar" : "omnibox",
+  "appearance" : {
+    "accent" : "#FF1B2D",
+    "background" : {
+      "color" : "#F2F2F7",
+      "gradient" : {
+        "angle" : 135,
+        "centerX" : 0.5,
+        "centerY" : 0.5,
+        "kind" : "linear",
+        "noise" : 0,
+        "opacity" : 1,
+        "raw" : false,
+        "sharpness" : 2.2,
+        "sources" : [
+
+        ],
+        "stops" : [
+
+        ]
+      },
+      "kind" : "system"
+    },
+    "colorScheme" : "system",
+    "contentCornerRadius" : 8,
+    "contentInset" : 6,
+    "cornerRadius" : 8,
+    "density" : "regular",
+    "glow" : false,
+    "material" : "liquidGlass",
+    "newTabBackground" : {
+      "custom" : {
+        "color" : "#F2F2F7",
+        "gradient" : {
+          "angle" : 135,
+          "centerX" : 0.5,
+          "centerY" : 0.5,
+          "kind" : "mesh",
+          "noise" : 0,
+          "opacity" : 1,
+          "raw" : false,
+          "sharpness" : 2.2,
+          "sources" : [
+            {
+              "color" : "#FF7E5F",
+              "id" : "sunset-0",
+              "spread" : 1,
+              "x" : 0.05,
+              "y" : 0.1
+            },
+            {
+              "color" : "#FEB47B",
+              "id" : "sunset-1",
+              "spread" : 1,
+              "x" : 0.95,
+              "y" : 0.15
+            },
+            {
+              "color" : "#6A3093",
+              "id" : "sunset-2",
+              "spread" : 1,
+              "x" : 0.5,
+              "y" : 0.95
+            }
+          ],
+          "stops" : [
+
+          ]
+        },
+        "kind" : "gradient"
+      },
+      "mode" : "plain"
+    },
+    "toolbarSurface" : false,
+    "workspaceBackgrounds" : {
+
+    }
+  },
+  "bookmarksBar" : false,
+  "name" : "Opera",
+  "preset" : "opera",
+  "regions" : {
+    "rail" : [
+      "home",
+      "bookmarksPage",
+      "historyPage",
+      "readingListPage",
+      "downloadsPage",
+      "flexibleSpace",
+      "settings"
+    ],
+    "sidebarBottom" : [
+      "workspaces",
+      "flexibleSpace",
+      "engineSwitch",
+      "blocker",
+      "extensions",
+      "downloads",
+      "menu",
+      "newTab"
+    ],
+    "sidebarMiddle" : [
+      "addressField",
+      "bookmarkStar"
+    ],
+    "sidebarTop" : [
+      "sidebarToggle",
+      "flexibleSpace",
+      "back",
+      "forward",
+      "reload"
+    ]
+  },
+  "schemaVersion" : 1,
+  "sidebar" : "collapsible",
+  "sidebarWidth" : 260,
+  "tabPlacement" : "sidebarLeading",
+  "tabStyle" : "opera"
+}

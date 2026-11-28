@@ -24,16 +24,16 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [x] ~~Self-contained publish for win-x64 and win-arm64; smoke test on both CI architectures~~ — CI 46136897428: one job publishes both RIDs (Windows App SDK self-contained), smoke on windows-latest and windows-11-arm
 
 ## shell — Mosaics and the composed window
-- [ ] Layout model shared with macOS (regions × components, appearance), same JSON
-- [ ] Mosaic: Zen / Arc (vertical sidebar, pinned grid, workspaces)
-- [ ] Mosaic: Chrome (tab strip in the title bar, omnibox row, bookmarks bar)
-- [ ] Mosaic: Opera / Opera GX
-- [ ] Mosaic: **Microsoft Edge** (Windows only): Edge-style tabs and toolbar, horizontal and vertical tab modes, Edge-like address bar, Edge-style sidebar, rounded tabs and menus
-- [ ] No Safari Mosaic on Windows (macOS only), and layouts imported from macOS that use it fall back cleanly
-- [ ] Switching Mosaics is instant: no restart, no page reload
-- [ ] Settings inside the main window, all 14 categories, searchable; Mosaics, General and Accessibility pages
-- [ ] Accent colour, light/dark/system, density, corner radius, materials toggle (Mica/Acrylic ↔ solid)
-- [ ] Keyboard access everywhere; UI Automation names on every control; high contrast
+- [x] ~~Layout model shared with macOS (regions × components, appearance), same JSON~~ — unit: `Shell/ShellGoldenTests` compare byte for byte with golden files generated from the macOS Swift sources (`Golden/generate.swift`): every preset (pretty and compact), GX, a customised layout (unicode, escapes, workspace backgrounds), tab-placement changes, forgiving decoding of messy/wrong-typed/future files, the `mosaics.json` store file; Swift number formatting and key order. CI (Windows x64, run 46136623487): all shell tests pass.
+- [~] Mosaic: Zen / Arc (vertical sidebar, pinned grid, workspaces) — layout, plan and view built (sidebar with navigation, compact address field, tab list, bottom row; thin caption strip; collapsed strip; auto-hide peek). Pinned grid and workspaces come from the tabs area (`FeatureMounts.Components["workspaces"]`, placeholder meanwhile). Not yet seen on Windows: needs winui M1 (the skeleton window does not show `FeatureMounts.Shell`).
+- [~] Mosaic: Chrome (tab strip in the title bar, omnibox row, bookmarks bar) — model unit-tested; view built (shaped tabs merging into the toolbar surface, pill omnibox with star, bookmarks-bar slot `Components["bookmarksBar"]`). Not yet seen on Windows (M1).
+- [~] Mosaic: Opera / Opera GX — model unit-tested (GX on/off); view built (rounded tabs, rail, inset card, glow). Not yet seen on Windows (M1).
+- [~] Mosaic: **Microsoft Edge** (Windows only) — preset and both tab modes unit-tested (`MosaicLayoutTests.Edge*`, `ShellPlanTests.EdgeVertical*`): workspaces + tab actions + rounded tabs in the title bar, toolbar with rounded address bar, Edge sidebar on the right (`trailingRail`, a Windows-only region macOS drops), vertical mode keeps the toolbar and collapses to a tab-icon column, Mica Alt behind tabbed title rows. Not yet seen on Windows (M1).
+- [x] ~~No Safari Mosaic on Windows (macOS only), and layouts imported from macOS that use it fall back cleanly~~ — unit: a Safari layout reads as the Edge preset keeping density, radius, accent, light/dark, material, backgrounds, bookmarks bar and vertical tabs; a macOS `mosaics.json` with Safari active opens as Edge and its Safari entry is written back untouched; `mosaic safari` applies Edge. CI run 46136623487.
+- [~] Switching Mosaics is instant: no restart, no page reload — by design (the page area is never re-parented: only grid column widths and margins change); `dump` reports `shell.pageRect` and tab state to check it. Not yet run on Windows (M1).
+- [~] Settings inside the main window, all 14 categories, searchable; Mosaics, General and Accessibility pages — built (category list in three groups, search over titles and labels with matched labels shown, Enter opens the first match, Esc/Done close, pages from `FeatureMounts.SettingsPages` or a placeholder, page hidden via `CoverPage("shell.settings")`); search unit-tested (`SettingsSearchTests`), automation `openSettings`/`settingsSearch`/`closeSettings` unit-tested. Not yet seen on Windows (M1).
+- [~] Accent colour, light/dark/system, density, corner radius, materials toggle (Mica/Acrylic ↔ solid) — Mosaics page and automation (`mosaicSet`) built; the toggle drives the window's material (winui's `MainWindow.Material` when present, else the shell's own backdrop) with solid fallbacks for Windows 10, transparency effects off, contrast themes. Not yet seen on Windows (M1).
+- [~] Keyboard access everywhere; UI Automation names on every control; high contrast — every control named, landmarks on toolbar/tabs/settings/page, arrow keys in the settings list, accelerators (Ctrl+, Ctrl+Shift+, Ctrl+Shift+L Alt+D F6 Alt+Home Alt+F, Esc), contrast-theme colours; `dump` lists `shell.unnamedControls` for CI. Not yet checked on Windows (M1).
 
 ## tabs — tabs, workspaces, sessions
 - [ ] Pin, duplicate, mute; recently closed (Ctrl+Shift+T); tab search (Ctrl+Shift+A)
