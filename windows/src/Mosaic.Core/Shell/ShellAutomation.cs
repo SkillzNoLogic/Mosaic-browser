@@ -74,7 +74,7 @@ public static class ShellAutomation
             ["settingsOpen"] = model.IsSettingsOpen,
             ["settingsQuery"] = model.SettingsQuery,
             ["settingsMatches"] = matches,
-            ["internalPage"] = model.InternalPageHost ?? "",
+            ["internalPage"] = model.ShellInternalPage ?? "",
             ["parts"] = new JsonArray([.. plan.Parts.Select(p => (JsonNode)JsonValue.Create(p))]),
             ["captionHost"] = plan.CaptionHost.Raw(),
             ["settings"] = settings.ToJson(),

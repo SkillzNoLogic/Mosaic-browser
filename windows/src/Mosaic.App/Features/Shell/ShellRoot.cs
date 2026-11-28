@@ -634,7 +634,7 @@ public sealed class ShellRoot : Grid
             FeatureMounts.CoverPage("shell.settings", false);
         }
 
-        var host = Model.InternalPageHost;
+        var host = Model.ShellInternalPage;
         if (host == "settings" && Model.SelectedTab?.Url is { } url)
         {
             // mosaic://settings/<category> opens Settings in the window.
@@ -642,6 +642,9 @@ public sealed class ShellRoot : Grid
             if (Model.SettingsPage is null) Model.ShowSettings(SettingsCategories.FromId(id));
             host = null;
         }
+        // The winui area's page area shows mosaic:// pages itself; the shell only does it in
+        // front of the skeleton window's placeholder.
+        if (!PageArea.IsPlaceholder) host = null;
         if (host is not null)
         {
             if (host != internalHostShown)

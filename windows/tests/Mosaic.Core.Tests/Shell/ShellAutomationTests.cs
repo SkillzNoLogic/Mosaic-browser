@@ -109,9 +109,9 @@ public sealed class ShellAutomationTests
     [Fact]
     public void InternalPages()
     {
-        Assert.Equal("bookmarks", BrowserModel.InternalHost("mosaic://bookmarks"));
-        Assert.Equal("settings", BrowserModel.InternalHost("MOSAIC://Settings/privacy"));
-        Assert.Null(BrowserModel.InternalHost("https://example.com"));
-        Assert.Null(BrowserModel.InternalHost("mosaic://"));
+        Assert.Equal("bookmarks", BrowserModel.ShellInternalHost("mosaic://bookmarks"));
+        Assert.Equal("settings", BrowserModel.ShellInternalHost("MOSAIC://Settings/privacy"));
+        Assert.Null(BrowserModel.ShellInternalHost("https://example.com"));
+        Assert.Null(BrowserModel.ShellInternalHost("mosaic://"));
     }
 }

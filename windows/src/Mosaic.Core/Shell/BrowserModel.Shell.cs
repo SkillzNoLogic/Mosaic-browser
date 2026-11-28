@@ -183,9 +183,9 @@ public sealed partial class BrowserModel
     }
 
     /// <summary>Mosaic's own page the selected tab shows (<c>mosaic://bookmarks</c> → "bookmarks"), or null.</summary>
-    public string? InternalPageHost => InternalHost(SelectedTab?.Url);
+    public string? ShellInternalPage => ShellInternalHost(SelectedTab?.Url);
 
-    public static string? InternalHost(string? url)
+    public static string? ShellInternalHost(string? url)
     {
         const string scheme = "mosaic://";
         if (url is null || !url.StartsWith(scheme, StringComparison.OrdinalIgnoreCase)) return null;

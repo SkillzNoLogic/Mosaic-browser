@@ -68,7 +68,7 @@ internal sealed class GeneralSettingsPage : Grid
         Validate();
     }
 
-    private static bool BrowserModelInternal(string url) => Mosaic.Core.Browser.BrowserModel.InternalHost(url) is null;
+    private static bool BrowserModelInternal(string url) => Mosaic.Core.Browser.BrowserModel.ShellInternalHost(url) is null;
 
     private void Validate()
     {
