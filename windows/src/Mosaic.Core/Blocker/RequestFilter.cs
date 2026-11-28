@@ -14,7 +14,9 @@ public sealed class RequestFilter
 {
     private readonly Lock gate = new();
     private BlockerEngine? engine;
+    private CosmeticStyleCache? cosmetics;
     private BlockerSettings settings = new();
+    private volatile bool cosmeticsEnabled = true;
 
     /// <summary>Puts <paramref name="replacement"/> in charge and returns the engine it replaces,
     /// which the caller owns and should dispose.</summary>
@@ -24,8 +26,51 @@ public sealed class RequestFilter
         {
             var previous = engine;
             engine = replacement;
+            cosmetics = replacement is null ? null : new CosmeticStyleCache(replacement);
             return previous;
         }
+    }
+
+    /// <summary>The engine in charge, if one has loaded; also answers the dashboard and filter validation.</summary>
+    public BlockerEngine? Engine
+    {
+        get { lock (gate) return engine; }
+    }
+
+    /// <summary>The settings in effect.</summary>
+    public BlockerSettings Settings
+    {
+        get { lock (gate) return settings; }
+    }
+
+    /// <summary>Requests blocked in Chromium tabs, per page, for the dashboard. <see cref="ShouldBlock"/> records into it.</summary>
+    public BlockLog Log { get; } = new();
+
+    /// <summary>Hide page elements named by cosmetic filters (<c>##.ad</c>) in Chromium tabs.</summary>
+    public bool CosmeticsEnabled { get => cosmeticsEnabled; set => cosmeticsEnabled = value; }
+
+    /// <summary>
+    /// The style-injection script for a Chromium frame, or null. The generic stylesheet (half a
+    /// megabyte with the default lists) goes to the page itself and to frames on the page's own
+    /// host; other frames get only their site's specific rules, which keeps ad-heavy pages with
+    /// many third-party frames fast. A main frame committing a new document also starts its
+    /// dashboard log over. Port of <c>ContentBlocker.cosmeticScript</c> on macOS.
+    /// </summary>
+    public string? CosmeticScript(string frameUrl, string pageUrl, bool isMainFrame)
+    {
+        if (isMainFrame) Log.Clear(frameUrl);
+        CosmeticStyleCache? cache;
+        BlockerSettings choices;
+        lock (gate)
+        {
+            cache = cosmetics;
+            choices = settings;
+        }
+        if (!cosmeticsEnabled || cache is null || !choices.Filters(pageUrl)) return null;
+        if (!Uri.TryCreate(frameUrl, UriKind.Absolute, out var frame) || frame.Host.Length == 0) return null;
+        var pageHost = Uri.TryCreate(pageUrl, UriKind.Absolute, out var page) ? page.Host : null;
+        var css = cache.StylesheetFor(frame.Host, includeGeneric: isMainFrame || string.Equals(pageHost, frame.Host, StringComparison.OrdinalIgnoreCase));
+        return CosmeticInjection.Script(css);
     }
 
     public void Use(BlockerSettings replacement)
@@ -47,7 +92,9 @@ public sealed class RequestFilter
             current = engine;
             choices = settings;
         }
-        return current is not null && choices.Filters(documentUrl)
+        var blocked = current is not null && choices.Filters(documentUrl)
             && current.Verdict(url, documentUrl, type) == BlockerVerdict.Block;
+        if (blocked) Log.Record(url, documentUrl, type);
+        return blocked;
     }
 }

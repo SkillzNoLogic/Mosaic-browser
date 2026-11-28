@@ -15,6 +15,59 @@ public enum BlockerVerdict
     Allow = 2,
 }
 
+/// <summary>Counts of the cosmetic filters compiled from the lists.</summary>
+/// <param name="Generic">Generic hiding selectors (<c>##.ad</c>), applied on every page.</param>
+/// <param name="Specific">Site-specific hiding filters and exceptions.</param>
+/// <param name="Unsupported">Valid uBO syntax Mosaic does not apply: procedural filters, scriptlets,
+/// HTML and response-header filters, regex/path-based site targets.</param>
+public sealed record CosmeticStats(int Generic, int Specific, int Unsupported);
+
+/// <summary>Cosmetic filtering for one hostname.</summary>
+/// <param name="Css">CSS hiding what site-specific filters name, exceptions applied.</param>
+/// <param name="GenericExceptions">Generic selectors this site excepts (<c>example.com#@#.ad</c>);
+/// the generic stylesheet for this site must leave them out.</param>
+public sealed record CosmeticRules(string Css, IReadOnlyList<string> GenericExceptions)
+{
+    public static CosmeticRules Empty { get; } = new("", []);
+
+    public bool Equals(CosmeticRules? other) =>
+        other is not null && Css == other.Css && GenericExceptions.SequenceEqual(other.GenericExceptions);
+
+    public override int GetHashCode() => HashCode.Combine(Css, GenericExceptions.Count);
+}
+
+/// <summary>
+/// The verdict on one line of the user's own filters. <c>Line</c> is the 1-based line number in the
+/// text checked; <c>Message</c> says why it is an error or unsupported, or notes something about a valid filter.
+/// </summary>
+public sealed record FilterCheck(int Line, string Text, FilterCheckKind Kind, string Message)
+{
+    /// <summary>Whether the line takes effect (possibly with a note).</summary>
+    public bool IsEffective => Kind is FilterCheckKind.Network or FilterCheckKind.Cosmetic;
+
+    public static FilterCheckKind KindFromId(string? id) => id switch
+    {
+        "comment" => FilterCheckKind.Comment,
+        "network" => FilterCheckKind.Network,
+        "cosmetic" => FilterCheckKind.Cosmetic,
+        "unsupported" => FilterCheckKind.Unsupported,
+        _ => FilterCheckKind.Error,
+    };
+
+    /// <summary>macOS's raw value of <see cref="Kind"/>.</summary>
+    public string KindId => Kind.ToString().ToLowerInvariant();
+}
+
+public enum FilterCheckKind
+{
+    Comment,
+    Network,
+    Cosmetic,
+    /// <summary>Valid uBO syntax that Mosaic does not apply (scriptlets, procedural cosmetic filters, modifiers such as <c>$removeparam</c>).</summary>
+    Unsupported,
+    Error,
+}
+
 /// <summary>The engine could not be loaded. <see cref="Exception.Message"/> is user-presentable.</summary>
 public sealed class BlockerEngineException(string message, Exception? inner = null) : Exception(message, inner);
 
@@ -88,6 +141,15 @@ public sealed class BlockerEngine : IDisposable
             blocker.InvokeMethod("beginLists");
             foreach (var list in lists) blocker.InvokeMethod("addList", list.Name, list.Text);
             FilterCount = Convert.ToInt32(blocker.InvokeMethod("commitLists"), System.Globalization.CultureInfo.InvariantCulture);
+            // Bundles built before cosmetic filtering have no cosmeticStats; they simply hide nothing.
+            if (blocker.GetProperty("cosmeticStats") is ScriptObject && blocker.InvokeMethod("cosmeticStats") is ScriptObject stats)
+            {
+                CosmeticStats = new CosmeticStats(Int(stats.GetProperty("generic")), Int(stats.GetProperty("specific")), Int(stats.GetProperty("unsupported")));
+                stats.Dispose();
+                SupportsCosmetics = true;
+            }
+            SupportsValidation = blocker.GetProperty("validateFilters") is ScriptObject;
+            SupportsDetails = blocker.GetProperty("matchDetails") is ScriptObject;
         }
         catch (ScriptEngineException error)
         {
@@ -106,6 +168,154 @@ public sealed class BlockerEngine : IDisposable
 
     /// <summary>Number of network filters in effect.</summary>
     public int FilterCount { get; }
+
+    /// <summary>Cosmetic filters in effect.</summary>
+    public CosmeticStats CosmeticStats { get; } = new(0, 0, 0);
+
+    /// <summary>Whether the bundle has cosmetic filtering (bundles built from an older <c>engine.js</c> do not).</summary>
+    public bool SupportsCosmetics { get; }
+
+    /// <summary>Whether <see cref="Validate"/> can check filters with this bundle.</summary>
+    public bool SupportsValidation { get; }
+
+    /// <summary>Whether <see cref="Details"/> can name filters with this bundle.</summary>
+    public bool SupportsDetails { get; }
+
+    /// <summary>The site-specific cosmetic rules for <paramref name="hostname"/>. Cheap (well under a millisecond); callers still cache per hostname.</summary>
+    public CosmeticRules CosmeticRulesFor(string hostname)
+    {
+        lock (gate)
+        {
+            if (isDisposed || !SupportsCosmetics) return CosmeticRules.Empty;
+            try
+            {
+                if (blocker.InvokeMethod("cosmeticFor", hostname) is not ScriptObject result) return CosmeticRules.Empty;
+                using (result)
+                {
+                    var css = result.GetProperty("css") as string ?? "";
+                    List<string> exceptions = [];
+                    if (result.GetProperty("exceptions") is ScriptObject array)
+                    {
+                        using (array)
+                        {
+                            var length = Int(array.GetProperty("length"));
+                            for (var i = 0; i < length; i++)
+                            {
+                                if (array.GetProperty(i) is string selector) exceptions.Add(selector);
+                            }
+                        }
+                    }
+                    return new CosmeticRules(css, exceptions);
+                }
+            }
+            catch (ScriptEngineException error)
+            {
+                Trace.WriteLine($"[Blocker] cosmeticFor failed for {hostname}: {error.Message}");
+                return CosmeticRules.Empty;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every generic hiding selector as a stylesheet (one rule per selector), leaving out
+    /// <paramref name="excluded"/>. The same for every page apart from exclusions.
+    /// </summary>
+    public string GenericCosmeticCss(IReadOnlyList<string>? excluded = null)
+    {
+        lock (gate)
+        {
+            if (isDisposed || !SupportsCosmetics) return "";
+            try
+            {
+                var list = script.Evaluate("[]") as ScriptObject;
+                using (list)
+                {
+                    foreach (var selector in excluded ?? []) list!.InvokeMethod("push", selector);
+                    return blocker.InvokeMethod("cosmeticGeneric", list) as string ?? "";
+                }
+            }
+            catch (ScriptEngineException error)
+            {
+                Trace.WriteLine($"[Blocker] cosmeticGeneric failed: {error.Message}");
+                return "";
+            }
+        }
+    }
+
+    /// <summary>
+    /// The decision for one request together with the filter that made it, as uBO's logger writes
+    /// it (empty when no filter matched). Costs one extra match; for the dashboard, not the request path.
+    /// </summary>
+    public (BlockerVerdict Verdict, string Filter) Details(string url, string documentUrl, string type)
+    {
+        lock (gate)
+        {
+            if (isDisposed || !SupportsDetails) return (BlockerVerdict.None, "");
+            try
+            {
+                if (blocker.InvokeMethod("matchDetails", url, documentUrl, type) is not ScriptObject result) return (BlockerVerdict.None, "");
+                using (result)
+                {
+                    var verdict = Int(result.GetProperty("result")) switch
+                    {
+                        1 => BlockerVerdict.Block,
+                        2 => BlockerVerdict.Allow,
+                        _ => BlockerVerdict.None,
+                    };
+                    return (verdict, result.GetProperty("filter") as string ?? "");
+                }
+            }
+            catch (ScriptEngineException error)
+            {
+                Trace.WriteLine($"[Blocker] matchDetails failed for {url}: {error.Message}");
+                return (BlockerVerdict.None, "");
+            }
+        }
+    }
+
+    /// <summary>Checks filters the user typed (one per line) with uBO's parser. Empty when the bundle cannot.</summary>
+    public IReadOnlyList<FilterCheck> Validate(string filters)
+    {
+        lock (gate)
+        {
+            if (isDisposed || !SupportsValidation) return [];
+            try
+            {
+                if (blocker.InvokeMethod("validateFilters", filters) is not ScriptObject array) return [];
+                using (array)
+                {
+                    List<FilterCheck> checks = [];
+                    var length = Int(array.GetProperty("length"));
+                    for (var i = 0; i < length; i++)
+                    {
+                        if (array.GetProperty(i) is not ScriptObject record) continue;
+                        using (record)
+                        {
+                            checks.Add(new FilterCheck(
+                                Int(record.GetProperty("line")),
+                                record.GetProperty("text") as string ?? "",
+                                FilterCheck.KindFromId(record.GetProperty("kind") as string),
+                                record.GetProperty("message") as string ?? ""));
+                        }
+                    }
+                    return checks;
+                }
+            }
+            catch (ScriptEngineException error)
+            {
+                Trace.WriteLine($"[Blocker] validateFilters failed: {error.Message}");
+                return [];
+            }
+        }
+    }
+
+    private static int Int(object? value) => value switch
+    {
+        int number => number,
+        double number => (int)number,
+        long number => (int)number,
+        _ => 0,
+    };
 
     /// <summary>The engine's decision for one request.</summary>
     /// <param name="url">The request URL.</param>
