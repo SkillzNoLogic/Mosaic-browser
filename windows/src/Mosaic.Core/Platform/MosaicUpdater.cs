@@ -470,7 +470,15 @@ public sealed class MosaicUpdater : ObservableObject
     public Task CleanLeftoversAsync() => Task.Run(() =>
     {
         if (phase is not UpdatePhase.IdlePhase) return;
-        GeckoRuntimeInstaller.DeleteQuietly(Path.Combine(options.DownloadDirectory));
+        // Folders only: install.log tells what the last update did.
+        try
+        {
+            if (Directory.Exists(options.DownloadDirectory))
+            {
+                foreach (var folder in Directory.GetDirectories(options.DownloadDirectory)) GeckoRuntimeInstaller.DeleteQuietly(folder);
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         var install = options.InstallDirectory;
         if (Path.GetDirectoryName(install) is not { } parent || !Directory.Exists(parent)) return;
         var name = Path.GetFileName(install);
