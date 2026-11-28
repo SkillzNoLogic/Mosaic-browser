@@ -23,6 +23,10 @@ on:
         description: 'Areas to run, comma-separated (empty: all). winui, shell, tabs, library, engine, downloads, privacy, passwords, productivity, platform, canvas, system, gallery, accessibility'
         required: false
         default: ''
+      app_ref:
+        description: 'Build the app from this branch or commit instead (e.g. win2/winui); the e2e scripts still come from the run''s branch'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -88,6 +92,20 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v7
+
+      - name: Build another branch's app with this run's e2e scripts (app_ref input, or windows/scripts/e2e/app-ref on win2/qa)
+        env:
+          APP_REF: ${{ inputs.app_ref }}
+        run: |
+          $ref = $env:APP_REF
+          $file = 'windows\scripts\e2e\app-ref'
+          if (-not $ref -and '${{ github.ref_name }}' -eq 'win2/qa' -and (Test-Path -LiteralPath $file)) { $ref = (Get-Content -LiteralPath $file -Raw).Trim() }
+          if (-not $ref) { Write-Host "App and scripts from $env:GITHUB_SHA"; exit 0 }
+          git fetch --no-tags origin $ref
+          if ($LASTEXITCODE -ne 0) { throw "Cannot fetch $ref" }
+          git checkout --force FETCH_HEAD
+          git checkout $env:GITHUB_SHA -- windows/scripts/e2e
+          Write-Host "::notice::App built from $ref ($(git rev-parse --short HEAD)); e2e scripts from $env:GITHUB_SHA"
 
       - name: Set up .NET 10
         uses: actions/setup-dotnet@v6

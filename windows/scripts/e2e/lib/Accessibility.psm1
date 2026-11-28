@@ -12,6 +12,14 @@ $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+# The proxies that expose plain Win32 controls (buttons, edits, list views) with their real
+# control types; WinUI implements UI Automation itself and does not need them.
+try {
+    Add-Type -AssemblyName UIAutomationClientsideProviders
+    [System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly(
+        [UIAutomationClientsideProviders.UIAutomationClientSideProviders].Assembly.GetName())
+}
+catch { Write-Verbose "UI Automation client-side providers not registered: $($_.Exception.Message)" }
 
 $script:Interactive = @('Button', 'CheckBox', 'ComboBox', 'Edit', 'Hyperlink', 'ListItem', 'MenuItem', 'RadioButton',
     'Slider', 'Spinner', 'SplitButton', 'TabItem', 'TreeItem', 'DataItem', 'MenuBar', 'ScrollBar', 'Document')

@@ -50,6 +50,7 @@ if ($Disable) {
         $key = Join-Path $localDumps $exe
         if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force; Write-Host "LocalDumps off for $exe" }
     }
+    foreach ($name in @('DumpFolder', 'DumpType', 'DumpCount')) { Remove-ItemProperty -LiteralPath $localDumps -Name $name -ErrorAction SilentlyContinue }
     return
 }
 
@@ -65,6 +66,11 @@ foreach ($exe in $Executables) {
     New-ItemProperty -LiteralPath $key -Name 'DumpCount' -PropertyType DWord -Value $DumpCount -Force | Out-Null
     Write-Host "LocalDumps on for $exe -> $DumpFolder (type $type)"
 }
+# Any other process too (the folder on the LocalDumps key itself): a crash in a helper
+# process with an unexpected name is still caught.
+New-ItemProperty -LiteralPath $localDumps -Name 'DumpFolder' -PropertyType ExpandString -Value $DumpFolder -Force | Out-Null
+New-ItemProperty -LiteralPath $localDumps -Name 'DumpType' -PropertyType DWord -Value 1 -Force | Out-Null
+New-ItemProperty -LiteralPath $localDumps -Name 'DumpCount' -PropertyType DWord -Value $DumpCount -Force | Out-Null
 # No "Mosaic has stopped working" dialog waiting for a click on an unattended runner.
 New-ItemProperty -LiteralPath $werKey -Name 'DontShowUI' -PropertyType DWord -Value 1 -Force | Out-Null
 # Dumps are written locally even if WER is set to send reports.

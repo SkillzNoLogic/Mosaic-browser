@@ -17,7 +17,9 @@ $ErrorActionPreference = 'Stop'
 $script:LibDirectory = $PSScriptRoot
 $script:E2EDirectory = Split-Path -Parent $PSScriptRoot
 $script:ScriptsDirectory = Split-Path -Parent $script:E2EDirectory
-Import-Module (Join-Path $script:ScriptsDirectory 'MosaicAutomation.psm1') -Force
+# The pipe client is Send-RawCommand below rather than MosaicAutomation.psm1's
+# Send-MosaicCommand: that one writes without a time-out, which blocks for as long as a hung
+# Mosaic does not read (its pipe has no buffer), so a hang could not be detected.
 
 $script:Utf8 = New-Object System.Text.UTF8Encoding($false)
 
@@ -218,8 +220,10 @@ function Wait-Until {
 # ---- the automation pipe ----------------------------------------------------------------------
 
 function Send-RawCommand {
-    # Like Send-MosaicCommand (MosaicAutomation.psm1), plus extra request fields (macOS commands
-    # such as page.screenshot read "full", page.dialog "text"). Returns the parsed reply.
+    # One exchange on the automation pipe (CONTRACT.md), with extra request fields when given
+    # (macOS commands such as page.screenshot read "full", page.dialog "text"). Every step has a
+    # time-out, the write included: the app's pipe has no buffer, so a write blocks until a hung
+    # app reads it. Returns the parsed reply; throws on time-outs and on replies that are not JSON.
     param(
         [Parameter(Mandatory = $true)] [string]$Do,
         [string]$Value,
@@ -228,21 +232,18 @@ function Send-RawCommand {
         [int]$ConnectTimeoutMilliseconds = 5000,
         [int]$ReplyTimeoutSeconds = 30
     )
-    if (-not $Extra -or $Extra.Count -eq 0) {
-        return (Send-MosaicCommand -Do $Do -Value $Value -Out $Out -ConnectTimeoutMilliseconds $ConnectTimeoutMilliseconds -ReplyTimeoutSeconds $ReplyTimeoutSeconds).Reply
-    }
     $request = [ordered]@{ do = $Do }
     if ($Value) { $request['value'] = $Value }
     if ($Out) { $request['out'] = $Out }
-    foreach ($key in $Extra.Keys) { $request[$key] = [string]$Extra[$key] }
+    if ($Extra) { foreach ($key in $Extra.Keys) { $request[$key] = [string]$Extra[$key] } }
     $json = $request | ConvertTo-Json -Compress
     $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'mosaic-automation', [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
     try {
         try { $pipe.Connect($ConnectTimeoutMilliseconds) }
         catch [System.TimeoutException] { throw 'No Mosaic is listening on \\.\pipe\mosaic-automation.' }
         $bytes = $script:Utf8.GetBytes($json + "`n")
-        $pipe.Write($bytes, 0, $bytes.Length)
-        $pipe.Flush()
+        $writing = $pipe.WriteAsync($bytes, 0, $bytes.Length)
+        if (-not $writing.Wait($ReplyTimeoutSeconds * 1000)) { throw "Mosaic did not read '$Do' within $ReplyTimeoutSeconds s." }
         $reader = New-Object System.IO.StreamReader($pipe, $script:Utf8, $false, 4096, $true)
         $pending = $reader.ReadLineAsync()
         if (-not $pending.Wait($ReplyTimeoutSeconds * 1000)) { throw "Mosaic did not answer '$Do' within $ReplyTimeoutSeconds s." }
@@ -250,7 +251,7 @@ function Send-RawCommand {
         if ([string]::IsNullOrWhiteSpace($line)) { throw "Mosaic closed the connection without answering '$Do'." }
     }
     finally { $pipe.Dispose() }
-    $line | ConvertFrom-Json
+    try { $line | ConvertFrom-Json } catch { throw "Mosaic's answer to '$Do' is not JSON: $line" }
 }
 
 function Assert-MosaicRunning {
@@ -692,16 +693,33 @@ function Get-Survivors {
     $survivors
 }
 
-function Get-DumpFiles {
-    # Crash dumps that may concern this run: WER LocalDumps (Enable-CrashDumps.ps1), and those
-    # the engines write inside the data folders (WebView2's Crashpad, Gecko's minidumps).
+function Get-DumpRoots {
     $roots = @()
     if ($script:Config.DumpDirectory -and (Test-Path -LiteralPath $script:Config.DumpDirectory)) { $roots += $script:Config.DumpDirectory }
     $data = Join-Path $script:Config.OutputDirectory 'data'
     if (Test-Path -LiteralPath $data) { $roots += $data }
+    # WER's default LocalDumps folder, and its report folders (Report.wer names the faulting
+    # module and, for WinUI's stowed exceptions, the error; some reports carry a dump).
+    $candidates = @()
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'CrashDumps'), (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportArchive'), (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\WER\ReportQueue') }
+    if ($env:ProgramData) { $candidates += (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportArchive'), (Join-Path $env:ProgramData 'Microsoft\Windows\WER\ReportQueue') }
+    foreach ($candidate in $candidates) { if (Test-Path -LiteralPath $candidate) { $roots += $candidate } }
+    $roots
+}
+
+function Get-DumpFiles {
+    # Crash dumps that may concern this run: WER LocalDumps (Enable-CrashDumps.ps1), those the
+    # engines write inside the data folders (WebView2's Crashpad, Gecko's minidumps), and WER
+    # reports of the app or its engines.
     $files = @()
-    foreach ($root in $roots) {
-        $files += @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -Include '*.dmp', '*.mdmp' -ErrorAction SilentlyContinue)
+    foreach ($root in Get-DumpRoots) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -Include '*.dmp', '*.mdmp', '*.hdmp', 'Report.wer' -ErrorAction SilentlyContinue)) {
+            if ($file.Name -eq 'Report.wer' -or $file.FullName -like '*\WER\*') {
+                # Only reports about Mosaic or its engines (WER folders are named after the exe).
+                if ($file.Directory.Name -notmatch '(?i)mosaic|msedgewebview2|firefox|powershell') { continue }
+            }
+            $files += $file
+        }
     }
     $files
 }
@@ -712,18 +730,32 @@ function Update-DumpBaseline {
 }
 
 function Get-NewDumps {
-    <# Dumps that appeared since the last call; copied into the output's dumps folder. #>
+    <# Dumps and WER reports that appeared since the last call; copied into the output's dumps folder. #>
     $new = @()
     foreach ($file in Get-DumpFiles) {
         if ($script:DumpBaseline.ContainsKey($file.FullName)) { continue }
         $script:DumpBaseline[$file.FullName] = $true
-        $target = Join-Path $script:Config.OutputDirectory ('dumps\' + $file.Name)
+        $name = $file.Name
+        if ($name -eq 'Report.wer' -or $file.FullName -like '*\WER\*') { $name = $file.Directory.Name + '-' + $file.Name }
+        $target = Join-Path $script:Config.OutputDirectory ('dumps\' + $name)
         if ($file.FullName -ne $target) {
             try { Copy-Item -LiteralPath $file.FullName -Destination $target -Force } catch { $target = $file.FullName }
         }
-        $new += [pscustomobject]@{ Name = $file.Name; Path = $target; Source = $file.FullName; Size = $file.Length }
+        $new += [pscustomobject]@{ Name = $name; Path = $target; Source = $file.FullName; Size = $file.Length; IsReport = ($file.Name -eq 'Report.wer') }
     }
     $new
+}
+
+function Wait-NewDumps {
+    <# After a crash: WER writes its dump a few seconds later, so wait a little for it. #>
+    param([int]$Seconds = 15)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $found = @(Get-NewDumps)
+    while (@($found | Where-Object { -not $_.IsReport }).Count -eq 0 -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 1
+        $found += @(Get-NewDumps)
+    }
+    $found
 }
 
 function Save-EventLog {
@@ -763,12 +795,12 @@ function Start-MosaicApp {
 
     # The pipe name is fixed: a Mosaic still listening would be driven by mistake.
     $other = $null
-    try { $other = Send-MosaicCommand -Do 'dump' -ConnectTimeoutMilliseconds 300 -ReplyTimeoutSeconds 5 } catch { }
+    try { $other = Send-RawCommand -Do 'dump' -ConnectTimeoutMilliseconds 300 -ReplyTimeoutSeconds 5 } catch { }
     if ($other) {
         foreach ($id in @($script:StartedProcessIds)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 2
         $other = $null
-        try { $other = Send-MosaicCommand -Do 'dump' -ConnectTimeoutMilliseconds 300 -ReplyTimeoutSeconds 5 } catch { }
+        try { $other = Send-RawCommand -Do 'dump' -ConnectTimeoutMilliseconds 300 -ReplyTimeoutSeconds 5 } catch { }
         if ($other) { throw 'Another Mosaic is listening on \\.\pipe\mosaic-automation (not started by this run). Quit it first.' }
     }
 
@@ -815,6 +847,7 @@ function Start-MosaicApp {
         ExpectExit    = $false
         Crashed       = $false
         Hung          = $false
+        StartCrashed  = $false
         GeckoProcessId = 0
     }
     Write-Host "==> Mosaic for '$Name' (process $($process.Id)), data in $dataDirectory"
@@ -827,16 +860,18 @@ function Start-MosaicApp {
     $deadline = (Get-Date).AddSeconds($wait)
     while ($true) {
         if ($process.HasExited) {
-            $script:Session.StartError = "Mosaic exited during start-up (exit code $($process.ExitCode))."
+            $script:Session.StartError = ('Mosaic exited during start-up (exit code {0}, 0x{1:X8}).' -f $process.ExitCode, $process.ExitCode)
             $script:Session.Crashed = $true
+            $script:Session.StartCrashed = $true
+            $script:Session.ExpectExit = $true
             break
         }
         try {
-            $reply = Send-MosaicCommand -Do 'dump' -ConnectTimeoutMilliseconds 1000 -ReplyTimeoutSeconds 15
+            $reply = Send-RawCommand -Do 'dump' -ConnectTimeoutMilliseconds 1000 -ReplyTimeoutSeconds 15
             $script:Session.PipeUp = $true
             $script:PipeSeen = $true
             $script:Session.PipeSeconds = [math]::Round($clock.Elapsed.TotalSeconds, 1)
-            $gecko = Get-Field $reply.Reply 'state.geckoProcessId'
+            $gecko = Get-Field $reply 'state.geckoProcessId'
             if ($gecko) { $script:Session.GeckoProcessId = [int]$gecko }
             break
         }
@@ -869,7 +904,7 @@ function Stop-MosaicApp {
     if ($session.GeckoProcessId -gt 0) { $roots += $session.GeckoProcessId }
     if ($session.PipeUp -and -not $session.Process.HasExited) {
         try {
-            $gecko = Get-Field (Send-MosaicCommand -Do 'dump' -ReplyTimeoutSeconds 10).Reply 'state.geckoProcessId'
+            $gecko = Get-Field (Send-RawCommand -Do 'dump' -ReplyTimeoutSeconds 10) 'state.geckoProcessId'
             if ($gecko -and [int]$gecko -gt 0) { $roots += [int]$gecko }
         }
         catch { }
@@ -877,7 +912,7 @@ function Stop-MosaicApp {
     $snapshot = @(Get-ProcessSnapshot -Roots $roots -DataDirectory $session.DataDirectory)
     if (-not $session.Process.HasExited) {
         if (-not $Kill -and $session.PipeUp) {
-            try { Send-MosaicCommand -Do 'quit' -ReplyTimeoutSeconds 10 | Out-Null } catch { }
+            try { Send-RawCommand -Do 'quit' -ReplyTimeoutSeconds 10 | Out-Null } catch { }
             if ($session.Process.WaitForExit(30000)) { $result.Quit = $true }
             else { $result.Message = 'Mosaic was still running 30 s after "quit".' }
         }
@@ -972,8 +1007,8 @@ function Save-FailureEvidence {
     try {
         if ($script:Session -and $script:Session.PipeUp -and -not $script:Session.Process.HasExited) {
             try {
-                $reply = Send-MosaicCommand -Do 'dump' -ReplyTimeoutSeconds 10
-                Save-State (Get-Field $reply.Reply 'state') "failure-$Name"
+                $reply = Send-RawCommand -Do 'dump' -ReplyTimeoutSeconds 10
+                Save-State (Get-Field $reply 'state') "failure-$Name"
             }
             catch { }
         }
@@ -993,6 +1028,7 @@ function Invoke-Scenario {
     Write-Host "--> $($Scenario.Area) / $($Scenario.Name)"
     try {
         if ((Get-Date) -ge $script:Config.Deadline) { Skip-Pending 'the run''s time budget is used up' }
+        if ($null -ne $script:Session -and $script:Session.StartCrashed) { Skip-Pending "blocked: $($script:Session.StartError) (reported once, in this area's '(start)' result)" }
         if (-not $Scenario.NoPipe) {
             if ($null -eq $script:Session) { throw 'Mosaic is not running.' }
             if (-not $script:Session.PipeUp) { Skip-Pending "no automation pipe: $($script:Session.StartError)" }
@@ -1032,7 +1068,7 @@ function Invoke-Scenario {
             $record.Message = "Mosaic exited during the scenario (exit code $($script:Session.Process.ExitCode))."
         }
     }
-    $dumps = @(Get-NewDumps)
+    if ($record.Kind -eq 'crash') { $dumps = @(Wait-NewDumps) } else { $dumps = @(Get-NewDumps) }
     if ($dumps.Count -gt 0) {
         foreach ($dump in $dumps) { $record.Evidence.Add('dumps\' + $dump.Name); [void]$record.Log.Add("new crash dump: $($dump.Source)") }
         if ($record.Status -ne 'failed') {
@@ -1057,8 +1093,21 @@ function Invoke-Area {
     Write-Host ''
     Write-Host "=== $Area ($(@($Scenarios).Count) scenario(s)) ==="
     $areaStarted = Get-Date
-    if ((Get-Date) -lt $script:Config.Deadline) { $null = Start-MosaicApp -Name $Area }
+    if ((Get-Date) -lt $script:Config.Deadline) {
+        $null = Start-MosaicApp -Name $Area
+        if ($script:Session.StartCrashed) {
+            $record = New-ResultRecord -Area $Area -Name '(start) Mosaic starts with --mosaic-automation'
+            $record.Status = 'failed'; $record.Kind = 'crash'; $record.Message = $script:Session.StartError
+            $script:Current = $record
+            foreach ($dump in @(Wait-NewDumps)) { $record.Evidence.Add('dumps\' + $dump.Name) }
+            $record.Evidence.Add('areas\' + (ConvertTo-SafeName $Area) + '\events.txt')
+            $null = Save-Screenshot 'start-crash'
+            $script:Current = $null
+            Add-Result $record
+        }
+    }
     foreach ($scenario in $Scenarios) {
+        if ($null -ne $script:Session -and $script:Session.StartCrashed) { $null = Invoke-Scenario $scenario; continue }
         if ($null -eq $script:Session -or $script:Session.Process.HasExited -or $script:Session.Hung) {
             if ($null -ne $script:Session) {
                 Write-Host '    restarting Mosaic (it crashed, hung or was stopped)'
