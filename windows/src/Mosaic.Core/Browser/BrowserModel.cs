@@ -71,7 +71,7 @@ public sealed record ContentMessage(string Title, string? Detail, bool ShowsProg
 /// on the UI thread, with that thread's <see cref="SynchronizationContext"/> current, which is also
 /// where the engines raise their events.
 /// </remarks>
-public sealed class BrowserModel : ObservableObject
+public sealed partial class BrowserModel : ObservableObject
 {
     private const string BlankPage = "about:blank";
 

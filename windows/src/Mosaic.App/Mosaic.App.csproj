@@ -1,25 +1,41 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- Mosaic for Windows: WinUI 3 (Windows App SDK), unpackaged, self-contained on Windows.
+       The UI is written in C# code, not XAML markup, so the app compiles on macOS/Linux too
+       (the XAML compiler is Windows-only); Windows-only packaging steps run on Windows. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-    <UseWPF>true</UseWPF>
     <RootNamespace>Mosaic.App</RootNamespace>
     <AssemblyName>Mosaic</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Mosaic.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <Platforms>x64;ARM64</Platforms>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Program.cs is the entry point (no App.xaml). -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform(Windows))">
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+  <!-- Compile-only on macOS/Linux: these steps run Windows executables (makepri, mt). -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform(Windows))">
+    <AppxGeneratePriEnabled>false</AppxGeneratePriEnabled>
+    <GenerateLibraryLayout>false</GenerateLibraryLayout>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.251106002" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Mosaic.Core\Mosaic.Core.csproj" />
   </ItemGroup>
   <!-- The content blocker, as scripts\bootstrap.ps1 builds it: uBlock Origin's engine, its
-       licence and the filter-list snapshot, loaded from blocker\ next to the executable.
-       Without it the app builds without the blocker, which then reports itself unavailable. -->
+       licence and the filter-list snapshot, loaded from blocker\ next to the executable. -->
   <ItemGroup Condition="Exists('..\..\vendor\ublock\ublock-engine.js')">
     <Content Include="..\..\vendor\ublock\ublock-engine.js;..\..\vendor\ublock\LICENSE-uBlock-Origin.txt" Link="blocker\%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -29,10 +45,16 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <!-- Mosaic's agent inside Gecko, loaded from next to the executable. -->
-    <Content Include="..\..\resources\gecko\**\*" Link="gecko\%(RecursiveDir)%(Filename)%(Extension)">
+    <!-- Mosaic's agent inside Gecko (shared with macOS: the repository's Resources/gecko). -->
+    <Content Include="..\..\..\Resources\gecko\**\*" Link="gecko\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Resource Include="Assets\**\*.png" />
+    <Content Include="Assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- Mosaic's licence (GPL v3 or later), shown in Settings › About & Updates. -->
+    <Content Include="..\..\..\LICENSE" Link="LICENSE">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

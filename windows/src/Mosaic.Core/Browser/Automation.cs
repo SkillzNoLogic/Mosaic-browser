@@ -181,6 +181,11 @@ public sealed class Automation
             case "quit":
                 return Success(quit: true);
             default:
+                // Feature areas register their own commands (AutomationRegistry).
+                foreach (var handler in AutomationRegistry.Handlers)
+                {
+                    if (await handler(model, command, value, output) is { } reply) return reply;
+                }
                 return Failure($"Unknown command \"{command}\".");
         }
     }
@@ -242,7 +247,7 @@ public sealed class Automation
             ["blocker"] = BlockerState(model.Blocker),
             ["extensionError"] = model.Extensions.ErrorMessage ?? "",
             ["extensionsBusy"] = model.Extensions.IsBusy,
-        };
+        }.WithFeatureState(model);
     }
 
     private static JsonObject BlockerState(ContentBlocker blocker) => new()

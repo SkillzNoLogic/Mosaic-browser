@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Mosaic.App/Mosaic.App.csproj" />
+    <!-- src/Mosaic.App.Wpf: the v0.1 WPF app, kept only as a porting reference; not built. -->
     <Project Path="src/Mosaic.Core/Mosaic.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
