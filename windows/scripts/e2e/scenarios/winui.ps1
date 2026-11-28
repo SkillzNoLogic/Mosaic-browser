@@ -248,3 +248,15 @@ Register-Scenario -Area winui -Name 'single instance: a URL opened from outside 
         @(@(Get-Field $s 'tabs') | Where-Object { (Get-Field $_ 'title') -eq 'Mosaic From Outside' }).Count -gt 0
     }
 }
+
+Register-Scenario -Area winui -Name 'navigating again to the page already shown keeps its title' -Todo 'Parity with the v0.1 WPF app' -Body {
+    Invoke-OnEngines {
+        param($engine)
+        $path = "/page?title=Same%20Page%20$engine"
+        $null = Open-TestPage $path -Engine $engine -Title "Same Page $engine"
+        $before = @(Get-TestRequests -PathPrefix '/page' | Where-Object { $_.Query -like "*Same%20Page%20$engine*" }).Count
+        Invoke-Mosaic 'navigate' (Get-TestUrl $path) | Out-Null
+        $null = Wait-Until -What 'the page requested again' -Condition { @(Get-TestRequests -PathPrefix '/page' | Where-Object { $_.Query -like "*Same%20Page%20$engine*" }).Count -gt $before }
+        $null = Wait-State "the title reported again after loading the same URL" -TimeoutSeconds 20 -Condition { param($s) Test-TabShows (Get-SelectedTab $s) -Title "Same Page $engine" -Engine $engine }
+    }
+}
