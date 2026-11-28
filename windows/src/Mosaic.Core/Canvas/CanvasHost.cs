@@ -61,6 +61,12 @@ public static class CanvasServices
     /// <summary>The selected workspace (ID as stored in <c>workspaceBackgrounds</c>, and its name).</summary>
     public static Func<BrowserModel, (string Id, string Name)>? Workspace { get; set; }
 
+    /// <summary>Shows the editor in a mode (the app opens <c>mosaic://customize</c>).</summary>
+    public static Action<BrowserModel, CanvasController.EditorMode>? ShowEditor { get; set; }
+
+    /// <summary>Opens Settings › Mosaics (the shell; for <c>canvasMode presets</c>).</summary>
+    public static Action<BrowserModel>? ShowMosaicsSettings { get; set; }
+
     /// <summary>Saved configurations: <c>%LOCALAPPDATA%\Mosaic\Canvas\configurations.json</c> (macOS: Application Support/Mosaic/Canvas).</summary>
     public static string LibraryPath => Path.Combine(AppPaths.DataRoot, "Canvas", "configurations.json");
 
@@ -69,6 +75,7 @@ public static class CanvasServices
         var controller = new CanvasController(HostFactory?.Invoke(model) ?? new MosaicStoreHost(new MosaicStore(null)), LibraryPath,
             () => Workspace?.Invoke(model) ?? ("default", "Workspace"));
         controller.Notice += text => model.Notice = text;
+        controller.ShowRequested += mode => ShowEditor?.Invoke(model, mode);
         return controller;
     }
 }

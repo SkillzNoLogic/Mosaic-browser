@@ -271,7 +271,7 @@ public static class ColorEncodings
     }
 
     /// <summary>printf-style fixed formatting (round half to even on the binary value, as %.nf does).</summary>
-    internal static string F(double x, int digits)
+    public static string F(double x, int digits)
     {
         var rounded = Math.Round(x, digits, MidpointRounding.ToEven);
         return rounded.ToString("F" + digits, CultureInfo.InvariantCulture);

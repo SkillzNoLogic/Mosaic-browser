@@ -26,6 +26,12 @@ public static class Gradients
 
     private static string Key(JsonNode node) => SwiftJson.Write(node, pretty: false);
 
+    /// <summary>The gradient's JSON in one line (a cache key; equal gradients give equal keys).</summary>
+    public static string JsonKey(GradientSpec g) => Key(g.ToJson());
+
+    /// <summary>A background's JSON in one line.</summary>
+    public static string JsonKey(BackgroundSpec b) => Key(b.ToJson());
+
     public static bool Same(GradientSpec? a, GradientSpec? b) =>
         ReferenceEquals(a, b) || (a is not null && b is not null && Key(a.ToJson()) == Key(b.ToJson()));
 
