@@ -105,6 +105,9 @@ internal static class WindowAutomation
             ["geckoHostMode"] = area.Gecko.IsAttached ? area.Gecko.AttachedMode.ToString().ToLowerInvariant() : "",
             ["pageCovers"] = covers,
             ["shell"] = FeatureMounts.Shell is null ? "basic" : "feature",
+            // Diagnostics: how the windows Gecko's page depends on are made (WS_EX_* bits).
+            ["topLevelExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(w.Handle, Hosting.NativeMethods.GWL_EXSTYLE):X}",
+            ["containerExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(area.Gecko.ContainerWindow, Hosting.NativeMethods.GWL_EXSTYLE):X}",
         };
     }
 
