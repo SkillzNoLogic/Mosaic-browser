@@ -391,13 +391,15 @@ public sealed partial class BrowserModel
     {
         if (!watchedTabs.TryGetValue(tab, out var watch)) return;
         if (watch.Audio is not null && watch.AudioHandler is not null) watch.Audio.PlayingAudioChanged -= watch.AudioHandler;
-        var audio = tab.Chromium as IChromiumAudio ?? (tab.Chromium is { } browser ? ChromiumAudioProvider?.Invoke(browser) : null);
+        var current = tab.Chromium;
+        var audio = current as IChromiumAudio ?? (current is not null ? ChromiumAudioProvider?.Invoke(current) : null);
         Action? audioHandler = null;
         if (audio is not null)
         {
             audioHandler = () =>
             {
-                if (ReferenceEquals(tab.Chromium, audio)) tab.IsPlayingAudio = audio.IsPlayingAudio;
+                // A browser the tab has let go of may still report; it is not the tab's.
+                if (ReferenceEquals(tab.Chromium, current)) tab.IsPlayingAudio = audio.IsPlayingAudio;
             };
             audio.PlayingAudioChanged += audioHandler;
             if (tab.IsMuted) audio.IsMuted = true;
