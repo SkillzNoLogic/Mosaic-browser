@@ -224,6 +224,33 @@ if (IS_MAC) {
   Object.assign(FORWARDED, { f: "find", g: "findNext" });
   Object.assign(FORWARDED_WITH_SHIFT, { g: "findPrevious" });
 }
+/** "WINNT" on Windows. */
+const IS_WINDOWS = Services.appinfo.OS === "WINNT";
+
+/**
+ * Engine area, Windows only: Mosaic's find bar replaces Firefox's there too, once Mosaic has
+ * called configurePageFeatures (a Mosaic for Windows without the find bar keeps Firefox's).
+ * Ctrl+F, Ctrl+G / Ctrl+Shift+G and F3 / Shift+F3. Returns the event type, or null.
+ */
+function windowsFindShortcut(event) {
+  if (!IS_WINDOWS || !page.configured || event.altKey || event.metaKey) {
+    return null;
+  }
+  if (event.key === "F3" && !event.ctrlKey) {
+    return event.shiftKey ? "findPrevious" : "findNext";
+  }
+  if (!event.ctrlKey) {
+    return null;
+  }
+  const key = event.key.toLowerCase();
+  if (key === "f" && !event.shiftKey) {
+    return "find";
+  }
+  if (key === "g") {
+    return event.shiftKey ? "findPrevious" : "findNext";
+  }
+  return null;
+}
 
 /**
  * Gecko's own shortcuts for whole windows: close window, reopen closed window,
@@ -237,6 +264,13 @@ const SWALLOWED_WITH_SHIFT = new Set(IS_MAC ? ["w", "n", "p"] : ["w", "n", "p", 
 function onKeyDown(event) {
   // productivity: shortcuts the user assigned in Mosaic (see forwardCustomShortcut).
   if (forwardCustomShortcut(event)) {
+    return;
+  }
+  const find = windowsFindShortcut(event);
+  if (find) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pendingEvents.push({ type: find });
     return;
   }
   if (!hasShortcutModifier(event)) {
@@ -598,13 +632,23 @@ const page = {
   /** Pending permission requests Mosaic is asked about; id → request record. */
   requests: new Map(),
   nextRequestId: 1,
+  /** Mosaic for Windows: page events are also kept here, with their details, for takePageEvents(). */
+  keepEvents: false,
+  keptEvents: [],
 };
 
 const { setTimeout, clearTimeout } = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
 
 /** Queues an event for Mosaic with a payload (`detail`, a JSON string). */
 function postPageEvent(type, tab, detail) {
-  pendingEvents.push({ type, tab: tab ? idOf(tab) : null, detail: JSON.stringify(detail ?? {}) });
+  const event = { type, tab: tab ? idOf(tab) : null, detail: JSON.stringify(detail ?? {}) };
+  pendingEvents.push(event);
+  if (page.keepEvents) {
+    page.keptEvents.push(event);
+    if (page.keptEvents.length > 200) {
+      page.keptEvents.shift();
+    }
+  }
 }
 
 
@@ -738,7 +782,8 @@ function patchWebRTC() {
 function onBlockedPopups(event) {
   const browser = event.target;
   const tab = tabForBrowser(browser);
-  const blocker = browser?.popupAndRedirectBlocker;
+  // Older Gecko releases call it popupBlocker.
+  const blocker = browser?.popupAndRedirectBlocker ?? browser?.popupBlocker;
   if (!tab || !blocker) {
     return;
   }
@@ -1351,9 +1396,20 @@ export const Agent = {
    * after `setup`. Options:
    *   fakeMedia  test runs only: fake camera/microphone streams and a fixed
    *              location, so no system permission dialog appears.
+   *   keepEvents also keep each page event, with its details, for
+   *              takePageEvents() (Mosaic for Windows, whose engine passes only
+   *              the event types of state() on).
    */
   configurePageFeatures(options = {}) {
     const win = requireWindow();
+    if (options.keepEvents) {
+      page.keepEvents = true;
+    }
+    if (IS_WINDOWS && !page.configured) {
+      // Page full screen fills the Gecko window only: Mosaic's window, of which Gecko's is a
+      // child window, is the one that goes full screen (on the pageFullscreen event).
+      Services.prefs.setBoolPref("full-screen-api.ignore-widgets", true);
+    }
     if (!page.configured) {
       page.configured = true;
       Services.prefs.setBoolPref("accessibility.typeaheadfind.enablesound", false);
@@ -1384,6 +1440,10 @@ export const Agent = {
       Services.prefs.setBoolPref("geo.provider.use_corelocation", false);
       Services.prefs.setStringPref("geo.provider.network.url",
         'data:application/json,{"location":{"lat":51.5007,"lng":-0.1246},"accuracy":20}');
+      if (IS_WINDOWS) {
+        // The fixed location above, not Windows' location service.
+        Services.prefs.setBoolPref("geo.provider.ms-windows-location", false);
+      }
     }
     return "true";
   },
@@ -1431,6 +1491,15 @@ export const Agent = {
       tabs.push({ id: idOf(tab), zoom, muted: !!tab.muted });
     }
     return JSON.stringify(tabs);
+  },
+
+  /**
+   * The page events (permissionRequest, permissionCancel, popupBlocked,
+   * pageFullscreen) queued since the last call, with their details:
+   * [{ type, tab, detail }]. Only kept after configurePageFeatures({ keepEvents: true }).
+   */
+  takePageEvents() {
+    return JSON.stringify(page.keptEvents.splice(0));
   },
 
   /** Answers a `permissionRequest` event. Returns false if it is no longer pending. */
@@ -1484,7 +1553,8 @@ export const Agent = {
 
   /** Opens the pop-ups the page in tab `id` was stopped from opening. */
   async openBlockedPopups(id) {
-    await requireTab(id).browser.popupAndRedirectBlocker?.unblockAllPopups();
+    const { browser } = requireTab(id);
+    await (browser.popupAndRedirectBlocker ?? browser.popupBlocker)?.unblockAllPopups();
     return "true";
   },
 

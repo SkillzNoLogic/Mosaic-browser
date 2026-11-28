@@ -744,7 +744,7 @@ public sealed partial class BrowserModel : ObservableObject
         };
         browser.NewTabRequested += url =>
         {
-            if (Current()) NewTab(url, tab.Engine);
+            if (Current() && !SuppressesPopup(tab, url)) NewTab(url, tab.Engine); // engine: pop-up blocking
         };
         browser.BlockedCountChanged += count =>
         {
