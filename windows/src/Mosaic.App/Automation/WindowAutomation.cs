@@ -15,6 +15,7 @@ namespace Mosaic.App.AutomationSupport;
 /// {"do": "window", "value": "maximize" | "minimize" | "restore" | "fullscreen" | "windowed" | "1024x768"}
 /// {"do": "material", "value": "mica" | "micaAlt" | "acrylic" | "solid"}
 /// {"do": "coverPage", "value": "on" | "off"}     // as an overlay would: Gecko's page must hide
+/// {"do": "screenCapture", "value": "C:\\out.png"} // the window as the screen shows it
 /// </code>
 /// <c>dump</c> gains <c>winui</c>: the window's state, bounds and scale, the materials, the page
 /// area's bounds and whether Gecko's page is showing, the active page covers and the shell in use.
@@ -66,6 +67,15 @@ internal static class WindowAutomation
             case "coverPage":
                 FeatureMounts.CoverPage(CoverId, value != "off");
                 return Reply(AutomationRegistry.Ok());
+            case "screenCapture":
+                // The window's rectangle as the screen shows it (see WindowCapture.SaveScreenPng).
+                if (value.Length == 0) return Reply(AutomationRegistry.Error("screenCapture needs the path to write to."));
+                var handle = w.Handle;
+                return Task.Run<AutomationReply?>(() =>
+                {
+                    WindowCapture.SaveScreenPng(handle, value);
+                    return AutomationRegistry.Ok();
+                });
             default:
                 return Task.FromResult<AutomationReply?>(null);
         }

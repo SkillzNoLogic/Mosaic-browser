@@ -1334,12 +1334,21 @@ public sealed class GeckoWindowHost : IDisposable
 
         // WS_CLIPCHILDREN: never paint the background over Gecko's window. WS_CLIPSIBLINGS: it
         // shares its parent with WinUI's content window. Created hidden; Place shows it.
-        nint container = CreateWindowExW(0, ContainerClassName, null,
+        // Experiment (MOSAIC_GECKO_CONTAINER=layered): a layered container has a redirection
+        // surface of its own, which WinUI's top-level window (WS_EX_NOREDIRECTIONBITMAP) lacks;
+        // GDI-presented content of a child window needs one to be seen.
+        bool layered = string.Equals(Environment.GetEnvironmentVariable("MOSAIC_GECKO_CONTAINER"), "layered", StringComparison.OrdinalIgnoreCase);
+        nint container = CreateWindowExW(layered ? (uint)WS_EX_LAYERED : 0, ContainerClassName, null,
             (uint)(WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS), 0, 0, 0, 0, parent, 0, instance, 0);
         if (container == 0)
         {
             int error = Marshal.GetLastPInvokeError();
             throw new Win32Exception(error, $"Could not create the Gecko host window: {Describe(error)}");
+        }
+        if (layered)
+        {
+            bool opaque = SetLayeredWindowAttributes(container, 0, 255, LWA_ALPHA);
+            Info($"Container 0x{container:X} is a layered window (opaque: {opaque}).");
         }
         return container;
     }

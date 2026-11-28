@@ -39,6 +39,8 @@ internal static unsafe partial class NativeMethods
     internal const long WS_EX_CLIENTEDGE = 0x00000200;
     internal const long WS_EX_STATICEDGE = 0x00020000;
     internal const long WS_EX_APPWINDOW = 0x00040000;
+    internal const long WS_EX_LAYERED = 0x00080000;
+    internal const uint LWA_ALPHA = 0x00000002;
 
     internal const int GWL_STYLE = -16;
     internal const int GWL_EXSTYLE = -20;
@@ -322,6 +324,10 @@ internal static unsafe partial class NativeMethods
 
     [LibraryImport("user32.dll")]
     internal static partial nint GetSysColorBrush(int index);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetLayeredWindowAttributes(nint hWnd, uint colorKey, byte alpha, uint flags);
 
     [LibraryImport("user32.dll")]
     internal static partial nint LoadCursorW(nint instance, nint cursorName);

@@ -280,11 +280,15 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
                 let arrived = false;
                 const listener = () => { arrived = true; };
                 root.addEventListener("keydown", listener, true);
-                root.dispatchEvent(new win.KeyboardEvent("keydown", {
+                const init = {
                   key, bubbles: true, cancelable: true,
                   metaKey: shortcut && mac, ctrlKey: shortcut && !mac, shiftKey: shift, altKey: alt,
-                }));
+                };
+                root.dispatchEvent(new win.KeyboardEvent("keydown", init));
                 root.removeEventListener("keydown", listener, true);
+                // Released again, as a real key would be: Gecko's own handlers (Link Preview's
+                // key combination) keep state between a key going down and coming up.
+                root.dispatchEvent(new win.KeyboardEvent("keyup", init));
                 return !arrived;
               };
               const before = win.gBrowser.tabs.length;

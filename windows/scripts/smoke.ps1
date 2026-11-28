@@ -40,6 +40,13 @@
 .PARAMETER GeckoHostMode
     child (the default embedding) or owned (the fallback; passes --gecko-host=owned).
 
+.PARAMETER GeckoOnly
+    Only the Mozilla steps (1 and 1b), then quit: for trying Gecko hosting variants quickly.
+
+.PARAMETER Container
+    standard (default) or layered: the Gecko host's container window as a layered window
+    (MOSAIC_GECKO_CONTAINER=layered), an experiment for how a child window renders under WinUI.
+
 .PARAMETER TimeoutSeconds
     How long each wait (page load, engine switch, extension install) may take. Default 120.
 
@@ -61,6 +68,11 @@ param(
 
     [ValidateSet('child', 'owned')]
     [string]$GeckoHostMode = 'child',
+
+    [switch]$GeckoOnly,
+
+    [ValidateSet('standard', 'layered')]
+    [string]$Container = 'standard',
 
     [ValidateRange(10, 3600)]
     [int]$TimeoutSeconds = 120,
@@ -351,6 +363,12 @@ function Save-Screenshot {
             Start-Sleep -Milliseconds 250
         }
         Write-Host "    screenshot: $path"
+        # The same rectangle as the screen shows it: PrintWindow and the screen can disagree
+        # about native child windows. Evidence only; not a check.
+        try {
+            Send-MosaicCommand -Do 'screenCapture' -Value (Join-Path $OutputDirectory "$Name-screen.png") | Out-Null
+        }
+        catch { Write-Host "    (no screen capture: $($_.Exception.Message))" }
     }
     catch {
         $script:SoftFailures += "Screenshot '$Name' failed: $($_.Exception.Message)"
@@ -526,6 +544,7 @@ New-Item -ItemType Directory -Path $dataDirectory, $fixtures -Force | Out-Null
 $savedDataDir = $env:MOSAIC_DATA_DIR
 $savedGeckoExe = $env:MOSAIC_GECKO_EXE
 $savedTraceFile = $env:MOSAIC_TRACE_FILE
+$savedContainer = $env:MOSAIC_GECKO_CONTAINER
 $started = Get-Date
 $snapshot = @()
 $failure = $null
@@ -556,6 +575,7 @@ try {
     $env:MOSAIC_GECKO_EXE = $gecko
     # The Gecko window host's step-by-step diagnostics, the first thing to read on a failure.
     $env:MOSAIC_TRACE_FILE = Join-Path $OutputDirectory 'mosaic-trace.log'
+    $env:MOSAIC_GECKO_CONTAINER = if ($Container -eq 'layered') { 'layered' } else { $null }
     $arguments = @('--mosaic-automation')
     if ($GeckoHostMode -eq 'owned') { $arguments += '--gecko-host=owned' }
     $script:App = Start-Process -FilePath $appExe -ArgumentList $arguments -PassThru `
@@ -625,6 +645,7 @@ try {
         Write-Host '    hidden while covered, shown again after'
     }
 
+    if (-not $GeckoOnly) {
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {
         throw "Mosaic reports that Chromium is unavailable (chromiumAvailable is not true). Is the WebView2 runtime installed? See scripts\bootstrap.ps1."
@@ -737,6 +758,8 @@ try {
         Write-Host "    maximised, then restored at 1024x700; page area $(Get-MosaicProperty $area 'width')x$(Get-MosaicProperty $area 'height')"
     }
 
+    }
+
     Write-Host '==> 7. Quit'
     $geckoProcessId = 0
     $reported = Get-MosaicProperty $state 'geckoProcessId'
@@ -773,6 +796,7 @@ finally {
     $env:MOSAIC_DATA_DIR = $savedDataDir
     $env:MOSAIC_GECKO_EXE = $savedGeckoExe
     $env:MOSAIC_TRACE_FILE = $savedTraceFile
+    $env:MOSAIC_GECKO_CONTAINER = $savedContainer
     Stop-PageServer $script:PageServer
     try {
         if ($null -ne $script:App) {

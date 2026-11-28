@@ -19,9 +19,20 @@ internal static partial class WindowCapture
 {
     private const uint PW_RENDERFULLCONTENT = 0x00000002;
     private const uint DIB_RGB_COLORS = 0;
+    private const uint SRCCOPY = 0x00CC0020;
+    private const uint CAPTUREBLT = 0x40000000;
+
+    /// <summary>
+    /// Copies the window's rectangle from the screen, as it is actually displayed (whatever is
+    /// in front of it included), and writes a PNG. A cross-check for <see cref="SavePng"/>:
+    /// <c>PrintWindow</c> can miss content that the screen shows, and the other way round.
+    /// </summary>
+    public static void SaveScreenPng(nint window, string path) => Capture(window, path, fromScreen: true);
 
     /// <summary>Captures the window and writes a PNG. Throws <see cref="IOException"/> on failure.</summary>
-    public static void SavePng(nint window, string path)
+    public static void SavePng(nint window, string path) => Capture(window, path, fromScreen: false);
+
+    private static void Capture(nint window, string path, bool fromScreen)
     {
         if (window == 0 || !GetWindowRect(window, out var bounds))
         {
@@ -38,7 +49,9 @@ internal static partial class WindowCapture
         try
         {
             var previous = SelectObject(memory, bitmap);
-            var captured = PrintWindow(window, memory, PW_RENDERFULLCONTENT);
+            var captured = fromScreen
+                ? BitBlt(memory, 0, 0, width, height, screen, bounds.Left, bounds.Top, SRCCOPY | CAPTUREBLT)
+                : PrintWindow(window, memory, PW_RENDERFULLCONTENT);
             SelectObject(memory, previous);
             if (!captured) throw new IOException("Windows could not capture Mosaic's window.");
 
@@ -170,6 +183,10 @@ internal static partial class WindowCapture
 
     [LibraryImport("user32.dll")]
     private static partial int ReleaseDC(nint window, nint deviceContext);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool BitBlt(nint target, int x, int y, int width, int height, nint source, int sourceX, int sourceY, uint operation);
 
     [LibraryImport("gdi32.dll")]
     private static partial nint CreateCompatibleDC(nint deviceContext);
