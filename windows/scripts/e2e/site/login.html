@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Login Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Login Page</h1>
+<form id="login" method="get" action="/page">
+  <input type="hidden" name="title" value="Mosaic Logged In">
+  <label>Username <input id="username" name="username" type="text" autocomplete="username"></label><br>
+  <label>Password <input id="password" name="pw" type="password" autocomplete="current-password"></label><br>
+  <button id="submit" type="submit" style="width:200px;height:60px">Sign in</button>
+</form>
+<script>
+  // ?autosubmit=<user>:<password> types the credentials and submits, as a person would.
+  var auto = E2E.params.get('autosubmit');
+  var typedByPage = false;
+  if (auto) {
+    setTimeout(function () {
+      var parts = auto.split(':');
+      typedByPage = true;
+      var user = document.getElementById('username'), pass = document.getElementById('password');
+      user.focus(); user.value = parts[0]; user.dispatchEvent(new Event('input', { bubbles: true }));
+      pass.focus(); pass.value = parts.slice(1).join(':'); pass.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(function () {
+        var form = document.getElementById('login');
+        if (form.requestSubmit) form.requestSubmit(document.getElementById('submit')); else document.getElementById('submit').click();
+      }, 400);
+    }, 1200);
+  }
+  // Reports what the browser filled in (autofill), without the password itself: its length.
+  var lastReported = '';
+  setInterval(function () {
+    if (typedByPage) return;
+    var user = document.getElementById('username').value, pass = document.getElementById('password').value;
+    var now = user + '|' + pass.length;
+    if ((user || pass) && now !== lastReported) {
+      lastReported = now;
+      E2E.report('filledUser', user);
+      E2E.report('filledPasswordLength', pass.length);
+      if (E2E.params.get('expect')) E2E.report('filledMatches', pass === E2E.params.get('expect') ? 'yes' : 'no');
+    }
+  }, 300);
+</script>
+</body></html>

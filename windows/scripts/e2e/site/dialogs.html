@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Dialogs Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Dialogs Page</h1>
+<script>
+  var kind = E2E.params.get('kind') || 'alert';
+  setTimeout(function () {
+    if (kind === 'alert') { alert('Mosaic alert'); E2E.report('dialog', 'alert-closed'); }
+    else if (kind === 'confirm') { E2E.report('dialog', confirm('Mosaic confirm?') ? 'confirmed' : 'cancelled'); }
+    else if (kind === 'prompt') { var r = prompt('Mosaic prompt', 'default'); E2E.report('dialog', r === null ? 'cancelled' : 'answer:' + r); }
+    else if (kind === 'beforeunload') {
+      window.addEventListener('beforeunload', function (e) { e.preventDefault(); e.returnValue = ''; });
+      E2E.report('dialog', 'armed');
+    }
+  }, 800);
+</script>
+</body></html>

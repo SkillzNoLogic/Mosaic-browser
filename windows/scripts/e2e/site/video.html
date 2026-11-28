@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Video Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Video Page</h1>
+<canvas id="canvas" width="320" height="180" style="display:none"></canvas>
+<video id="video" width="640" height="360" autoplay muted playsinline></video>
+<script>
+  // A video without a media file: an animated canvas captured as a stream.
+  var canvas = document.getElementById('canvas'), context = canvas.getContext('2d'), frame = 0;
+  setInterval(function () {
+    frame++;
+    context.fillStyle = 'hsl(' + (frame * 3 % 360) + ',70%,50%)';
+    context.fillRect(0, 0, 320, 180);
+    context.fillStyle = '#fff';
+    context.font = '40px sans-serif';
+    context.fillText('Mosaic ' + frame, 20, 100);
+  }, 50);
+  var video = document.getElementById('video');
+  video.srcObject = canvas.captureStream(20);
+  video.play().then(function () { E2E.report('video', 'playing'); }).catch(function (e) { E2E.report('video', 'no:' + e.name); });
+  document.addEventListener('enterpictureinpicture', function () { E2E.report('pip', 'entered'); }, true);
+  document.addEventListener('leavepictureinpicture', function () { E2E.report('pip', 'left'); }, true);
+  document.addEventListener('fullscreenchange', function () { E2E.report('fullscreen', document.fullscreenElement ? 'on' : 'off'); });
+  video.addEventListener('click', function () { video.requestFullscreen().catch(function (e) { E2E.report('fullscreen', 'error:' + e.name); }); });
+</script>
+</body></html>

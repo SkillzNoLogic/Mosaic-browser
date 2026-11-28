@@ -1,0 +1,35 @@
+{
+  "exported" : "2026-11-20T10:00:00Z",
+  "format" : "dev.mosaic.layout",
+  "layout" : {
+    "addressBar" : "omnibox",
+    "appearance" : {
+      "accent" : "#1A73E8",
+      "background" : {
+        "kind" : "system"
+      },
+      "colorScheme" : "dark",
+      "contentCornerRadius" : 0,
+      "contentInset" : 0,
+      "cornerRadius" : 10,
+      "density" : "compact",
+      "glow" : false,
+      "material" : "solid",
+      "toolbarSurface" : true
+    },
+    "bookmarksBar" : true,
+    "name" : "E2E From macOS",
+    "preset" : "chrome",
+    "regions" : {
+      "titleBar" : [ "tabStrip", "newTab", "flexibleSpace" ],
+      "toolbar" : [ "back", "forward", "reload", "home", "addressField", "bookmarkStar", "engineSwitch", "blocker", "extensions", "downloads", "menu" ]
+    },
+    "schemaVersion" : 1,
+    "sidebar" : "collapsible",
+    "sidebarWidth" : 260,
+    "tabPlacement" : "top",
+    "tabStyle" : "chrome"
+  },
+  "name" : "E2E From macOS",
+  "version" : 1
+}

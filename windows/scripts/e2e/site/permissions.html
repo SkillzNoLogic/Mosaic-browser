@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Permissions Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Permissions Page</h1>
+<p>?ask=geolocation|notifications|camera|microphone|clipboard asks on load; the button asks with a gesture.</p>
+<button id="ask" style="width:400px;height:160px" onclick="ask('click')">Ask</button>
+<script>
+  var kind = E2E.params.get('ask') || 'geolocation';
+  function done(result) { E2E.report('permission', result); }
+  function ask(why) {
+    E2E.report('asked', kind + ':' + why);
+    try {
+      if (kind === 'geolocation') {
+        navigator.geolocation.getCurrentPosition(function () { done('granted'); }, function (e) { done('denied:' + e.code); }, { timeout: 60000 });
+      } else if (kind === 'notifications') {
+        Notification.requestPermission().then(function (r) { done(r === 'granted' ? 'granted' : 'denied:' + r); });
+      } else if (kind === 'camera' || kind === 'microphone') {
+        navigator.mediaDevices.getUserMedia(kind === 'camera' ? { video: true } : { audio: true })
+          .then(function (s) { s.getTracks().forEach(function (t) { t.stop(); }); done('granted'); })
+          .catch(function (e) { done('denied:' + e.name); });
+      } else if (kind === 'clipboard') {
+        navigator.clipboard.readText().then(function () { done('granted'); }).catch(function (e) { done('denied:' + e.name); });
+      }
+    } catch (e) { done('error:' + e.message); }
+  }
+  if (E2E.params.get('auto') !== '0') setTimeout(function () { ask('load'); }, 600);
+</script>
+</body></html>

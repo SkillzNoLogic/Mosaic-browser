@@ -1,0 +1,16 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Audio Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Audio Page</h1>
+<button id="play" style="width:600px;height:300px;font-size:32px" onclick="play()">Play</button>
+<audio id="audio" src="/tone.wav?seconds=120" loop></audio>
+<script>
+  function play() {
+    var audio = document.getElementById('audio');
+    audio.play().then(function () { E2E.report('playing', 'yes'); }).catch(function (e) { E2E.report('playing', 'no:' + e.name); });
+  }
+  // Autoplay attempt (allowed or not depending on the engine's policy).
+  if (E2E.params.get('autoplay') === '1') setTimeout(play, 300);
+</script>
+</body></html>

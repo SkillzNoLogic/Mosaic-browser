@@ -1,0 +1,37 @@
+{
+  "exported" : "2026-11-20T10:00:00Z",
+  "format" : "dev.mosaic.layout",
+  "layout" : {
+    "addressBar" : "unified",
+    "appearance" : {
+      "accent" : "system",
+      "background" : {
+        "kind" : "system"
+      },
+      "colorScheme" : "system",
+      "contentCornerRadius" : 0,
+      "contentInset" : 0,
+      "cornerRadius" : 8,
+      "density" : "regular",
+      "glow" : false,
+      "material" : "liquidGlass",
+      "toolbarSurface" : false
+    },
+    "bookmarksBar" : false,
+    "name" : "E2E Safari From macOS",
+    "preset" : "safari",
+    "regions" : {
+      "sidebarBottom" : [ "workspaces", "flexibleSpace", "settings" ],
+      "sidebarTop" : [ "flexibleSpace", "home" ],
+      "tabBar" : [ "tabStrip" ],
+      "titleBar" : [ "sidebarToggle", "back", "forward", "flexibleSpace", "addressField", "flexibleSpace", "blocker", "downloads", "newTab", "menu" ]
+    },
+    "schemaVersion" : 1,
+    "sidebar" : "collapsible",
+    "sidebarWidth" : 240,
+    "tabPlacement" : "top",
+    "tabStyle" : "safari"
+  },
+  "name" : "E2E Safari From macOS",
+  "version" : 1
+}

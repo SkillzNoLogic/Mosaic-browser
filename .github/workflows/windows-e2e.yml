@@ -1,0 +1,205 @@
+# Mosaic for Windows: end-to-end suite (windows/scripts/e2e, documented in windows/docs/testing.md).
+#
+# - selftest: the framework against a stand-in app (no build), so a framework bug is told apart
+#   from an app bug.
+# - e2e x64 (windows-latest): builds and publishes the app, then runs every area's scenarios,
+#   the screenshot gallery and the accessibility scan, with crash and hang detection.
+# - e2e arm64 (windows-11-arm): the same build natively, smoke-tagged scenarios only.
+#
+# Results: junit.xml / results.json / summary.md (also on the run's summary page), screenshots,
+# the gallery (gallery/index.html), accessibility reports, logs and any crash dumps, as artifacts.
+name: Windows E2E
+
+on:
+  push:
+    branches: [win-next, 'win2/qa']
+    paths:
+      - 'windows/**'
+      - 'Resources/gecko/**'
+      - '.github/workflows/windows-e2e.yml'
+  workflow_dispatch:
+    inputs:
+      areas:
+        description: 'Areas to run, comma-separated (empty: all). winui, shell, tabs, library, engine, downloads, privacy, passwords, productivity, platform, canvas, system, gallery, accessibility'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Windows PowerShell 5.1, as the scripts promise to run on a stock Windows installation.
+    shell: powershell
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  selftest:
+    name: Framework self-test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the scripts
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            windows/scripts
+
+      - name: Crash dumps for the stand-in app
+        run: .\windows\scripts\e2e\Enable-CrashDumps.ps1 -Executables powershell.exe
+
+      - name: Self-test
+        run: .\windows\scripts\e2e\Run-E2E.ps1 -SelfTest -OutputDirectory windows\artifacts\e2e-selftest -StartSeconds 30
+
+      - name: Upload self-test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-selftest
+          path: windows/artifacts/e2e-selftest
+          if-no-files-found: warn
+          retention-days: 7
+
+  e2e:
+    name: E2E ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            rid: win-x64
+            tags: ''
+            budget: 80
+          - arch: arm64
+            runner: windows-11-arm
+            rid: win-arm64
+            tags: smoke
+            budget: 40
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js (for esbuild, which bundles the content blocker)
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-e2e-${{ matrix.arch }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-e2e-${{ matrix.arch }}-
+
+      - name: Build the content blocker
+        run: .\windows\scripts\bootstrap.ps1 -BlockerOnly
+
+      - name: Publish ${{ matrix.rid }}
+        run: .\windows\scripts\build.ps1 -Runtime ${{ matrix.rid }} -SkipTests
+
+      - name: Install the Gecko engine (Firefox ESR)
+        # If Mozilla's download is unavailable, Run-E2E.ps1 falls back to the runner's Firefox.
+        continue-on-error: true
+        run: .\windows\scripts\bootstrap.ps1 -SkipBlocker
+
+      - name: Make sure the WebView2 runtime is installed
+        run: |
+          $client = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $keys = @(
+            "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$client",
+            "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\EdgeUpdate\Clients\$client",
+            "Registry::HKEY_CURRENT_USER\Software\Microsoft\EdgeUpdate\Clients\$client"
+          )
+          function Get-WebView2Version {
+            foreach ($key in $keys) {
+              $entry = Get-ItemProperty -LiteralPath $key -Name pv -ErrorAction SilentlyContinue
+              if ($entry -and $entry.pv -and $entry.pv -ne '0.0.0.0') { return $entry.pv }
+            }
+          }
+          $version = Get-WebView2Version
+          if (-not $version) {
+            Write-Host 'WebView2 runtime not found; installing the Evergreen runtime.'
+            $ProgressPreference = 'SilentlyContinue'
+            $setup = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+            Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $setup -UseBasicParsing
+            $signature = Get-AuthenticodeSignature -LiteralPath $setup
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+              throw "The WebView2 bootstrapper is not validly signed by Microsoft ($($signature.Status))."
+            }
+            $install = Start-Process -FilePath $setup -ArgumentList '/silent', '/install' -Wait -PassThru
+            if ($install.ExitCode -ne 0) { throw "WebView2 setup failed with exit code $($install.ExitCode)." }
+            $version = Get-WebView2Version
+            if (-not $version) { throw 'WebView2 setup finished but the runtime is still not registered.' }
+          }
+          Write-Host "WebView2 runtime $version"
+
+      - name: Crash dumps (Windows Error Reporting LocalDumps)
+        run: .\windows\scripts\e2e\Enable-CrashDumps.ps1
+
+      - name: End-to-end suite
+        env:
+          E2E_AREAS: ${{ inputs.areas }}
+        run: |
+          $arguments = @{
+            AppPath         = "windows\publish\${{ matrix.rid }}\Mosaic.exe"
+            OutputDirectory = "windows\artifacts\e2e-${{ matrix.arch }}"
+            BudgetMinutes   = ${{ matrix.budget }}
+          }
+          if ('${{ matrix.tags }}') { $arguments['Tags'] = @('${{ matrix.tags }}') }
+          if ($env:E2E_AREAS) { $arguments['Areas'] = @($env:E2E_AREAS.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+          if (-not $env:MOSAIC_GECKO_EXE) {
+            $firefox = Join-Path $env:ProgramFiles 'Mozilla Firefox\firefox.exe'
+            $private = Join-Path $env:LOCALAPPDATA 'Mosaic\Engines\Firefox\firefox.exe'
+            if (-not (Test-Path -LiteralPath $private) -and (Test-Path -LiteralPath $firefox)) { $arguments['GeckoExe'] = $firefox }
+          }
+          & .\windows\scripts\e2e\Run-E2E.ps1 @arguments
+          exit $LASTEXITCODE
+
+      - name: Upload results, logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-results-${{ matrix.arch }}
+          path: |
+            windows/artifacts/e2e-${{ matrix.arch }}
+            !windows/artifacts/e2e-${{ matrix.arch }}/data/**
+            !windows/artifacts/e2e-${{ matrix.arch }}/dumps/**
+            !windows/artifacts/e2e-${{ matrix.arch }}/gallery/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload the screenshot gallery
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-gallery-${{ matrix.arch }}
+          path: windows/artifacts/e2e-${{ matrix.arch }}/gallery
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload crash and hang dumps
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crash-dumps-${{ matrix.arch }}
+          path: |
+            windows/artifacts/e2e-${{ matrix.arch }}/dumps
+            C:/MosaicCrashDumps
+          if-no-files-found: ignore
+          retention-days: 7

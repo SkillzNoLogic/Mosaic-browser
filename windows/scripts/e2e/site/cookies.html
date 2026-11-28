@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Cookies Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Cookies Page</h1>
+<p>Sets a first-party cookie and loads a frame from another site that sets a third-party one.</p>
+<iframe id="third" style="width:500px;height:200px"></iframe>
+<script>
+  document.cookie = 'e2efirst=' + E2E.token + '; path=/; max-age=86400; SameSite=Lax';
+  try { localStorage.setItem('e2e', E2E.token); } catch (e) { }
+  document.getElementById('third').src = '{{ALT_ORIGIN}}/third-party.html?token=' + encodeURIComponent(E2E.token);
+  setTimeout(function () { E2E.report('firstCookie', document.cookie.indexOf('e2efirst=') >= 0 ? 'set' : 'missing'); }, 500);
+</script>
+</body></html>

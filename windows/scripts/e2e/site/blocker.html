@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Blocker Page</title>
+<script src="/e2e.js"></script>
+<!-- Blocked by every default filter list; a blocked request never leaves the machine. -->
+<script src="http://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+</head>
+<body>
+<h1>Mosaic Blocker Page</h1>
+<p>Served by the end-to-end test server.</p>
+<ins class="adsbygoogle" style="display:block;width:300px;height:90px;background:#fc0">generic cosmetic target</ins>
+<div class="e2e-target" style="width:300px;height:90px;background:#f60">site cosmetic target</div>
+<script>
+  setTimeout(function () {
+    E2E.report('generic', E2E.visible(document.querySelector('.adsbygoogle')));
+    E2E.report('specific', E2E.visible(document.querySelector('.e2e-target')));
+    E2E.report('adscript', typeof window.adsbygoogle === 'undefined' ? 'blocked' : 'loaded');
+  }, 2000);
+</script>
+</body></html>

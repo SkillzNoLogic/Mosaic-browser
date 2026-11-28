@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Cosmetic Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Cosmetic Page</h1>
+<ins class="adsbygoogle" style="display:block;width:300px;height:90px;background:#fc0">generic cosmetic target</ins>
+<div class="e2e-target" style="width:300px;height:90px;background:#f60">site cosmetic target (My filters)</div>
+<div id="e2e-late"></div>
+<script>
+  // An element added after load: cosmetic filtering must also hide what scripts insert.
+  setTimeout(function () {
+    var late = document.createElement('div');
+    late.className = 'e2e-target e2e-late-target';
+    late.style.cssText = 'width:300px;height:40px;background:#f06';
+    late.textContent = 'late target';
+    document.getElementById('e2e-late').appendChild(late);
+  }, 500);
+  setTimeout(function () {
+    E2E.report('generic', E2E.visible(document.querySelector('.adsbygoogle')));
+    E2E.report('specific', E2E.visible(document.querySelector('.e2e-target')));
+    E2E.report('late', E2E.visible(document.querySelector('.e2e-late-target')));
+  }, 2500);
+</script>
+</body></html>

@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Popup Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Popup Page</h1>
+<button id="open" style="width:300px;height:120px" onclick="openOne('click')">Open a pop-up (user gesture)</button>
+<script>
+  function openOne(why) {
+    var w = window.open('/page?title=Mosaic%20Popup%20Window&token=' + encodeURIComponent(E2E.token), '_blank', 'width=400,height=300');
+    E2E.report('opened-' + why, w ? 'yes' : 'no');
+  }
+  // Without a user gesture: a pop-up blocker must stop these and say so.
+  setTimeout(function () { openOne('auto1'); openOne('auto2'); }, 800);
+</script>
+</body></html>

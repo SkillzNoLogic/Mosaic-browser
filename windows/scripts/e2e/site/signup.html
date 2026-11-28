@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mosaic Signup Page</title>
+<script src="/e2e.js"></script></head>
+<body>
+<h1>Mosaic Signup Page</h1>
+<form id="signup" method="get" action="/page">
+  <input type="hidden" name="title" value="Mosaic Signed Up">
+  <label>Email <input id="email" name="email" type="email" autocomplete="username"></label><br>
+  <label>New password <input id="new" name="pw1" type="password" autocomplete="new-password"></label><br>
+  <label>Confirm <input id="confirm" name="pw2" type="password" autocomplete="new-password"></label><br>
+  <button type="submit">Create account</button>
+</form>
+<script>
+  setInterval(function () {
+    var a = document.getElementById('new').value, b = document.getElementById('confirm').value;
+    if (a) { E2E.report('generatedLength', a.length); E2E.report('confirmMatches', a === b ? 'yes' : 'no'); }
+  }, 500);
+</script>
+</body></html>
