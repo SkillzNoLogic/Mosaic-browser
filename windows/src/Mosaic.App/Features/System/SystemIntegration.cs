@@ -148,17 +148,17 @@ public static class SystemIntegration
             return new JsonObject { ["ok"] = true, ["open"] = ContextMenus.IsOpen };
         }
         if (window?.Content is not FrameworkElement root) return new JsonObject { ["ok"] = false, ["error"] = "The window has no content yet." };
-        ContextMenus.Show(root, new Windows.Foundation.Point(80, 80),
-        [
+        ContextMenus.Show(root, new Windows.Foundation.Point(80, 80), new MenuItemSpec[]
+        {
             new MenuItemSpec("&Back", () => { }) { Icon = "back", Shortcut = "Alt+Left" },
             new MenuItemSpec("&Reload", () => { }) { Icon = "reload", Shortcut = "Ctrl+R" },
             MenuItemSpec.Separator,
             new MenuItemSpec("Open in new &tab", () => { }) { Icon = "newtab" },
             new MenuItemSpec("Pin tab", () => { }) { Icon = "pin", Checked = true },
-            new MenuItemSpec("Engine") { Icon = "engine", Children = [new("Mozilla", () => { }) { Checked = true }, new("Chromium", () => { }) { Checked = false }] },
+            new MenuItemSpec("Engine") { Icon = "engine", Children = new MenuItemSpec[] { new("Mozilla", () => { }) { Checked = true }, new("Chromium", () => { }) { Checked = false } } },
             MenuItemSpec.Separator,
             new MenuItemSpec("Close tab", () => { }) { Icon = "xmark", Shortcut = "Ctrl+W", Destructive = true },
-        ]);
+        });
         return new JsonObject { ["ok"] = true, ["open"] = ContextMenus.IsOpen, ["pageCovered"] = FeatureMounts.IsPageCovered };
     }
 
