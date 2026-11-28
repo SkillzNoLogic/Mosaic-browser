@@ -1,4 +1,5 @@
 #import "CEFBridge.h"
+#import "CEFBridgeInternal.h"  // engine area: page features
 
 #include <list>
 #include <string>
@@ -9,9 +10,16 @@
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
 #include "include/cef_parser.h"
+#include "include/cef_request_context.h"  // platform: languages
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
+
+// downloads area: download handler and link context-menu items (CEFDownloads.mm).
+#include "CEFDownloadsInternal.h"
+#include "CEFPasswords.h"  // passwords: save/fill hooks (CEFPasswords.mm)
+#include "CEFPrivacyInternal.h"  // privacy area
 
 #if !__has_feature(objc_arc)
 #error "CEFBridge must be compiled with ARC"
@@ -29,6 +37,32 @@ bool g_quitting = false;
 CefScopedLibraryLoader* g_library = nullptr;
 std::list<CefRefPtr<CefBrowser>> g_browsers;
 void (^g_willQuit)(void) = nil;
+// Written once on the main thread before any browser exists; read on the IO thread.
+BOOL (^g_requestFilter)(NSString*, NSString*, NSString*) = nil;
+
+/// Chromium's resource types under the names the webRequest API (and so
+/// uBlock Origin's filter syntax) uses for them.
+NSString* WebRequestType(cef_resource_type_t type) {
+  switch (type) {
+    case RT_MAIN_FRAME: return @"main_frame";
+    case RT_SUB_FRAME: return @"sub_frame";
+    case RT_STYLESHEET: return @"stylesheet";
+    case RT_SCRIPT: return @"script";
+    case RT_IMAGE: return @"image";
+    case RT_FAVICON: return @"image";
+    case RT_FONT_RESOURCE: return @"font";
+    case RT_OBJECT: return @"object";
+    case RT_PLUGIN_RESOURCE: return @"object";
+    case RT_MEDIA: return @"media";
+    case RT_WORKER: return @"script";
+    case RT_SHARED_WORKER: return @"script";
+    case RT_SERVICE_WORKER: return @"script";
+    case RT_XHR: return @"xmlhttprequest";
+    case RT_PING: return @"ping";
+    case RT_CSP_REPORT: return @"csp_report";
+    default: return @"other";
+  }
+}
 
 /// Marks the placeholder page shown when a navigation fails, so its data: URL
 /// is never reported to the address bar.
@@ -70,6 +104,15 @@ class MosaicApp : public CefApp, public CefBrowserProcessHandler {
     // app to the Keychain and would prompt for "Chromium Safe Storage" again.
     // TODO(release): drop this once Mosaic ships with a stable signing identity.
     command_line->AppendSwitch("use-mock-keychain");
+    // Engine area: scripted checks (MOSAIC_FAKE_MEDIA=1) use fake camera/microphone
+    // devices, so no system permission dialog appears, and keep pages live while the
+    // window is covered (or the display asleep) so they still take scripted input.
+    const char* fakeMedia = getenv("MOSAIC_FAKE_MEDIA");
+    if (fakeMedia && std::string(fakeMedia) == "1") {
+      command_line->AppendSwitch("use-fake-device-for-media-stream");
+      command_line->AppendSwitch("disable-backgrounding-occluded-windows");
+      command_line->AppendSwitch("disable-renderer-backgrounding");
+    }
   }
 
  private:
@@ -82,14 +125,35 @@ class MosaicClient : public CefClient,
                      public CefDisplayHandler,
                      public CefLifeSpanHandler,
                      public CefLoadHandler,
-                     public CefRequestHandler {
+                     public CefRequestHandler,
+                     public CefResourceRequestHandler {
  public:
-  explicit MosaicClient(MCEFBrowserView* view) : view_(view) {}
+  explicit MosaicClient(MCEFBrowserView* view) : view_(view), page_(new MosaicPageHandler(view)) {}
 
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  // downloads area (CEFDownloads.mm). A context-menu handler of this client's own should
+  // call MosaicDownloadsBeforeContextMenu / MosaicDownloadsContextMenuCommand instead.
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return MosaicDownloadHandler(); }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override {
+    return MosaicDownloadsContextMenuHandler();
+  }
+
+  // Engine area: page features (CEFBridge+Engine.mm).
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return page_; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return page_; }
+  CefRefPtr<CefAudioHandler> GetAudioHandler() override { return page_; }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return page_; }
+  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return page_; }
+  void OnFullscreenModeChange(CefRefPtr<CefBrowser> browser, bool fullscreen) override {
+    page_->FullscreenChanged(fullscreen);
+  }
+  void OnMediaAccessChange(CefRefPtr<CefBrowser> browser, bool has_video_access,
+                           bool has_audio_access) override {
+    page_->MediaAccessChanged(has_video_access, has_audio_access);
+  }
 
   // CefDisplayHandler
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override {
@@ -112,6 +176,17 @@ class MosaicClient : public CefClient,
     [view.delegate browserView:view didChangeURL:ToNSString(url)];
   }
 
+  // Passwords (area: passwords): page-script messages; see CEFPasswords.mm.
+  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                        cef_log_severity_t level,
+                        const CefString& message,
+                        const CefString& source,
+                        int line) override {
+    CEF_REQUIRE_UI_THREAD();
+    MCEFBrowserView* view = view_;
+    return mosaic_passwords::ConsoleMessage(view, browser, message);
+  }
+
   // CefLifeSpanHandler
   bool OnBeforePopup(CefRefPtr<CefBrowser> browser,
                      CefRefPtr<CefFrame> frame,
@@ -127,6 +202,10 @@ class MosaicClient : public CefClient,
                      CefRefPtr<CefDictionaryValue>& extra_info,
                      bool* no_javascript_access) override {
     CEF_REQUIRE_UI_THREAD();
+    // Engine area: pop-ups opened without a user gesture are blocked and offered instead.
+    if (page_->BlockPopupIfNeeded(target_url, user_gesture)) {
+      return true;
+    }
     // Mosaic has tabs, not popup windows: reroute into a new tab.
     if (!target_url.empty()) {
       MCEFBrowserView* view = view_;
@@ -138,6 +217,7 @@ class MosaicClient : public CefClient,
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
     g_browsers.push_back(browser);
+    mosaic_privacy::BrowserCreated(browser);  // privacy area
     MCEFBrowserView* view = view_;
     if (view && !g_quitting) {
       [view mosaicBrowserCreated:browser];
@@ -161,6 +241,7 @@ class MosaicClient : public CefClient,
 
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
+    mosaic_privacy::BrowserClosing(browser);  // privacy area
     for (auto it = g_browsers.begin(); it != g_browsers.end(); ++it) {
       if ((*it)->IsSame(browser)) {
         g_browsers.erase(it);
@@ -187,15 +268,33 @@ class MosaicClient : public CefClient,
                   canGoForward:canGoForward];
   }
 
+  // Passwords (area: passwords): injects the form watcher; see CEFPasswords.mm.
+  void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
+    CEF_REQUIRE_UI_THREAD();
+    mosaic_passwords::FrameLoaded(browser, frame);
+  }
+
   void OnLoadError(CefRefPtr<CefBrowser> browser,
                    CefRefPtr<CefFrame> frame,
                    ErrorCode errorCode,
                    const CefString& errorText,
                    const CefString& failedUrl) override {
     CEF_REQUIRE_UI_THREAD();
+    // privacy area: a failed HTTPS-only upgrade shows Mosaic's HTTPS-only page instead.
+    if (mosaic_privacy::OnLoadError(browser, frame, errorCode, failedUrl)) {
+      return;
+    }
     // ERR_ABORTED is a cancelled load (user pressed stop, download started…).
     if (errorCode == ERR_ABORTED || !frame->IsMain()) {
       return;
+    }
+    // Platform area: safe engine switching needs to know the load failed.
+    MCEFBrowserView* failedView = view_;
+    if ([failedView.delegate respondsToSelector:@selector(browserView:didFailLoadWithErrorCode:errorText:url:)]) {
+      [failedView.delegate browserView:failedView
+              didFailLoadWithErrorCode:static_cast<NSInteger>(errorCode)
+                             errorText:ToNSString(errorText)
+                                   url:ToNSString(failedUrl)];
     }
     std::string html =
         "<!doctype html><meta charset=utf-8><title>Can’t open this page</title>"
@@ -210,6 +309,72 @@ class MosaicClient : public CefClient,
   }
 
   // CefRequestHandler
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+      CefRefPtr<CefBrowser> browser,
+      CefRefPtr<CefFrame> frame,
+      CefRefPtr<CefRequest> request,
+      bool is_navigation,
+      bool is_download,
+      const CefString& request_initiator,
+      bool& disable_default_handling) override {
+    return this;
+  }
+
+  // CefResourceRequestHandler. Runs on the IO thread for every request.
+  cef_return_value_t OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
+                                          CefRefPtr<CefFrame> frame,
+                                          CefRefPtr<CefRequest> request,
+                                          CefRefPtr<CefCallback> callback) override {
+    const cef_resource_type_t type = request->GetResourceType();
+    __weak MCEFBrowserView* weakView = view_;
+    if (type == RT_MAIN_FRAME) {
+      // A page's own document is never blocked; note the navigation so the
+      // per-page blocked count starts over.
+      dispatch_async(dispatch_get_main_queue(), ^{
+        MCEFBrowserView* view = weakView;
+        [view.delegate browserViewDidStartDocumentLoad:view];
+      });
+      return RV_CONTINUE;
+    }
+    BOOL (^filter)(NSString*, NSString*, NSString*) = g_requestFilter;
+    if (!filter) {
+      return RV_CONTINUE;
+    }
+    // "First party for cookies" is the top-level document the request belongs
+    // to, which is what filter rules mean by the page.
+    CefString document = request->GetFirstPartyForCookies();
+    if (document.empty() && browser) {
+      document = browser->GetMainFrame()->GetURL();
+    }
+    NSString* url = ToNSString(request->GetURL());
+    if (!filter(url, ToNSString(document), WebRequestType(type))) {
+      return RV_CONTINUE;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MCEFBrowserView* view = weakView;
+      [view.delegate browserView:view didBlockRequest:url];
+    });
+    return RV_CANCEL;
+  }
+
+  // privacy area: HTTPS-only upgrades, tracking-parameter removal, cosmetic filtering.
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                      CefRefPtr<CefFrame> frame,
+                      CefRefPtr<CefRequest> request,
+                      bool user_gesture,
+                      bool is_redirect) override {
+    CEF_REQUIRE_UI_THREAD();
+    return mosaic_privacy::OnBeforeBrowse(browser, frame, request, user_gesture, is_redirect);
+  }
+
+  void OnLoadStart(CefRefPtr<CefBrowser> browser,
+                   CefRefPtr<CefFrame> frame,
+                   TransitionType transition_type) override {
+    CEF_REQUIRE_UI_THREAD();
+    mosaic_privacy::OnLoadStart(browser, frame);
+  }
+  // end privacy area
+
   bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
                         CefRefPtr<CefFrame> frame,
                         const CefString& target_url,
@@ -224,12 +389,18 @@ class MosaicClient : public CefClient,
 
  private:
   __weak MCEFBrowserView* view_;
+  CefRefPtr<MosaicPageHandler> page_;  // engine area
 
   IMPLEMENT_REFCOUNTING(MosaicClient);
   DISALLOW_COPY_AND_ASSIGN(MosaicClient);
 };
 
 }  // namespace
+
+// downloads area: lets CEFDownloads.mm start a download no page asked for (retry).
+CefRefPtr<CefBrowser> MosaicAnyLiveBrowser() {
+  return (g_browsers.empty() || g_quitting) ? nullptr : g_browsers.front();
+}
 
 // MARK: - MosaicApplication
 
@@ -299,6 +470,14 @@ class MosaicClient : public CefClient,
 
 + (void)setWillQuitHandler:(void (^)(void))handler {
   g_willQuit = [handler copy];
+}
+
++ (BOOL (^)(NSString*, NSString*, NSString*))requestFilter {
+  return g_requestFilter;
+}
+
++ (void)setRequestFilter:(BOOL (^)(NSString*, NSString*, NSString*))filter {
+  g_requestFilter = [filter copy];
 }
 
 + (BOOL)startWithArgc:(int)argc argv:(char**)argv dataDirectory:(NSString*)dataDirectory {
@@ -380,6 +559,41 @@ class MosaicClient : public CefClient,
   });
 }
 
+// Platform area: languages. intl.accept_languages is a preference of the global request
+// context, which every Mosaic browser uses; Chromium persists it in the profile.
++ (NSString*)setAcceptLanguageList:(NSString*)list {
+  if (!g_running) {
+    return @"Chromium is not running.";
+  }
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  if (!context || !context->CanSetPreference("intl.accept_languages")) {
+    return @"Chromium does not allow changing its languages.";
+  }
+  CefRefPtr<CefValue> value = CefValue::Create();
+  value->SetString(list.UTF8String);
+  CefString error;
+  // intl.selected_languages is the user's choice, from which Chromium derives
+  // intl.accept_languages; both are set so neither overrides the other.
+  if (context->HasPreference("intl.selected_languages") &&
+      context->CanSetPreference("intl.selected_languages") &&
+      !context->SetPreference("intl.selected_languages", value, error)) {
+    return error.empty() ? @"Chromium refused the language list." : ToNSString(error);
+  }
+  if (!context->SetPreference("intl.accept_languages", value, error)) {
+    return error.empty() ? @"Chromium refused the language list." : ToNSString(error);
+  }
+  return nil;
+}
+
++ (NSString*)acceptLanguageList {
+  if (!g_running) {
+    return nil;
+  }
+  CefRefPtr<CefRequestContext> context = CefRequestContext::GetGlobalContext();
+  CefRefPtr<CefValue> value = context ? context->GetPreference("intl.accept_languages") : nullptr;
+  return value ? ToNSString(value->GetString()) : nil;
+}
+
 + (void)shutdown {
   if (!g_running) {
     return;
@@ -435,7 +649,8 @@ class MosaicClient : public CefClient,
   CefBrowserSettings browserSettings;
   _client = new MosaicClient(self);
   std::string url = _pendingURL.length ? _pendingURL.UTF8String : "about:blank";
-  CefBrowserHost::CreateBrowser(windowInfo, _client, url, browserSettings, nullptr, nullptr);
+  CefBrowserHost::CreateBrowser(windowInfo, _client, url, browserSettings, nullptr,
+                                mosaic_privacy::RequestContextForView(self));  // privacy area: private views
 }
 
 - (void)mosaicBrowserCreated:(CefRefPtr<CefBrowser>)browser {
@@ -455,11 +670,23 @@ class MosaicClient : public CefClient,
     browser->GetMainFrame()->LoadURL(initial.UTF8String);
   }
   _navigatedBeforeCreation = NO;
+  [self mosaicPageBrowserCreated];  // engine area
+}
+
+// Passwords (area: passwords): CEFPasswords.mm reaches the browser through this.
+- (CefRefPtr<CefBrowser>)mosaicPasswordsBrowser {
+  return _browser;
 }
 
 - (void)mosaicBrowserClosed {
+  [self mosaicPageBrowserClosed];  // engine area
   _browser = nullptr;
   _client = nullptr;
+}
+
+// Engine area: lets CEFBridge+Engine.mm reach the browser.
+- (CefRefPtr<CefBrowser>)mosaicBrowser {
+  return _browser;
 }
 
 - (void)loadURL:(NSString*)url {
@@ -512,10 +739,16 @@ class MosaicClient : public CefClient,
   }
   _closed = YES;
   self.delegate = nil;
+  [self releasePageScripts];  // productivity: page-script channel (MCEFBrowserView+Script.mm)
   if (_browser) {
     _browser->GetHost()->CloseBrowser(true);
   }
   [self removeFromSuperview];
+}
+
+// productivity: the browser for page scripts (MCEFBrowserView+Script.mm, reader mode).
+- (void*)mosaicBrowserHandle {
+  return _browser.get();
 }
 
 @end

@@ -40,6 +40,35 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var failure: String?
+    /// Requests the content blocker stopped since this tab's page began loading.
+    @Published var blockedCount = 0
+
+    // Organisation (behaviour owned by the tabs area; mute is applied by the engine area).
+    @Published var isPinned = false
+    @Published var isMuted = false
+    @Published var workspaceID: UUID?
+    @Published var groupID: UUID?
+
+    // Tabs area: sleeping tabs (Features/Tabs/BrowserModel+Sleep.swift).
+    /// Unloaded to save memory: its engine holds nothing (Chromium) or a discarded browser
+    /// (Gecko). URL and title are kept and the page comes back when the tab is selected.
+    /// The shell draws such tabs dimmed.
+    @Published var isAsleep = false
+    /// When this tab last was, or stopped being, the selected tab.
+    var lastActivated = Date()
+    /// Set by engines that can tell (Gecko). Tabs playing audio are never put to sleep.
+    @Published var isPlayingAudio = false
+    /// Privacy area: a private tab (Chromium, in-memory profile). Set once, right after
+    /// the tab is created, and never changed. History, passwords, downloads lists and
+    /// session restore must not record anything from a tab where this is true.
+    @Published var isPrivate = false
+    // Reader view (productivity area; set by ReaderMode, read by the shell's indicator).
+    /// The page looks like an article that reader view can show.
+    @Published var isReaderAvailable = false
+    /// The tab is showing its page in reader view.
+    @Published var isReaderActive = false
+    // Engine area: the page's zoom (1 = 100 %), remembered per site (Features/Engine/PageFeatures.swift).
+    @Published var zoomFactor: Double = 1
 
     /// Chromium: the view hosting this tab's browser.
     var chromiumView: MCEFBrowserView?
@@ -60,6 +89,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable {
     }
 
     var isStartPage: Bool { url.isEmpty }
+
+    /// Set when the tab shows one of Mosaic's own pages instead of a web page.
+    var internalPage: InternalPage? { InternalPage(url: url) }
 
     var displayTitle: String {
         if isStartPage { return "New Tab" }
@@ -101,6 +133,22 @@ extension BrowserTab: MCEFBrowserDelegate {
         MainActor.assumeIsolated {
             guard view === chromiumView else { return }
             onNewTabRequest?(self, url)
+        }
+    }
+
+    nonisolated func browserViewDidStartDocumentLoad(_ view: MCEFBrowserView) {
+        MainActor.assumeIsolated {
+            guard view === chromiumView, blockedCount != 0 else { return }
+            blockedCount = 0
+            onChange?(self)
+        }
+    }
+
+    nonisolated func browserView(_ view: MCEFBrowserView, didBlockRequest url: String) {
+        MainActor.assumeIsolated {
+            guard view === chromiumView else { return }
+            blockedCount += 1
+            onChange?(self)
         }
     }
 }

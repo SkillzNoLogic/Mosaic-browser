@@ -118,6 +118,11 @@ public final class RDPClient: @unchecked Sendable {
         if (packet["hasException"] as? Bool) == true {
             throw RDPError.remote(Self.describe(packet["exceptionMessage"]) ?? "script threw an exception")
         }
+        // An awaited promise that rejects is not reported as an exception: the
+        // reply only carries this flag, with no message or value.
+        if (packet["topLevelAwaitRejected"] as? Bool) == true {
+            throw RDPError.remote("an awaited promise was rejected")
+        }
         return try await unwrap(packet["result"])
     }
 

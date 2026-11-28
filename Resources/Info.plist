@@ -32,11 +32,21 @@
 	<string>14.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Websites you allow can use your camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Websites you allow can use your microphone.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Websites you allow can use your location.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Websites you allow can use your location.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Mosaic looks for printers and devices on your network when you print.</string>
 	<key>NSPrincipalClass</key>
 	<string>MosaicApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Mosaic embeds Chromium (CEF) and runs Mozilla Gecko.</string>
+	<string>Copyright © 2026 the Mosaic contributors. Licensed under the GNU GPL v3 or later.</string>
 </dict>
 </plist>

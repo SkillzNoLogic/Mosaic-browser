@@ -12,7 +12,11 @@ import MosaicCore
 @MainActor
 final class Automation {
     static let flag = "--mosaic-automation"
-    static let notification = Notification.Name("dev.mosaic.browser.automation")
+    /// Every running copy would hear a shared name, so `MOSAIC_AUTOMATION_ID` (also read by
+    /// Scripts/drive.swift) gives each copy its own channel.
+    static let notification = Notification.Name(
+        "dev.mosaic.browser.automation"
+            + (ProcessInfo.processInfo.environment["MOSAIC_AUTOMATION_ID"].map { $0.isEmpty ? "" : ".\($0)" } ?? ""))
 
     private let model: BrowserModel
     private weak var window: NSWindow?
@@ -36,6 +40,11 @@ final class Automation {
               let action = command["do"] as? String
         else { return }
         let value = command["value"] as? String ?? ""
+        if PlatformAutomation.handle(action, command, model: model) { return }  // platform: see PlatformAutomation.swift
+        // shell: Mosaics, settings, sidebar (see ShellAutomation)
+        if ShellAutomation.handle(action, value: value, model: model) { return }
+        // canvas: layout editor, Gradient Studio, configurations (Features/Canvas/CanvasAutomation.swift)
+        if CanvasAutomation.handle(action, command, model: model) { return }
 
         switch action {
         case "navigate": model.navigate(value)
@@ -63,6 +72,12 @@ final class Automation {
                 model.openExtensionPage(ext, kind: parts[1])
             }
         case "showExtensions": model.showExtensions = (value != "false")
+        case "blocker": model.setBlockerEnabled(value != "off")
+        case "blockerSite":
+            if let tab = model.selectedTab { model.setBlocking(value != "off", onSiteOf: tab) }
+        case "showBlocker": model.showBlocker = (value != "false")
+        case "updateLists": Task { await model.blocker.updateLists() }
+        case let page where page.hasPrefix("page."): model.pageFeatures.automation(page, command)  // engine area
         case "geckoEval":
             // {"do":"geckoEval","value":"<agent method>","out":"/path"}
             let out = command["out"] as? String
@@ -76,8 +91,22 @@ final class Automation {
         case "activate": NSApp.activate(ignoringOtherApps: true)
         case "orderFront": window?.orderFront(nil)
         case "hitTest": hitTest(to: value)
+        case let action where action.hasPrefix("passwords"):  // passwords: see PasswordsAutomation.swift
+            model.passwords.automation(action, value: value, command: command)
+        case _ where action.hasPrefix("privacy."): model.handlePrivacyAutomation(action, command)  // privacy area
         case "dump": dump(to: value)
+        // Tabs area: pin, mute, duplicate, workspaces, groups, sleeping tabs… (Features/Tabs/TabsAutomation.swift)
+        case let tabs where TabsAutomation.commands.contains(tabs):
+            TabsAutomation.handle(tabs, value: value, command: command, model: model)
+        // library: bookmarks, history, suggestions, import/export (Features/Library/LibraryAutomation.swift)
+        case _ where LibraryAutomation.handles(action):
+            LibraryAutomation.run(action, value: value, out: command["out"] as? String, model: model)
         case "quit": NSApp.terminate(nil)
+        // downloads area: "download…" commands, listed in DownloadManager+Automation.swift.
+        case _ where action.hasPrefix("download"):
+            model.downloads.handleAutomation(action, value: value, command: command)
+        // productivity: palette, reader, shortcuts, Speed Dial (Productivity+Automation.swift).
+        case _ where model.productivity.handleAutomation(action, value: value, command: command): break
         default: break
         }
     }
@@ -106,14 +135,15 @@ final class Automation {
 
     private func dump(to path: String) {
         let frame = window?.frame ?? .zero
-        let state: [String: Any] = [
+        var state: [String: Any] = [
             "tabs": model.tabs.map { tab in
-                [
+                ([
                     "engine": tab.engine.rawValue, "url": tab.url, "title": tab.title,
                     "loading": tab.isLoading, "canGoBack": tab.canGoBack, "canGoForward": tab.canGoForward,
                     "geckoID": tab.geckoID ?? -1, "hasChromiumView": tab.chromiumView != nil,
+                    "blocked": tab.blockedCount,
                     "failure": tab.failure ?? "", "selected": tab.id == model.selectedTabID,
-                ] as [String: Any]
+                ] as [String: Any]).merging(TabsAutomation.tabFields(tab, model: model)) { own, _ in own }  // tabs area
             },
             "engine": model.engine.rawValue,
             "searchEngine": model.searchEngine.id,
@@ -127,6 +157,7 @@ final class Automation {
                        "width": frame.width, "height": frame.height],
             "isActive": NSApp.isActive,
             "notice": model.notice ?? "",
+            "page": model.pageFeatures.automationState(),  // engine area
             "extensions": model.extensions.extensions.map { ext in
                 [
                     "id": ext.id, "geckoID": ext.geckoID, "name": ext.name, "version": ext.version,
@@ -134,9 +165,24 @@ final class Automation {
                     "notes": ext.notes.map { "\($0.severity.rawValue): \($0.message)" },
                 ] as [String: Any]
             },
+            "blocker": [
+                "status": "\(model.blocker.status)", "enabled": model.blocker.isEnabled,
+                "allowlist": model.blocker.settings.allowlist.sorted(),
+                "engineVersion": model.blocker.engineVersion ?? "",
+                "updating": model.blocker.isUpdating,
+            ] as [String: Any],
             "extensionError": model.extensions.errorMessage ?? "",
             "extensionsBusy": model.extensions.isBusy,
+            "platform": PlatformAutomation.dump(model),  // platform
+            "library": LibraryAutomation.dumpFields(model),  // library
+            "downloads": model.downloads.automationState(), // downloads area
+            "passwords": model.passwords.automationState(),  // passwords (never includes a password)
+            "privacy": model.privacyDump(),  // privacy area
+            "productivity": model.productivity.automationState,
+            "canvas": CanvasAutomation.dumpFields(model: model),  // canvas
         ]
+        state.merge(TabsAutomation.stateFields(model: model)) { own, _ in own }  // tabs area
+        state.merge(ShellAutomation.dumpFields(model: model)) { current, _ in current }  // shell
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }

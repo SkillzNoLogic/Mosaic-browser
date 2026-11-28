@@ -1,15 +1,43 @@
 import AppKit
+import CryptoKit
 import MosaicCore
 
 /// Where Mosaic keeps its data.
 enum AppPaths {
-    static let support: URL = FileManager.default
+    /// The user's real Mosaic folder in Application Support.
+    static let standardSupport: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Mosaic", isDirectory: true)
+
+    /// Where this instance keeps its data. `MOSAIC_DATA_DIR` points it at another folder:
+    /// an isolated profile for testing, used by the automated checks so that several copies
+    /// can run at once without touching the user's real profile.
+    static let support: URL = ProcessInfo.processInfo.environment["MOSAIC_DATA_DIR"]
+        .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? standardSupport
+
+    /// True when running on an isolated profile (see `support`).
+    static var isIsolatedProfile: Bool { support != standardSupport }
+
+    /// Preferences for this instance. An isolated profile keeps its own, so a test run
+    /// never changes the user's settings. Always use this, never `UserDefaults.standard`.
+    static let defaults: UserDefaults = {
+        guard isIsolatedProfile else { return .standard }
+        // Named after the folder (a stable digest; `hashValue` changes between launches).
+        let digest = SHA256.hash(data: Data(support.standardizedFileURL.path.utf8))
+        let suite = "dev.mosaic.browser.isolated." + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+        return UserDefaults(suiteName: suite) ?? .standard
+    }()
 
     static var geckoProfile: URL { support.appendingPathComponent("Gecko/Profile", isDirectory: true) }
     static var chromiumData: URL { support.appendingPathComponent("Chromium", isDirectory: true) }
     static var extensions: URL { support.appendingPathComponent("Extensions", isDirectory: true) }
+    /// Filter lists of the built-in content blocker.
+    static var blockerLists: URL { support.appendingPathComponent("Blocker/lists", isDirectory: true) }
+
+    // Engine area: per-site decisions and zoom, shared by both engines.
+    static var sitePermissions: URL { support.appendingPathComponent("SitePermissions.json") }
+    static var siteZoom: URL { support.appendingPathComponent("SiteZoom.json") }
 
     /// Folder inside the app bundle holding `agent.sys.mjs`.
     static var geckoAgent: URL? { Bundle.main.resourceURL?.appendingPathComponent("gecko", isDirectory: true) }
@@ -37,6 +65,7 @@ final class GeckoEngine: ObservableObject {
         case notRunning
         case startTimedOut(String)
         case exitedDuringStartup
+        case agent(String)
 
         var errorDescription: String? {
             switch self {
@@ -45,6 +74,7 @@ final class GeckoEngine: ObservableObject {
             case .notRunning: "Gecko is not running."
             case .startTimedOut(let stage): "Gecko did not finish starting (\(stage))."
             case .exitedDuringStartup: "Gecko quit while it was starting."
+            case .agent(let message): message
             }
         }
     }
@@ -57,10 +87,17 @@ final class GeckoEngine: ObservableObject {
         let canGoBack: Bool
         let canGoForward: Bool
         let selected: Bool
+        /// Requests the content blocker stopped since the page started loading.
+        let blocked: Int
     }
 
     struct Event: Decodable, Equatable {
         let type: String
+        /// passwords: payload of "passwords" events (decoding never fails; see PasswordPageMessage).
+        var passwords: PasswordPageMessage? = nil
+        // Engine area: the agent tab the event concerns, and its payload as a JSON string.
+        var tab: Int?
+        var detail: String?
     }
 
     struct Snapshot: Decodable {
@@ -79,6 +116,14 @@ final class GeckoEngine: ObservableObject {
     /// Gecko finished starting; the place to re-install extensions.
     var onStarted: (() async -> Void)?
 
+    // MARK: Feature hooks (engine area)
+    // Feature areas watch Gecko here without touching BrowserModel: every snapshot (tab
+    // state and events) after the model has applied it, and every start.
+    private var snapshotObservers: [(Snapshot) -> Void] = []
+    private var startObservers: [() async -> Void] = []
+    func addSnapshotObserver(_ observer: @escaping (Snapshot) -> Void) { snapshotObservers.append(observer) }
+    func addStartObserver(_ observer: @escaping () async -> Void) { startObservers.append(observer) }
+
     private var client: RDPClient?
     private var app: NSRunningApplication?
     private var startTask: Task<Void, Error>?
@@ -96,7 +141,25 @@ final class GeckoEngine: ObservableObject {
     var processIdentifier: pid_t? { app?.processIdentifier }
 
     init() {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
+    }
+
+    /// An isolated profile has no engine of its own installed, so the user's private copy
+    /// (in the standard Mosaic folder) is used as well, read-only.
+    private static func locateRuntime() -> GeckoRuntime? {
+        // An isolated profile prefers its own private runtime, then the user's private Firefox
+        // ESR, and only then a Gecko browser found in /Applications. Checking /Applications
+        // first would run whichever browser happens to be installed (Zen, Nightly…), whose newer
+        // Gecko marks the test profile as too new for ESR.
+        if AppPaths.isIsolatedProfile, ProcessInfo.processInfo.environment["MOSAIC_GECKO_PRIVATE_ONLY"] != "1" {
+            for support in [AppPaths.support, AppPaths.standardSupport] {
+                let managed = GeckoRuntime.managedAppURL(applicationSupport: support)
+                if let runtime = GeckoRuntime(appURL: managed, isManaged: support == AppPaths.support) {
+                    return runtime
+                }
+            }
+        }
+        return GeckoRuntime.locate(applicationSupport: AppPaths.support)
     }
 
     // MARK: - Lifecycle
@@ -122,7 +185,7 @@ final class GeckoEngine: ObservableObject {
     }
 
     private func launch() async throws {
-        runtime = GeckoRuntime.locate(applicationSupport: AppPaths.support)
+        runtime = Self.locateRuntime()
         guard let runtime, let agentDirectory = AppPaths.geckoAgent else { throw GeckoError.noRuntime }
         status = .starting
         generation += 1
@@ -174,7 +237,8 @@ final class GeckoEngine: ObservableObject {
         // 3. Wait for the browser window, then strip its chrome.
         _ = try await Self.retry(seconds: 45, stage: "browser window") { () -> Bool? in
             if launched.isTerminated { throw GeckoError.exitedDuringStartup }
-            return (try await connection.evaluate(Self.agentCall("setup", [])) as? String) == "true" ? true : nil
+            let result = try await connection.evaluate(Self.agentCall("setup", []))
+            return (try Self.unwrapAgentResult(result)) == "true" ? true : nil
         }
 
         status = .running
@@ -182,6 +246,7 @@ final class GeckoEngine: ObservableObject {
         applyDock()
         startPolling(generation: launchGeneration)
         await onStarted?()
+        for observer in startObservers { await observer() }  // engine area
     }
 
     /// Polls `attempt` until it returns a value.
@@ -320,8 +385,33 @@ final class GeckoEngine: ObservableObject {
         """
     }
 
+    /// A call to an agent method, wrapped so that whatever happens comes back
+    /// as one JSON string: `{"ok":true,"value":<the method's JSON>}` or
+    /// `{"ok":false,"error":"<message>"}`. Without the wrapper a failing async
+    /// method would be indistinguishable from one that returned nothing, since
+    /// the debugging protocol reports a rejected promise without its reason.
     private static func agentCall(_ method: String, _ arguments: [Any]) -> String {
-        "\(agentExpression).\(method)(\(arguments.map(jsLiteral).joined(separator: ", ")))"
+        let call = "\(agentExpression).\(method)(\(arguments.map(jsLiteral).joined(separator: ", ")))"
+        return """
+        (async () => {
+          try {
+            return JSON.stringify({ ok: true, value: await \(call) });
+          } catch (error) {
+            return JSON.stringify({ ok: false, error: String(error?.message ?? error) });
+          }
+        })()
+        """
+    }
+
+    /// Unwraps `agentCall`'s envelope into the method's own JSON string.
+    private static func unwrapAgentResult(_ result: Any?) throws -> String? {
+        guard let text = result as? String, let data = text.data(using: .utf8),
+              let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return nil }
+        guard (envelope["ok"] as? Bool) == true else {
+            throw GeckoError.agent((envelope["error"] as? String) ?? "the Gecko agent reported an error")
+        }
+        return envelope["value"] as? String
     }
 
     /// JSON is a subset of JavaScript, so a JSON-encoded value is a safe literal.
@@ -337,7 +427,17 @@ final class GeckoEngine: ObservableObject {
     func call(_ method: String, _ arguments: Any...) async throws -> Any? {
         guard status == .running, let client else { throw GeckoError.notRunning }
         let result = try await client.evaluate(Self.agentCall(method, arguments))
-        guard let text = result as? String, let data = text.data(using: .utf8) else { return nil }
+        guard let text = try Self.unwrapAgentResult(result), let data = text.data(using: .utf8) else { return nil }
+        let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        return value is NSNull ? nil : value
+    }
+
+    /// `call` with the arguments as an array (engine area: scripted checks).
+    @discardableResult
+    func callWithArguments(_ method: String, _ arguments: [Any]) async throws -> Any? {
+        guard status == .running, let client else { throw GeckoError.notRunning }
+        let result = try await client.evaluate(Self.agentCall(method, arguments))
+        guard let text = try Self.unwrapAgentResult(result), let data = text.data(using: .utf8) else { return nil }
         let value = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         return value is NSNull ? nil : value
     }
@@ -355,11 +455,13 @@ final class GeckoEngine: ObservableObject {
             let decoder = JSONDecoder()
             while !Task.isCancelled {
                 guard let self, self.generation == polled, let client = self.client else { return }
-                if let text = try? await client.evaluate(Self.agentCall("state", [])) as? String,
+                if let result = try? await client.evaluate(Self.agentCall("state", [])),
+                   let text = (try? Self.unwrapAgentResult(result)) ?? nil,
                    let snapshot = try? decoder.decode(Snapshot.self, from: Data(text.utf8)),
                    self.generation == polled, snapshot.ready
                 {
                     self.onSnapshot?(snapshot)
+                    for observer in self.snapshotObservers { observer(snapshot) }  // engine area
                 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -401,6 +503,14 @@ final class GeckoEngine: ObservableObject {
             rectInFlight = false
             pushRect()
         }
+    }
+
+    // MARK: - Runtime install (owner: platform)
+
+    /// Looks for the Gecko runtime again, after Mosaic installed, updated or removed its
+    /// private copy (Settings › Engine). The next start uses whatever is found.
+    func refreshRuntime() {
+        runtime = Self.locateRuntime()
     }
 
     /// Makes Gecko the active app so the page receives keyboard input.

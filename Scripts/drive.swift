@@ -15,8 +15,11 @@ guard let action = arguments.first else {
 var command: [String: String] = ["do": action]
 if arguments.count > 1 { command["value"] = arguments[arguments.startIndex + 1] }
 if arguments.count > 2 { command["out"] = arguments[arguments.startIndex + 2] }
+// MOSAIC_AUTOMATION_ID selects which running copy to talk to (it must match the app's).
+let channel = ProcessInfo.processInfo.environment["MOSAIC_AUTOMATION_ID"] ?? ""
+let channelSuffix = channel.isEmpty ? "" : ".\(channel)"
 let payload = String(data: try JSONSerialization.data(withJSONObject: command), encoding: .utf8)!
 DistributedNotificationCenter.default().postNotificationName(
-    Notification.Name("dev.mosaic.browser.automation"), object: payload, userInfo: nil, deliverImmediately: true)
+    Notification.Name("dev.mosaic.browser.automation" + channelSuffix), object: payload, userInfo: nil, deliverImmediately: true)
 // Give the notification server a moment to forward it before this process exits.
 RunLoop.current.run(until: Date().addingTimeInterval(0.2))

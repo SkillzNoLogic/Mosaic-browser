@@ -8,7 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${1:-release}"
-VERSION="0.1.0"
+VERSION="${MOSAIC_VERSION:-0.1.0}"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 CEF="$ROOT/Vendor/cef"
 APP="$ROOT/build/Mosaic.app"
@@ -19,6 +19,16 @@ if [[ "$(uname -m)" != "arm64" ]]; then
 fi
 if [[ ! -f "$CEF/build/libcef_dll_wrapper/libcef_dll_wrapper.a" ]]; then
   echo "Chromium (CEF) is missing. Run Scripts/bootstrap.sh first." >&2
+  exit 1
+fi
+
+# Xcode's toolchain: SwiftUI's macros (@State, @Observable, #Preview) and the Liquid Glass
+# APIs need it; the Command Line Tools alone do not ship the macro plug-ins.
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+if [[ "${DEVELOPER_DIR:-$(xcode-select -p)}" == */CommandLineTools ]]; then
+  echo "Mosaic needs Xcode (27 or later), not just the Command Line Tools: install Xcode, or set DEVELOPER_DIR." >&2
   exit 1
 fi
 
@@ -39,6 +49,22 @@ cp "$BIN/Mosaic" "$APP/Contents/MacOS/Mosaic"
 fill_plist "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist" "Mosaic" ""
 cp "$ROOT/Resources/gecko/"* "$APP/Contents/Resources/gecko/"
 [[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
+# Reader view for Chromium tabs: Mozilla's Readability (Apache 2.0, with its licence) and
+# Mosaic's reader page.
+cp -R "$ROOT/Resources/reader" "$APP/Contents/Resources/"
+# Mosaic's own licence (GPL v3 or later), shown in Settings › About & Updates.
+cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
+
+# Built-in content blocker: uBlock Origin's engine (bundled from source by
+# bootstrap.sh), a snapshot of its filter lists for first launch, and its licence.
+BLOCKER="$ROOT/Vendor/ublock"
+if [[ -f "$BLOCKER/ublock-engine.js" ]]; then
+  mkdir -p "$APP/Contents/Resources/blocker/lists"
+  cp "$BLOCKER/ublock-engine.js" "$BLOCKER/LICENSE-uBlock-Origin.txt" "$APP/Contents/Resources/blocker/"
+  cp "$BLOCKER/lists/"* "$APP/Contents/Resources/blocker/lists/"
+else
+  echo "warning: content blocker not bundled (run Scripts/bootstrap.sh); building without it." >&2
+fi
 
 # Chromium: the framework plus one helper app per sub-process type. The names
 # and locations are what CEF looks for; do not rename them.

@@ -67,7 +67,8 @@ extension SearchEngine {
     public static let `default` = SearchEngine.google
 
     public static func named(_ id: String) -> SearchEngine? {
-        builtIn.first { $0.id == id }
+        // library: custom engines (SearchShortcuts.swift) can be the default too.
+        builtIn.first { $0.id == id } ?? registered.first { $0.id == id }
     }
 
     /// The engine after `self` in `builtIn`, wrapping around.

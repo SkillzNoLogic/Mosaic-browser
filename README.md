@@ -1,232 +1,265 @@
 # Mosaic
 
-A two-engine web browser for Apple Silicon Macs, written in Swift and SwiftUI.
+A privacy-first, two-engine web browser for Apple Silicon Macs, written in Swift and SwiftUI.
 
-- **Two rendering engines, one window.** Every tab runs on either **Mozilla (Gecko)** or
-  **Chromium (Blink)**. A toolbar switch moves the current tab to the other engine and
-  reloads it there. Mozilla is the default.
-- **Switchable search engines.** Google, DuckDuckGo, Bing, Brave Search, Startpage, Ecosia
-  and Kagi, picked from the toolbar or cycled with ⌘⇧S.
-- **Chrome extensions on the Mozilla engine.** Mosaic downloads a Chrome extension's `.crx`
-  (from a Chrome Web Store link, an extension ID, or a file), converts it, and runs it on
-  Gecko.
+- **Two real rendering engines, one window.** Every tab runs on **Mozilla (Gecko)** or
+  **Chromium (Blink)**. Switch a tab's engine from the toolbar; the page stays on screen
+  until the other engine has loaded it. Per-site rules can pick the engine automatically.
+- **Mosaics.** Presets that transform the whole interface into a Zen/Arc, Chrome, Opera
+  (with an Opera GX variant) or Safari-like layout, instantly and without reloading pages.
+  Every preset is editable: drag toolbar and sidebar elements around on a layout canvas,
+  design backgrounds in the Gradient Studio, save and share named configurations.
+- **Built-in ad and tracker blocker.** uBlock Origin's filtering engine, compiled into the
+  browser from uBO's source (not installed as an extension), in both engines: network
+  blocking, cosmetic filtering, your own filters, a per-page "what was blocked and why".
+- **Chrome extensions on the Mozilla engine.** Install from the Chrome Web Store or a `.crx`
+  file; Mosaic converts them to run on Gecko and says exactly what does not carry over.
+- **Everything a browser needs, inside the window.** Settings (14 categories, searchable),
+  bookmarks, history, reading list, downloads (with Free Download Manager hand-off),
+  passwords in the macOS Keychain, workspaces, tab groups, session restore, find, zoom,
+  print/PDF, screenshots, reader mode, a command palette, private tabs.
+- **No telemetry, no account.** Mosaic itself makes only the connections listed in
+  Settings › About (filter-list updates, engine install/update checks, extension downloads,
+  optional favicons and search suggestions).
 
-Status: **v0.1, an early prototype.** The pieces above work; a lot of ordinary browser
-features (bookmarks, history, downloads UI, settings) do not exist yet. Read
-[Known limitations](#known-limitations) before relying on it.
+Status: **v0.2.** Built and verified by scripted runs in both engines on
+isolated profiles; see [Known limitations](#known-limitations) and `To Do.md` for what is
+partial or missing. Requirements: Apple Silicon Mac, macOS 14 or later (Liquid Glass needs
+macOS 26 or later; older systems get solid materials).
 
-Requirements: Apple Silicon Mac, macOS 14 or later. Intel Macs are not supported.
+## Install a release
 
-## Build and run
+Download `Mosaic-<version>-macos-arm64.dmg` from the GitHub release, open it and drag
+Mosaic onto the Applications folder (a `.zip` of the same app is attached too). The app is not yet signed with a Developer ID, so macOS
+blocks the first launch: right-click › **Open**, or run
+`xattr -dr com.apple.quarantine /Applications/Mosaic.app`.
 
-Only the Xcode Command Line Tools are needed (`xcode-select --install`); full Xcode is
-optional. CMake is needed once, to build Chromium's wrapper library (`brew install cmake`).
+The Mozilla engine is installed from inside the app (Settings › Engine, or the prompt in a
+Mozilla tab): Mosaic downloads Firefox ESR from Mozilla, checks that it is signed by
+Mozilla, and keeps it as a private copy that never touches a Firefox you already have.
+Until then Mosaic browses with Chromium.
+
+**Updates.** Settings › About & Updates checks GitHub for new releases. With **Download and
+install updates automatically** on, a new version downloads in the background and installs
+the next time you quit Mosaic; otherwise press **Download and Install**, then **Restart to
+Update**. Mosaic installs only a download signed with its release key (Ed25519; see
+*Releasing* below), checks the app's code signature, bundle ID and version, and keeps the
+old app until the new one is in place. If the repository is ever private, GitHub shows its
+releases only to people with access: then paste a fine-grained GitHub token with read-only
+*Contents* access under **Repository access** (it is kept in the Keychain and sent only to
+api.github.com). Mosaic must be in a folder you can write to (such as Applications), not
+running from the disk image. Automatic updates start with the first version after 0.2.1:
+earlier releases have no updater and no signed update file.
+
+## Build from source
+
+Needs **Xcode 27** (SwiftUI's macros and the Liquid Glass APIs ship with Xcode, not with
+the Command Line Tools alone), plus CMake and esbuild once (`brew install cmake esbuild`).
 
 ```sh
-Scripts/bootstrap.sh     # one time: fetches both engines (~280 MB download)
+Scripts/bootstrap.sh     # once: Chromium (CEF), the private Firefox ESR, the blocker engine
 Scripts/build.sh         # builds build/Mosaic.app
-open build/Mosaic.app
+Scripts/test.sh          # unit tests
+Scripts/release.sh 0.3.0 # tests, release build, .dmg, .zip and the zip's signature
 ```
 
-`bootstrap.sh` downloads:
+### Releasing
 
-| Engine | What | Where it goes |
+`Scripts/release.sh <version>` signs the zip with Mosaic's Ed25519 release key and writes
+`Mosaic-<version>-macos-arm64.zip.sig`. Attach the zip, its `.sig` and the DMG to a GitHub
+release tagged `v<version>`; the updater looks for exactly those names. The private key is
+in the login Keychain of the machine that ran `swift Scripts/sign-update.swift --generate`
+(service `dev.mosaic.release-signing`); its public half is compiled into the app
+(`UpdatePackage.signingPublicKey`). To release from another Mac, move the key with
+`--export` and set `MOSAIC_UPDATE_KEY_FILE` there. **If the key is lost, installed copies can
+no longer update themselves**; keep a backup somewhere safe.
+
+| Piece | What `bootstrap.sh` fetches | Where it goes |
 | --- | --- | --- |
-| Chromium | Chromium Embedded Framework (CEF) 158, checksum-verified | `Vendor/cef/` (git-ignored), copied into the app at build time |
+| Chromium | Chromium Embedded Framework (CEF) 158, checksum-verified | `Vendor/cef/` (git-ignored), copied into the app |
 | Gecko | Firefox ESR, from mozilla.org | `~/Library/Application Support/Mosaic/Engines/Firefox.app` |
-
-The Gecko runtime is a private copy with its own profile. Mosaic never reads or modifies a
-Firefox you already have. If the private copy is missing, Mosaic falls back to a Gecko
-browser found in `/Applications` (Firefox, Firefox Developer Edition, Nightly, LibreWolf,
-Zen), still with its own separate profile.
-
-Run the tests with `Scripts/test.sh`.
+| Blocker | uBlock Origin 1.77.2 source (checksum-verified), bundled with esbuild, plus uBO's default filter lists | `Vendor/ublock/` (git-ignored), copied into the app |
 
 ## Using it
 
 | Action | How |
 | --- | --- |
-| Open a page or search | Type in the address bar. Things that look like addresses are opened; anything else is searched. |
-| Change search engine | Toolbar menu, or ⌘⇧S to cycle |
-| Switch the tab's engine | **Mozilla / Chromium** switch in the toolbar, or ⌘⇧E |
-| Tabs | ⌘T new, ⌘W close, ⌘⇧] / ⌘⇧[ next / previous |
-| Navigate | ⌘[ back, ⌘] forward, ⌘R reload, ⌘L address bar |
-| Extensions | Puzzle-piece button, or ⌘⇧X |
+| Open a page or search | Type in the address bar (keywords work: `w term` searches Wikipedia) |
+| Command palette | ⌘K: every action, open tabs, bookmarks, history, settings |
+| Settings | ⌘, (inside the window; Esc closes) |
+| Switch Mosaic | Settings › Mosaics, View menu (⌃⌘1–4), or the palette |
+| Switch the tab's engine | Mozilla / Chromium control in the toolbar, or ⇧⌘E |
+| Tabs | ⌘T new, ⌘W close, ⇧⌘T reopen closed, ⇧⌘A search tabs, ⌘1–9, ⇧⌘N private tab |
+| Workspaces | Sidebar switcher or Tab menu; ⌃⌘N new, ⌃⌘← / ⌃⌘→ switch |
+| Navigate | ⌘[ / ⌘] back/forward, ⌘R reload, ⌘L address bar, ⇧⌘H home |
+| Find, zoom | ⌘F / ⌘G, ⌘+ / ⌘− / ⌘0 (zoom remembered per site) |
+| Bookmarks | ⌘D bookmark, ⇧⌘B bookmarks bar, ⌥⌘B manager, ⌘Y history, ⇧⌘D reading list |
+| Downloads | ⌥⌘L |
+| Reader view | ⇧⌘R |
+| Passwords | ⌘\ fill; Settings › Passwords & Autofill |
+| Content blocker | Shield in the toolbar, or ⌥⇧⌘B |
 
-The coloured dot on each tab shows its engine: orange for Mozilla, blue for Chromium. New
-tabs open in the engine of the tab you are on. The engine you last picked with the switch
-is the one Mosaic starts with next time.
-
-### Installing a Chrome extension
-
-Either:
-
-- open the extension's page on the Chrome Web Store in a tab and press **Add to Mosaic** in
-  the toolbar, or
-- open Extensions and paste a Web Store link or extension ID, or choose a `.crx` file.
-
-The extension is listed with any compatibility notes. **Open Popup** and **Options** open
-the extension's own pages in a tab.
+All shortcuts can be changed in Settings › Shortcuts & Gestures. The coloured dot on each
+tab shows its engine (orange Mozilla, blue Chromium; purple marks a private tab).
 
 ## How it works
 
 ```
-┌────────────────────────── Mosaic.app (Swift / SwiftUI) ───────────────────────────┐
-│  BrowserModel ── tabs, search engine, engine switching                            │
-│     │                                                                             │
-│     ├─ Chromium tab ─► MCEFBrowserView (CEFBridge, Objective-C++) ─► CEF, in-process│
-│     │                                                                             │
-│     └─ Gecko tab ───► GeckoEngine ─► RDPClient ─► unix socket ─► agent.sys.mjs    │
-│                                                         (inside the Gecko process)│
-│  ExtensionManager ─► ExtensionStore: .crx → unpack → ManifestConverter → Gecko    │
-└───────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────── Mosaic.app (Swift / SwiftUI) ─────────────────────────────┐
+│ ShellView ← MosaicLayout (regions × components, appearance)  ← canvas, Gradient Studio │
+│ BrowserModel: tabs, workspaces, groups, sessions, engine switching, feature services   │
+│   ├─ Chromium tab ─► MCEFBrowserView (CEFBridge, Objective-C++) ─► CEF, in-process      │
+│   └─ Gecko tab ───► GeckoEngine ─► RDPClient ─► unix socket ─► agent.sys.mjs (in Gecko) │
+│ Services: library (SQLite), downloads, passwords (Keychain), privacy, blocker,          │
+│           productivity (palette, reader, shortcuts), platform (engines, rules, updates) │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Interface: the composed shell and Mosaics
+
+The window is composed from a `MosaicLayout` (`Sources/MosaicCore/Shell`): regions (title
+bar, toolbar, tab bar, sidebar top/middle/bottom, rail) each hold an ordered list of
+components (back, forward, reload, address field, tab strip, downloads, blocker, …), plus tab
+placement, sidebar behaviour, density, corner radius, accent, light/dark, Liquid Glass or
+solid materials, and a background. The four presets are starting layouts; the layout canvas
+(Settings › Mosaics › Customise Layout) edits them by drag and drop or keyboard, with undo.
+Switching layouts re-parents Chromium views and re-docks the Gecko window, so no page
+reloads. Settings, bookmarks, history and downloads are drawn inside the window (internal
+pages at `mosaic://…`).
 
 ### Chromium
 
-Chromium is embedded with the Chromium Embedded Framework. `Sources/CEFBridge` is a small
-Objective-C++ layer that hides CEF's C++ API behind two Objective-C classes Swift can use:
-`MosaicCEF` (process lifecycle) and `MCEFBrowserView` (an `NSView` hosting one browser).
-Renderer, GPU and utility processes run from the `Mosaic Helper*.app` bundles inside the
-app. Because Chromium has to own the application class and the event loop, Mosaic uses an
-AppKit lifecycle (`main.swift`, `MosaicApplication`) with SwiftUI views inside.
+Embedded with the Chromium Embedded Framework. `Sources/CEFBridge` hides CEF's C++ API
+behind Objective-C classes Swift can use (`MosaicCEF`, `MCEFBrowserView`), split into files
+per feature (downloads, passwords, privacy, page features, page scripts). Renderer, GPU and
+utility processes run from the `Mosaic Helper*.app` bundles. Chromium owns the event loop, so
+Mosaic uses an AppKit lifecycle with SwiftUI views inside.
 
 ### Gecko
 
-**Gecko cannot be embedded in another app on macOS.** Mozilla does not ship an embedding
-API for the desktop (GeckoView is Android-only), so there is no Gecko equivalent of
-`WKWebView` or CEF. Mosaic's approach:
-
-1. It runs a private Gecko runtime as a companion process, with a dedicated profile.
-2. It loads an agent, [`Resources/gecko/agent.sys.mjs`](Resources/gecko/agent.sys.mjs), into
-   Gecko's parent process over the Firefox remote debugging protocol, on a Unix socket in
-   the user's private temporary directory. The agent removes all of Firefox's own UI and
-   makes the window borderless.
-3. Mosaic's own window is transparent in the content area of a Gecko tab. The chromeless
-   Gecko window is kept at exactly that rectangle, so the page shows through and receives
-   the clicks, while Mosaic's tab strip and toolbar frame it. Moving or resizing Mosaic
-   moves Gecko with it.
-4. Mosaic polls the agent a few times a second for tab state (URL, title, loading, history)
-   and mirrors it. Tabs that Gecko opens itself (links with `target=_blank`, extension
-   pages) are adopted as Mosaic tabs.
-
-The result looks and behaves like one window, but it is two, and that shows at the edges;
-see the limitations below. The agent is the only place that touches Firefox internals,
-which is why Firefox ESR (stable internals for a year) is the default runtime.
+**Gecko cannot be embedded in another app on macOS** (Mozilla ships no desktop embedding
+API). Mosaic runs a private Firefox ESR as a companion process with its own profile, loads
+an agent ([`Resources/gecko/agent.sys.mjs`](Resources/gecko/agent.sys.mjs)) into its parent
+process over the remote debugging protocol on a private Unix socket, removes all of
+Firefox's UI, and keeps the chromeless Gecko window exactly behind a transparent hole in
+Mosaic's window. Anything Mosaic draws over a Gecko page appears on top of it. The agent
+mirrors tabs, and implements Gecko's side of the blocker, downloads, passwords, privacy,
+find, zoom, printing, permissions, reader view and shortcuts. It is shared byte-for-byte
+with the Windows port (paused; see `docs/windows-later.md`).
 
 ### Chrome extensions on Gecko
 
-Gecko and Chromium both implement the WebExtensions API, so most of an extension runs
-unchanged. `Sources/MosaicCore/Extensions` handles the differences:
+`Sources/MosaicCore/Extensions` unpacks CRX2/CRX3 packages, converts the manifest (Gecko
+add-on ID, MV3 service worker → event page with its `importScripts()` hoisted, renamed keys,
+Chrome-only permissions removed), loads a small runtime shim that stubs Chrome-only APIs,
+and records a compatibility note for anything Gecko cannot do.
 
-- **Unpacking.** `CRXArchive` reads CRX2 and CRX3 packages (and plain ZIPs), and recovers
-  the extension ID from the signed header or public key.
-- **Manifest conversion.** `ManifestConverter` assigns a Gecko add-on ID, turns an MV3
-  background service worker into a Gecko event page (hoisting its `importScripts()` into
-  the script list), rewrites keys Gecko spells differently, and removes Chrome-only
-  permissions.
-- **Runtime shim.** A small script loaded first in the background context supplies the
-  service-worker globals an event page lacks, and replaces Chrome-only API namespaces
-  (`chrome.sidePanel`, `chrome.offscreen`, …) with inert stubs, so a call to one degrades to
-  a no-op instead of crashing the extension's background script.
-- **Honest reporting.** Anything Gecko genuinely cannot do is recorded as a compatibility
-  note (info / warning / blocker) and shown next to the extension.
+### Built-in content blocker
 
-Converted extensions are unsigned, so they are loaded as temporary add-ons each time Gecko
-starts. Their storage persists because each keeps a stable ID (`<chrome id>@crx.mosaic`).
+`Resources/blocker/engine.js` imports uBlock Origin's own static network filtering engine
+and parser from uBO's source; `bootstrap.sh` bundles it into `ublock-engine.js`, which runs in
+JavaScriptCore for Chromium tabs (CEF asks before every sub-resource request) and in a
+sandbox inside Gecko for Mozilla tabs, so both engines decide identically. Cosmetic filters
+are compiled with uBO's parser and injected as CSS. Filter lists ship in the app and refresh
+in the background.
 
 ## Known limitations
 
-**Extensions**
+**Engines and windows**
+- The Gecko page is a separate window: a "Firefox" icon appears in the Dock, and while a
+  Gecko page has the keyboard the menu bar is Firefox's (Mosaic's main shortcuts are
+  forwarded). The page follows a moment behind when the window is dragged.
+- Only one Gecko page can be visible at a time, so there is no split view, and only one
+  Mosaic window (multiple windows would need per-window Gecko windows).
+- Page full screen was not verified, and Mosaic's own window full screen is disabled.
+- Private tabs work in Chromium only (Gecko would need a second, private window).
 
-- Not every Chrome extension can work on Gecko. Extensions built on Chrome-only APIs
-  (`debugger`, `offscreen`, `sidePanel`, `tabCapture`, `desktopCapture`, Google sign-in via
-  `identity.getAuthToken`, …) will be partly or wholly broken; Mosaic tells you which.
-- There is no toolbar button or popup bubble for extensions yet. Popups open as a tab.
-- Extensions run on the Mozilla engine only. Chromium tabs do not load them: CEF's embedded
-  ("Alloy") browsers have no extension support.
-- Extensions do not update themselves. Reinstall to update.
-- Tested end to end with one extension so far (Dark Reader, MV3).
+**Features**
+- Extension popups open as a tab, not a panel under the toolbar; extensions do not run in
+  Chromium tabs (CEF Alloy has no extension support) and do not update themselves.
+- The blocker does not run uBO's scriptlets, procedural filters or `$redirect`/`$csp`
+  modifiers, so it blocks less than the uBO extension does.
+- Clearing site data in Chromium honours time ranges for cookies only.
+- Chromium tabs lose their back/forward history when unloaded to save memory, and Chromium
+  cannot show web notifications.
+- In Gecko, microphone streams were not verified; Firefox's own screen-sharing prompt
+  cannot appear.
+- Text-only zoom, mouse gestures, translation, AI features, sync and the proxy browser are
+  not built (see `To Do.md`).
 
-**The Gecko window**
-
-- It is a second app. A "Firefox" icon appears in the Dock, and when a Gecko page has
-  keyboard focus the menu bar is Firefox's. ⌘L, ⌘T, ⌘N, ⌘W and ⌘⇧E are forwarded to Mosaic;
-  other shortcuts act on Gecko directly.
-- While dragging or resizing Mosaic's window, the page follows a moment behind.
-- Full screen is disabled, and moving Mosaic to another Space does not take the Gecko
-  window along.
-- If another app's window ends up between the two, Mosaic re-stacks them when it becomes
-  active. This path has had little testing.
-
-**Security and privacy (prototype shortcuts, to fix before any release)**
-
-- Chromium runs without its sandbox and with a mock keychain (cookies are not protected by
-  the login keychain).
-- The app is ad-hoc signed; it runs on the Mac that built it. Distribution needs a
-  Developer ID signature and notarisation.
-- Gecko runs with remote debugging enabled on a socket only your user can reach. Any
+**Security and distribution (to fix before a public release)**
+- The app is ad-hoc signed (no Developer ID, not notarised); macOS asks again for Keychain
+  access to saved passwords after each new build.
+- Chromium runs without its sandbox.
+- Gecko is driven over a remote-debugging socket that only your user can reach; any
   process running as you could drive it.
-- The private Firefox does not auto-update; re-run `Scripts/bootstrap.sh` after deleting
-  `~/Library/Application Support/Mosaic/Engines` to refresh it.
-
-**Missing browser features:** bookmarks, history UI, downloads UI, find in page, private
-windows, settings, session restore, multiple windows, password management, default-browser
-registration.
 
 ## Project layout
 
 ```
 Package.swift
-Scripts/
-  bootstrap.sh        fetch both engines
-  build.sh            build build/Mosaic.app
-  test.sh             run the unit tests
-  make-icon.swift     regenerate Resources/AppIcon.icns
-  drive.swift         send automation commands to a running Mosaic
-Resources/
-  Info.plist, HelperInfo.plist, AppIcon.icns
-  gecko/agent.sys.mjs Mosaic's agent inside Gecko
+Scripts/        bootstrap, build, test, release, drive (automation), make-icon
+Resources/      Info.plist, icons, gecko/ (agent and Gecko-side modules), blocker/, reader/
 Sources/
-  MosaicCore/         engine-independent logic, unit tested
-    Search/           search engines, address-bar parsing
-    Extensions/       CRX parsing, manifest conversion, extension library
-    Gecko/            remote debugging client, runtime lookup, profile
-  CEFBridge/          Objective-C++ wrapper around CEF
-  MosaicHelper/       Chromium sub-process entry point
-  Mosaic/             the app: model, engines, SwiftUI views
+  MosaicCore/   engine-independent logic, unit-tested: Search, Extensions, Gecko, Blocker,
+                Shell, Canvas, Tabs, Library, Downloads, Passwords, Privacy, Productivity,
+                Platform, Permissions, Engine
+  CEFBridge/    Objective-C++ bridge to CEF
+  MosaicHelper/ Chromium sub-process entry point
+  Mosaic/       the app: App, Model, Engines, Shell, Views, Settings, Features/<area>
 Tests/MosaicCoreTests/
+docs/           AGENTS.md (how the parallel work was organised), windows-later.md, screenshots/
+To Do.md        the feature list, crossed off as items are verified
 ```
 
-Mosaic's data lives in `~/Library/Application Support/Mosaic/` (`Chromium/`, `Gecko/Profile/`,
-`Extensions/`, `Engines/`). Delete that folder to reset everything.
+Mosaic's data lives in `~/Library/Application Support/Mosaic/`; passwords are in the
+login Keychain. Delete the folder to reset everything else.
 
 ## Development notes
 
-**Building without Xcode.** On the macOS 27 SDK, SwiftUI's `@State` is a macro whose
-compiler plug-in ships only with Xcode. So that the project builds with just the Command
-Line Tools, views declare `State` storage directly (`private var x = State(initialValue:)`)
-instead of using `@State`. Keep to that pattern, or the CLT-only build breaks. For the same
-reason, run tests through `Scripts/test.sh`: a bare `swift test` intermittently fails under
-the Command Line Tools with "plugin for module 'TestingMacros' not found".
-
-**Scripted checks.** Launching with `--mosaic-automation` lets you drive the app from the
-shell, which is how the end-to-end behaviour was verified:
+**Isolated test copies.** `MOSAIC_DATA_DIR=<folder>` runs Mosaic on its own data folder and
+preferences, beside your normal copy; `MOSAIC_AUTOMATION_ID=<name>` gives it its own
+automation channel. Launched with `--mosaic-automation`, Mosaic can be driven from the shell
+and never takes focus:
 
 ```sh
+export MOSAIC_DATA_DIR=$TMPDIR/mosaic-test MOSAIC_AUTOMATION_ID=test
 build/Mosaic.app/Contents/MacOS/Mosaic --mosaic-automation &
 swift Scripts/drive.swift navigate example.com
-swift Scripts/drive.swift engine chromium
-swift Scripts/drive.swift installExtension eimadpbcbfnmbkopoojfekhnkhdbieeh
+swift Scripts/drive.swift mosaic chrome
 swift Scripts/drive.swift dump /tmp/mosaic-state.json
+swift Scripts/drive.swift quit
 ```
 
-Commands are listed in `Sources/Mosaic/App/Automation.swift`. In this mode Mosaic never
-takes keyboard focus on its own.
+To try an update without publishing one, serve a release JSON and a signed zip from this
+Mac and point a test copy at it with `MOSAIC_UPDATE_API=http://127.0.0.1:<port>/latest`
+(only HTTPS or local HTTP is accepted, and the signature is still required); then
+`drive updateCheck`, `updateDownload`, `updateRestart`.
+
+Each feature area adds its own commands and `dump` fields (see `Sources/Mosaic/App/Automation.swift`
+and the `*Automation.swift` files).
+
+## Licence
+
+Copyright © 2026 the Mosaic contributors.
+
+Mosaic is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. It is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [`LICENSE`](LICENSE) for the full
+text. (GPL is required because Mosaic includes uBlock Origin's engine, which is GPL v3.)
 
 ## Third-party software
 
-Mosaic bundles the Chromium Embedded Framework (BSD licence; Chromium's own licences are in
-`Vendor/cef/CREDITS.html` after bootstrap) and runs an unmodified Firefox ESR (MPL 2.0).
-Firefox is a trademark of the Mozilla Foundation; Mosaic is not affiliated with Mozilla or
-Google.
+- **Chromium Embedded Framework** (BSD) and Chromium (its licences: `chrome://credits`).
+- **Firefox ESR** (MPL 2.0), run unmodified as a separate program.
+- **uBlock Origin**'s filtering engine, Copyright (C) Raymond Hill and contributors,
+  **GNU GPL v3** (licence copied into the app as `blocker/LICENSE-uBlock-Origin.txt`). Filter
+  lists have their own licences (see each list's header).
+- **Readability.js** 0.6.0 (Apache 2.0), Mozilla, for Chromium reader view (`Resources/reader/`).
+- Tracking-parameter list from Firefox's query-stripping list.
+
+Firefox is a trademark of the Mozilla Foundation; Chrome and Chromium of Google; Arc, Zen,
+Opera and Safari of their owners. Mosaic is not affiliated with any of them; its presets are
+interface patterns, not copies of their code or assets.

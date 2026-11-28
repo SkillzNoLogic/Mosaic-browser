@@ -1,0 +1,93 @@
+{
+  "addressText" : "http:\/\/127.0.0.1:8765\/page.html",
+  "blocker" : {
+    "allowlist" : [
+
+    ],
+    "enabled" : true,
+    "engineVersion" : "1.77.2",
+    "status" : "ready(filters: 241997)",
+    "updating" : false
+  },
+  "chromiumAvailable" : true,
+  "engine" : "chromium",
+  "extensionError" : "",
+  "extensions" : [
+
+  ],
+  "extensionsBusy" : false,
+  "geckoDocked" : false,
+  "geckoPID" : -1,
+  "geckoStatus" : "stopped",
+  "geckoWindow" : -1,
+  "isActive" : false,
+  "notice" : "",
+  "privacy" : {
+    "blocker" : {
+      "cosmeticEnabled" : true,
+      "cosmeticGeneric" : 13764,
+      "cosmeticSpecific" : 19567,
+      "cosmeticUnsupported" : 4655,
+      "lastUpdate" : "",
+      "lists" : [
+        "easylist",
+        "easyprivacy",
+        "plowe-0",
+        "ublock-badware",
+        "ublock-filters",
+        "ublock-privacy",
+        "ublock-quick-fixes",
+        "ublock-unbreak",
+        "urlhaus-1"
+      ],
+      "userFilterLines" : 5
+    },
+    "hasPrivateProfile" : false,
+    "lastClear" : "",
+    "privateBrowsers" : 0,
+    "settings" : {
+      "blockThirdPartyCookies" : true,
+      "clearCookiesOnExit" : false,
+      "dohMode" : "off",
+      "dohTemplate" : "",
+      "httpsExceptions" : [
+
+      ],
+      "httpsOnly" : false,
+      "sessionHTTPExceptions" : [
+
+      ],
+      "stripTrackingParameters" : true
+    },
+    "tabs" : [
+      {
+        "isPrivate" : false,
+        "security" : "local",
+        "url" : "http:\/\/127.0.0.1:8765\/page.html"
+      }
+    ]
+  },
+  "searchEngine" : "google",
+  "tabs" : [
+    {
+      "blocked" : 3,
+      "canGoBack" : false,
+      "canGoForward" : false,
+      "engine" : "chromium",
+      "failure" : "",
+      "geckoID" : -1,
+      "hasChromiumView" : true,
+      "loading" : false,
+      "selected" : true,
+      "title" : "cos:VHHVV cookie:-",
+      "url" : "http:\/\/127.0.0.1:8765\/page.html"
+    }
+  ],
+  "window" : {
+    "height" : 800,
+    "number" : 3112,
+    "width" : 1240,
+    "x" : 220,
+    "y" : 219
+  }
+}

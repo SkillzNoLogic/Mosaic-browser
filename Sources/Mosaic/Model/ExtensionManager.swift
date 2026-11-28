@@ -36,6 +36,37 @@ final class ExtensionManager: ObservableObject {
         extensions.contains { $0.id == chromeID }
     }
 
+    /// What an extension asked for, read from its converted manifest.
+    struct Permissions: Equatable {
+        /// API permissions ("storage", "tabs"…).
+        var apis: [String] = []
+        /// Sites it can read and change, as match patterns; "<all_urls>" for every site.
+        var sites: [String] = []
+
+        var readsAllSites: Bool {
+            sites.contains { $0 == "<all_urls>" || $0.hasPrefix("*://*/") || $0.hasPrefix("http://*/") || $0.hasPrefix("https://*/") }
+        }
+    }
+
+    func permissions(for ext: InstalledExtension) -> Permissions {
+        guard let store,
+              let data = try? Data(contentsOf: store.geckoDirectory(for: ext.id).appendingPathComponent("manifest.json")),
+              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return Permissions() }
+        var result = Permissions()
+        let declared = (manifest["permissions"] as? [String] ?? []) + (manifest["host_permissions"] as? [String] ?? [])
+        for entry in declared {
+            if entry == "<all_urls>" || entry.contains("://") { result.sites.append(entry) } else { result.apis.append(entry) }
+        }
+        for script in manifest["content_scripts"] as? [[String: Any]] ?? [] {
+            result.sites += script["matches"] as? [String] ?? []
+        }
+        result.apis = Array(Set(result.apis)).sorted()
+        var seen = Set<String>()
+        result.sites = result.sites.filter { seen.insert($0).inserted }
+        return result
+    }
+
     // MARK: - Installing
 
     /// Installs from a Chrome Web Store link or a bare extension ID.
