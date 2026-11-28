@@ -237,6 +237,7 @@ public sealed record DownloadRecord
     {
         if (json[key] is not JsonValue value) return null;
         if (value.TryGetValue(out long number)) return number;
+        if (value.TryGetValue(out int small)) return small;
         if (value.TryGetValue(out double real)) return (long)real;
         return null;
     }

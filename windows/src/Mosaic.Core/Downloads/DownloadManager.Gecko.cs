@@ -25,6 +25,7 @@ public sealed record GeckoDownload(
     {
         if (json[key] is not JsonValue value) return fallback;
         if (value.TryGetValue(out long number)) return number;
+        if (value.TryGetValue(out int small)) return small;
         return value.TryGetValue(out double real) ? (long)real : fallback;
     }
 

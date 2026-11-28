@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using Mosaic.Core.Browser;
 
@@ -29,11 +28,12 @@ namespace Mosaic.Core.Downloads;
 /// </summary>
 public static class DownloadsAutomation
 {
-#pragma warning disable CA2255 // registering with the automation pipe is cheap and must happen before any request
-    [ModuleInitializer]
-#pragma warning restore CA2255
-    internal static void Register()
+    private static int registered;
+
+    /// <summary>Plugs the commands and the <c>dump</c> key in (once; the app's downloads mounts call it).</summary>
+    public static void Register()
     {
+        if (Interlocked.Exchange(ref registered, 1) != 0) return;
         AutomationRegistry.Register(HandleAsync);
         AutomationRegistry.RegisterState("downloads", model => State(model.Downloads));
     }
