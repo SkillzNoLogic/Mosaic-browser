@@ -23,8 +23,24 @@ public sealed record SearchEngine(string Id, string Name, string SearchTemplate,
     /// <summary>The engine used until the user picks one.</summary>
     public static SearchEngine Default => Google;
 
-    /// <summary>The built-in engine with this <see cref="Id"/>, or null.</summary>
-    public static SearchEngine? Named(string id) => BuiltIn.FirstOrDefault(engine => engine.Id == id);
+    /// <summary>The engine with this <see cref="Id"/> (built in, or one of <see cref="Registered"/>), or null.</summary>
+    public static SearchEngine? Named(string id) =>
+        BuiltIn.FirstOrDefault(engine => engine.Id == id) ?? Registered.FirstOrDefault(engine => engine.Id == id);
+
+    private static volatile IReadOnlyList<SearchEngine> registered = [];
+
+    /// <summary>
+    /// Engines added at run time (the user's custom search engines, kept up to date by the
+    /// library), so <see cref="Named"/> finds them and one can be the default.
+    /// </summary>
+    public static IReadOnlyList<SearchEngine> Registered
+    {
+        get => registered;
+        set => registered = [.. value];
+    }
+
+    /// <summary>Built-in engines followed by <see cref="Registered"/> ones (for pickers).</summary>
+    public static IReadOnlyList<SearchEngine> All => [.. BuiltIn, .. Registered];
 
     /// <summary>The engine after this one in <see cref="BuiltIn"/>, wrapping around.</summary>
     /// <remarks>An engine that is not built in is followed by <see cref="Default"/>.</remarks>

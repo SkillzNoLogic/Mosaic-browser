@@ -428,6 +428,7 @@ public sealed partial class BrowserModel : ObservableObject
 
     private void TabChanged(BrowserTab tab)
     {
+        LibraryTabChanged(tab);  // library: history from every tab, both engines (HistoryRecorder)
         if (!ReferenceEquals(tab, selectedTab)) return;
         if (!IsEditingAddress) AddressText = tab.Url;
         UpdatePresentation();
@@ -438,10 +439,12 @@ public sealed partial class BrowserModel : ObservableObject
     /// <summary>Handles whatever was submitted in the address bar or the start page.</summary>
     public void Navigate(string input)
     {
+        input = LibraryResolveKeyword(input);  // library: search keywords ("w swift" → Wikipedia)
         if (rules.ResolveAddress(input, searchEngine) is not { } url) return;
         var tab = selectedTab ?? NewTab();
         IsEditingAddress = false;
         Load(url, tab);
+        LibraryNoteTyped(tab);  // library: typed visits rank higher
         FocusContent();
     }
 
@@ -1078,6 +1081,7 @@ public sealed partial class BrowserModel : ObservableObject
     {
         if (isShutDown) return;
         isShutDown = true;
+        LibraryShutdown();  // library: record visits still waiting for their title
         foreach (var tab in Tabs)
         {
             if (tab.Chromium is not { } browser) continue;
