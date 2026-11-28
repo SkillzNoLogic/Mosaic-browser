@@ -89,6 +89,7 @@ public sealed class GeckoProductivityIntegrationTests : IDisposable
                 root.removeEventListener("keydown", listener, true);
                 return !arrived;
               };
+              const windows = Services.appinfo.OS === "WINNT";
               const tabs = win.gBrowser.tabs.length;
               return JSON.stringify({
                 intercepted: {
@@ -101,6 +102,8 @@ public sealed class GeckoProductivityIntegrationTests : IDisposable
                   lastTab: press("9", { accel: true }),
                   plainK: press("k"),
                   newTabBuiltIn: press("t", { accel: true }),
+                  // Russian layout: the K key types "л"; on Windows the shortcut follows the Latin letter.
+                  cyrillicK: windows ? press("\u043b", { accel: true, code: "KeyK" }) : null,
                 },
                 tabsOpened: win.gBrowser.tabs.length - tabs,
               });
@@ -109,7 +112,7 @@ public sealed class GeckoProductivityIntegrationTests : IDisposable
         using var keyboard = await RdpClient.ConnectTcpAsync("127.0.0.1", engine.DebuggerPort!.Value);
         await keyboard.AttachToParentProcessAsync();
         var pressed = JsonNode.Parse((await keyboard.EvaluateAsync(script))!.GetValue<string>())!;
-        var intercepted = pressed["intercepted"]!.AsObject().ToDictionary(e => e.Key, e => e.Value!.GetValue<bool>());
+        var intercepted = pressed["intercepted"]!.AsObject().Where(e => e.Value is not null).ToDictionary(e => e.Key, e => e.Value!.GetValue<bool>());
         Assert.All(["palette", "reload", "reader", "nextTab", "previousTab", "back", "lastTab", "newTabBuiltIn"],
             key => Assert.True(intercepted[key], key));
         Assert.False(intercepted["plainK"]);
@@ -125,7 +128,9 @@ public sealed class GeckoProductivityIntegrationTests : IDisposable
             ShortcutManager.GeckoEventPrefix + ShortcutCommands.Back,
             ShortcutManager.GeckoEventPrefix + ShortcutCommands.SelectLastTab,
             "newTab",
+            .. OperatingSystem.IsWindows() ? [ShortcutManager.GeckoEventPrefix + ShortcutCommands.CommandPalette] : Array.Empty<string>(),
         ];
+        if (OperatingSystem.IsWindows()) Assert.True(intercepted["cyrillicK"]);
         await Eventually.TrueAsync(() => { lock (events) return events.Count >= expected.Length; }, because: "the shortcut events never arrived");
         lock (events) Assert.Equal(expected, events);
     }
