@@ -18,7 +18,7 @@ namespace Mosaic.Core.Canvas;
 public sealed record LayoutConfiguration(string Id, string Name, DateTimeOffset Created, DateTimeOffset Modified, MosaicLayout Layout)
 {
     public static LayoutConfiguration Make(string name, MosaicLayout layout, DateTimeOffset now) =>
-        new(GradientSource.NewId(), name, now, now, layout);
+        new(Guid.NewGuid().ToString().ToUpperInvariant(), name, now, now, layout);
 }
 
 /// <summary>ISO 8601 as Swift's <c>.iso8601</c> strategy writes and reads it.</summary>
@@ -156,11 +156,11 @@ public sealed class ConfigurationLibrary
         {
             ["created"] = Iso8601.Write(c.Created),
             ["id"] = c.Id,
-            ["layout"] = c.Layout.ToJson(),
+            ["layout"] = c.Layout.ToJsonObject(),
             ["modified"] = Iso8601.Write(c.Modified),
             ["name"] = c.Name,
         })]);
-        return LayoutJson.Write(root);
+        return SwiftJson.Write(root);
     }
 
     /// <summary>The library in a file's text; one unreadable entry never loses the others, junk gives an empty library.</summary>
@@ -176,16 +176,16 @@ public sealed class ConfigurationLibrary
             foreach (var item in array)
             {
                 if (item is not JsonObject e
-                    || LayoutJson.String(e, "id") is not { } id
-                    || LayoutJson.String(e, "name") is not { } name
-                    || Iso8601.Read(LayoutJson.String(e, "created")) is not { } created
-                    || Iso8601.Read(LayoutJson.String(e, "modified")) is not { } modified
-                    || LayoutJson.TryDecodeLayout(e["layout"]) is not { } layout)
+                    || SwiftDecode.TryString(e["id"]) is not { } id
+                    || SwiftDecode.TryString(e["name"]) is not { } name
+                    || Iso8601.Read(SwiftDecode.TryString(e["created"])) is not { } created
+                    || Iso8601.Read(SwiftDecode.TryString(e["modified"])) is not { } modified
+                    || MosaicLayout.Decode(e["layout"]) is not { } layout)
                     continue;
                 entries.Add(new LayoutConfiguration(id, CleanName(name) ?? "Configuration", created, modified, LayoutCanvasRules.Usable(layout)));
             }
         }
-        var library = new ConfigurationLibrary(entries, LayoutJson.String(o, "activeID"));
+        var library = new ConfigurationLibrary(entries, SwiftDecode.TryString(o["activeID"]));
         if (library.ActiveID is { } active && library.Configuration(active) is null) library.ActiveID = null;
         return library;
     }
@@ -221,11 +221,11 @@ public static class LayoutTransfer
         var stored = LayoutCanvasRules.Usable(layout);
         var clean = ConfigurationLibrary.CleanName(name) ?? stored.Name;
         stored.Name = clean;
-        return LayoutJson.Write(new JsonObject
+        return SwiftJson.Write(new JsonObject
         {
             ["exported"] = Iso8601.Write(now ?? DateTimeOffset.UtcNow),
             ["format"] = Format,
-            ["layout"] = stored.ToJson(),
+            ["layout"] = stored.ToJsonObject(),
             ["name"] = clean,
             ["version"] = Version,
         });
@@ -273,10 +273,10 @@ public static class LayoutTransfer
         if (obj["layout"] is JsonObject layoutObject)
         {
             raw = layoutObject;
-            name = LayoutJson.String(obj, "name");
-            if (LayoutJson.String(obj, "format") is { } fmt && fmt != Format)
+            name = SwiftDecode.TryString(obj["name"]);
+            if (SwiftDecode.TryString(obj["format"]) is { } fmt && fmt != Format)
                 messages.Add($"The file says it is “{fmt}”, not a Mosaic layout; it was read as one anyway.");
-            if (LayoutJson.Int(obj, "version") is { } v && v > Version)
+            if (SwiftDecode.TryDouble(obj["version"]) is { } v && v == Math.Floor(v) && v > Version)
                 messages.Add("Written by a newer Mosaic: settings this version doesn’t know were ignored.");
         }
         else if (obj.ContainsKey("regions") || obj.ContainsKey("preset") || obj.ContainsKey("tabPlacement"))
@@ -287,8 +287,13 @@ public static class LayoutTransfer
         {
             return Fail(ImportErrorKind.NotALayout);
         }
-        if (LayoutJson.String(raw, "preset") is { } preset && RawValues.Parse<MosaicPresetID>(preset) is null)
-            messages.Add($"Unknown preset “{preset}”: started from Chrome.");
+        if (SwiftDecode.TryString(raw["preset"]) is { } preset && JsonEnum.Parse<MosaicPresetID>(preset) is null)
+        {
+            // Windows has no Safari Mosaic: the shell reads a Safari layout as Microsoft Edge, keeping its look.
+            messages.Add(preset == "safari"
+                ? "A Safari layout from a Mac: Windows shows it as Microsoft Edge, keeping its colours and backgrounds."
+                : $"Unknown preset “{preset}”: started from Chrome.");
+        }
         if (raw.ContainsKey("regions"))
         {
             if (raw["regions"] is JsonObject dict)
@@ -298,13 +303,13 @@ public static class LayoutTransfer
                 var unreadable = false;
                 foreach (var (key, value) in dict.OrderBy(p => p.Key, StringComparer.Ordinal))
                 {
-                    if (RawValues.Parse<ShellRegion>(key) is null) { unknownRegions.Add(key); continue; }
+                    if (JsonEnum.Parse<ShellRegion>(key) is null) { unknownRegions.Add(key); continue; }
                     if (value is not JsonArray names) { unreadable = true; continue; }
                     foreach (var item in names)
                     {
                         if (item is not JsonValue sv || sv.GetValueKind() != JsonValueKind.String) { unreadable = true; continue; }
                         var text = sv.GetValue<string>();
-                        if (RawValues.Parse<ShellComponent>(text) is null) unknownComponents.Add(text);
+                        if (JsonEnum.Parse<ShellComponent>(text) is null) unknownComponents.Add(text);
                     }
                 }
                 if (unknownComponents.Count > 0)
@@ -326,16 +331,16 @@ public static class LayoutTransfer
             var clean = new JsonObject();
             foreach (var (key, value) in regions)
             {
-                if (RawValues.Parse<ShellRegion>(key) is null || value is not JsonArray names) continue;
+                if (JsonEnum.Parse<ShellRegion>(key) is null || value is not JsonArray names) continue;
                 clean[key] = new JsonArray([.. names
                     .Where(i => i is JsonValue v && v.GetValueKind() == JsonValueKind.String)
                     .Select(i => i!.GetValue<string>())
-                    .Where(t => RawValues.Parse<ShellComponent>(t) is not null)
+                    .Where(t => JsonEnum.Parse<ShellComponent>(t) is not null)
                     .Select(t => (JsonNode)JsonValue.Create(t)!)]);
             }
             sanitized["regions"] = clean;
         }
-        if (LayoutJson.TryDecodeLayout(sanitized) is not { } decoded) return Fail(ImportErrorKind.NotALayout);
+        if (MosaicLayout.Decode(sanitized) is not { } decoded) return Fail(ImportErrorKind.NotALayout);
 
         var layout = LayoutCanvasRules.Usable(decoded);
         messages.AddRange(Repairs(decoded, layout));
@@ -348,8 +353,8 @@ public static class LayoutTransfer
     internal static List<string> Repairs(MosaicLayout decoded, MosaicLayout layout)
     {
         var messages = new List<string>();
-        var regions = RawValues.All<ShellRegion>();
-        var components = RawValues.All<ShellComponent>();
+        var regions = Enum.GetValues<ShellRegion>();
+        var components = Enum.GetValues<ShellComponent>();
         var before = regions.SelectMany(r => decoded.Components(r).Where(c => r.Accepts(c))).ToList();
         var duplicates = before.Where(c => c != ShellComponent.FlexibleSpace).GroupBy(c => c).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
         if (duplicates.Count > 0)
@@ -374,8 +379,8 @@ public static class LayoutTransfer
         if (Changed(da.ContentCornerRadius, la.ContentCornerRadius)) clamped.Add("page corners");
         if (clamped.Count > 0) messages.Add($"Brought out-of-range values back into range: {string.Join(", ", clamped)}.");
         if (da.Accent != la.Accent) messages.Add($"The accent colour “{da.Accent}” isn’t a colour; the system accent is used.");
-        if (da.Background != la.Background || da.NewTabBackground != la.NewTabBackground
-            || !new MosaicAppearance { WorkspaceBackgrounds = da.WorkspaceBackgrounds }.Equals(new MosaicAppearance { WorkspaceBackgrounds = la.WorkspaceBackgrounds }))
+        if (!Gradients.Same(da.Background, la.Background) || !Gradients.Same(da.NewTabBackground, la.NewTabBackground)
+            || !Gradients.SameWorkspaces(da.WorkspaceBackgrounds, la.WorkspaceBackgrounds))
             messages.Add("Repaired the background (invalid colours removed, values brought into range).");
         return messages;
     }

@@ -36,9 +36,9 @@ public sealed class GradientStudio
     public bool IsInUse => canvas.UsesGradient(Target);
 
     /// <summary>The target already shows exactly this gradient ("In Use").</summary>
-    public bool IsApplied => IsInUse && canvas.Background(Target).Gradient == Gradient.Clamped();
+    public bool IsApplied => IsInUse && Gradients.Same(canvas.Background(Target).Gradient, Gradient.Clamped());
 
-    public bool IsMesh => Gradient.GradientKind == GradientSpec.Kind.Mesh;
+    public bool IsMesh => Gradient.Kind == GradientKind.Mesh;
 
     public int? SelectedSourceIndex
     {
@@ -58,7 +58,7 @@ public sealed class GradientStudio
     public void Load()
     {
         var current = canvas.Background(Target);
-        if (canvas.UsesGradient(Target) || current.BackgroundKind == BackgroundSpec.Kind.Gradient) Gradient = current.Gradient.Clone();
+        if (canvas.UsesGradient(Target) || current.Kind == BackgroundKind.Gradient) Gradient = current.Gradient.Clone();
         else if (!loaded) Gradient = GradientPresets.MeshPresets[0].Gradient;
         Selection = null;
         loaded = true;
@@ -69,7 +69,7 @@ public sealed class GradientStudio
     {
         if (!loaded || !IsInUse || Dragging) return;
         var target = canvas.Background(Target).Gradient;
-        if (target != Gradient.Clamped())
+        if (!Gradients.Same(target, Gradient.Clamped()))
         {
             Gradient = target.Clone();
             if (SelectedSourceIndex is null && SelectedStopIndex is null) Selection = null;
@@ -108,12 +108,12 @@ public sealed class GradientStudio
         return true;
     }
 
-    public void ChangeKind(GradientSpec.Kind kind)
+    public void ChangeKind(GradientKind kind)
     {
         var next = Gradient.Clone();
-        if (next.GradientKind != GradientSpec.Kind.Mesh && next.Stops.Count < 2) next.Stops = next.NormalizedStops;
+        if (next.Kind != GradientKind.Mesh && next.Stops.Count < 2) next.Stops = next.NormalizedStops;
         next = next.Converted(kind);
-        if (kind != GradientSpec.Kind.Mesh && next.Stops.Count < 2) next.Stops = next.NormalizedStops;
+        if (kind != GradientKind.Mesh && next.Stops.Count < 2) next.Stops = next.NormalizedStops;
         Gradient = next;
         Selection = null;
         Edited();
@@ -147,19 +147,19 @@ public sealed class GradientStudio
         var i = Gradient.Sources.FindIndex(s => s.Id == id);
         if (i < 0) return;
         Selection = id;
-        Change(g => g.Sources[i] = g.Sources[i] with { X = Math.Clamp(x, 0, 1), Y = Math.Clamp(y, 0, 1) });
+        Change(g => { g.Sources[i].X = Math.Clamp(x, 0, 1); g.Sources[i].Y = Math.Clamp(y, 0, 1); });
     }
 
     /// <summary>Adds a source showing the colour already at that point (nothing jumps) and selects it.</summary>
     public bool AddSource(double x, double y)
     {
-        if (Gradient.Sources.Count >= Gradients.MaxSources) return false;
+        if (Gradient.Sources.Count >= GradientSpec.MaxSources) return false;
         var colour = Gradient.MeshColor(x, y, Aspect);
-        var source = GradientSource.Make(Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), colour.Hex);
+        var source = Gradients.NewSource(Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), colour.Hex);
         Selection = source.Id;
         Change(g =>
         {
-            if (g.Sources.Count == 0) g.Sources = [.. g.MeshSources()];
+            if (g.Sources.Count == 0) g.Sources = [.. g.MeshSources];
             g.Sources.Add(source);
         });
         return true;
@@ -167,7 +167,7 @@ public sealed class GradientStudio
 
     public bool AddStop(double location)
     {
-        if (Gradient.Stops.Count >= Gradients.MaxStops) return false;
+        if (Gradient.Stops.Count >= GradientSpec.MaxStops) return false;
         var t = Math.Clamp(double.IsFinite(location) ? location : 0.5, 0, 1);
         Change(g =>
         {
@@ -203,20 +203,20 @@ public sealed class GradientStudio
             Change(g =>
             {
                 var s = g.Sources[i];
-                g.Sources[i] = key switch
+                switch (key)
                 {
-                    CanvasController.KeyDirection.Left => s with { X = Math.Max(s.X - step, 0) },
-                    CanvasController.KeyDirection.Right => s with { X = Math.Min(s.X + step, 1) },
-                    CanvasController.KeyDirection.Up => s with { Y = Math.Max(s.Y - step, 0) },
-                    _ => s with { Y = Math.Min(s.Y + step, 1) },
-                };
+                    case CanvasController.KeyDirection.Left: s.X = Math.Max(s.X - step, 0); break;
+                    case CanvasController.KeyDirection.Right: s.X = Math.Min(s.X + step, 1); break;
+                    case CanvasController.KeyDirection.Up: s.Y = Math.Max(s.Y - step, 0); break;
+                    default: s.Y = Math.Min(s.Y + step, 1); break;
+                }
             });
             return true;
         }
         if (SelectedStopIndex is { } j && key is CanvasController.KeyDirection.Left or CanvasController.KeyDirection.Right)
         {
             var delta = key == CanvasController.KeyDirection.Left ? -step : step;
-            Change(g => g.Stops[j] = g.Stops[j] with { Location = Math.Clamp(g.Stops[j].Location + delta, 0, 1) });
+            Change(g => g.Stops[j].Location = Math.Clamp(g.Stops[j].Location + delta, 0, 1));
             return true;
         }
         return false;
@@ -226,31 +226,31 @@ public sealed class GradientStudio
     {
         var i = Gradient.Sources.FindIndex(s => s.Id == id);
         if (i < 0 || string.Equals(Gradient.Sources[i].Color, color.Hex, StringComparison.OrdinalIgnoreCase)) return;
-        Change(g => g.Sources[i] = g.Sources[i] with { Color = color.Hex });
+        Change(g => g.Sources[i].Color = color.Hex);
     }
 
     public void SetSpread(string id, double spread)
     {
         var i = Gradient.Sources.FindIndex(s => s.Id == id);
-        if (i >= 0) Change(g => g.Sources[i] = g.Sources[i] with { Spread = spread });
+        if (i >= 0) Change(g => g.Sources[i].Spread = spread);
     }
 
     public void SetStopColor(int index, ColorValue color)
     {
         if (index < 0 || index >= Gradient.Stops.Count || string.Equals(Gradient.Stops[index].Color, color.Hex, StringComparison.OrdinalIgnoreCase)) return;
-        Change(g => g.Stops[index] = g.Stops[index] with { Color = color.Hex });
+        Change(g => g.Stops[index].Color = color.Hex);
     }
 
     public void SetStopLocation(int index, double location)
     {
         if (index < 0 || index >= Gradient.Stops.Count) return;
         Selection = $"stop-{index}";
-        Change(g => g.Stops[index] = g.Stops[index] with { Location = Math.Clamp(location, 0, 1) });
+        Change(g => g.Stops[index].Location = Math.Clamp(location, 0, 1));
     }
 
     /// <summary>The selected colour (source or stop), if any.</summary>
     public ColorValue? SelectedColor =>
-        SelectedSourceIndex is { } i ? Gradient.Sources[i].ColorValue
+        SelectedSourceIndex is { } i ? Gradient.Sources[i].ColorValue()
         : SelectedStopIndex is { } j ? ColorValue.FromHex(Gradient.Stops[j].Color) ?? ColorValue.Fallback
         : null;
 

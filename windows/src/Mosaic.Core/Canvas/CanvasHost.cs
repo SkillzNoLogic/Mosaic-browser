@@ -31,51 +31,31 @@ public interface ICanvasLayoutHost
     event Action? LayoutChanged;
 }
 
-/// <summary>
-/// An in-memory stand-in for the shell's store until it lands (nothing is saved; the window is
-/// not drawn from it). Keeps each preset's edits, like <c>MosaicStore</c>.
-/// </summary>
-public sealed class InterimLayoutHost : ICanvasLayoutHost
+/// <summary>The shell's <see cref="MosaicStore"/> as the canvas's host.</summary>
+public sealed class MosaicStoreHost(MosaicStore store) : ICanvasLayoutHost
 {
-    private readonly Dictionary<MosaicPresetID, MosaicLayout> layouts =
-        RawValues.All<MosaicPresetID>().ToDictionary(p => p, MosaicLayout.PresetLayout);
+    public MosaicStore Store => store;
+    public MosaicPresetID ActivePreset => store.ActivePreset;
+    public MosaicLayout Layout => store.Layout;
+    public void ReplaceActiveLayout(MosaicLayout layout) => store.ReplaceActiveLayout(layout);
+    public void ApplyPreset(MosaicPresetID preset) => store.Apply(preset);
+    public void RestoreDefaults(MosaicPresetID preset) => store.RestoreDefaults(preset);
+    public bool IsCustomized(MosaicPresetID preset) => store.IsCustomized(preset);
 
-    public InterimLayoutHost(MosaicPresetID active = MosaicPresetID.ZenArc) => ActivePreset = active;
-
-    public MosaicPresetID ActivePreset { get; private set; }
-
-    public MosaicLayout Layout => layouts[ActivePreset];
-
-    public event Action? LayoutChanged;
-
-    public void ReplaceActiveLayout(MosaicLayout layout)
+    public event Action? LayoutChanged
     {
-        var normalized = layout.Normalized();
-        if (normalized == layouts[ActivePreset]) return;
-        layouts[ActivePreset] = normalized;
-        LayoutChanged?.Invoke();
+        add => store.Changed += value;
+        remove => store.Changed -= value;
     }
-
-    public void ApplyPreset(MosaicPresetID preset)
-    {
-        if (preset == ActivePreset) return;
-        ActivePreset = preset;
-        LayoutChanged?.Invoke();
-    }
-
-    public void RestoreDefaults(MosaicPresetID preset)
-    {
-        layouts[preset] = MosaicLayout.PresetLayout(preset);
-        if (preset == ActivePreset) LayoutChanged?.Invoke();
-    }
-
-    public bool IsCustomized(MosaicPresetID preset) => layouts[preset] != MosaicLayout.PresetLayout(preset);
 }
 
 /// <summary>How the canvas is wired into the app (set by the shell/tabs areas; read once, lazily).</summary>
 public static class CanvasServices
 {
-    /// <summary>The shell's layout store. Until set, an <see cref="InterimLayoutHost"/> is used.</summary>
+    /// <summary>
+    /// The shell's layout store. Until set, an in-memory <see cref="MosaicStore"/> is used
+    /// (once the shell's model is in win-next the default becomes <c>model.Mosaics</c>).
+    /// </summary>
     public static Func<BrowserModel, ICanvasLayoutHost>? HostFactory { get; set; }
 
     /// <summary>The selected workspace (ID as stored in <c>workspaceBackgrounds</c>, and its name).</summary>
@@ -86,7 +66,7 @@ public static class CanvasServices
 
     internal static CanvasController Create(BrowserModel model)
     {
-        var controller = new CanvasController(HostFactory?.Invoke(model) ?? new InterimLayoutHost(), LibraryPath,
+        var controller = new CanvasController(HostFactory?.Invoke(model) ?? new MosaicStoreHost(new MosaicStore(null)), LibraryPath,
             () => Workspace?.Invoke(model) ?? ("default", "Workspace"));
         controller.Notice += text => model.Notice = text;
         return controller;

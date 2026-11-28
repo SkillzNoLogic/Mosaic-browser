@@ -59,7 +59,7 @@ internal static class CanvasFixtures
             case (JsonValue va, JsonValue vb):
                 if (va.GetValueKind() == JsonValueKind.Number && vb.GetValueKind() == JsonValueKind.Number)
                 {
-                    var same = Math.Abs(Mosaic.Core.Canvas.Interim.LayoutJson.Number(va)!.Value - Mosaic.Core.Canvas.Interim.LayoutJson.Number(vb)!.Value) < 1e-12;
+                    var same = Math.Abs(CanvasFixtures.Number(va)!.Value - CanvasFixtures.Number(vb)!.Value) < 1e-12;
                     if (!same) where = $"{path}: {va} vs {vb}";
                     return same;
                 }
@@ -70,6 +70,15 @@ internal static class CanvasFixtures
                 where = $"{path}: {a?.ToJsonString()} vs {b?.ToJsonString()}";
                 return false;
         }
+    }
+
+    public static double? Number(JsonValue v) => v.GetValueKind() == JsonValueKind.Number
+        ? double.Parse(v.ToJsonString(), System.Globalization.CultureInfo.InvariantCulture) : null;
+
+    public static void AssertSameLayout(Mosaic.Core.Canvas.Interim.MosaicLayout expected, Mosaic.Core.Canvas.Interim.MosaicLayout? actual, string context = "")
+    {
+        Assert.NotNull(actual);
+        AssertSameJson(expected.ToJsonObject(), actual!.ToJsonObject(), context);
     }
 
     public static void AssertSameJson(JsonNode? expected, JsonNode? actual, string context = "")

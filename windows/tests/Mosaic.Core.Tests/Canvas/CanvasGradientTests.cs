@@ -71,13 +71,13 @@ public class CanvasColorTests
 
 public class CanvasGradientTests
 {
-    private static GradientSpec Decode(string json) => LayoutJson.DecodeGradient(JsonNode.Parse(json))!;
+    private static GradientSpec Decode(string json) => GradientSpec.FromJson(JsonNode.Parse(json))!;
 
     [Fact]
     public void OldGradientJsonStillDecodesWithDefaultsForNewFields()
     {
         var g = Decode("""{"kind":"radial","angle":90,"stops":[{"color":"#112233","location":0},{"color":"#445566","location":1}]}""");
-        Assert.Equal(GradientSpec.Kind.Radial, g.GradientKind);
+        Assert.Equal(GradientKind.Radial, g.Kind);
         Assert.Equal(90, g.Angle);
         Assert.Equal(2, g.Stops.Count);
         Assert.Empty(g.Sources);
@@ -93,7 +93,7 @@ public class CanvasGradientTests
     public void UnknownKindsFallBackAndEminenceSourcesDecode()
     {
         var g = Decode("""{"kind":"conic","sources":[{"x":0.2,"y":0.3,"hex":"#FF0000"},{"x":"bad"}],"sharpness":3}""");
-        Assert.Equal(GradientSpec.Kind.Linear, g.GradientKind);
+        Assert.Equal(GradientKind.Linear, g.Kind);
         Assert.Equal(2, g.Sources.Count);
         Assert.Equal("#FF0000", g.Sources[0].Color);
         Assert.Equal(0.5, g.Sources[1].X);
@@ -107,9 +107,9 @@ public class CanvasGradientTests
             {"preset":"chrome","name":"Old","tabPlacement":"top","regions":{"titleBar":["tabStrip","newTab"],"toolbar":["back","addressField","menu"]},
              "appearance":{"accent":"#FF0000","background":{"kind":"gradient","gradient":{"kind":"linear","angle":45,"stops":[{"color":"#000000","location":0},{"color":"#FFFFFF","location":1}]}}}}
             """);
-        Assert.Equal(BackgroundSpec.Kind.Gradient, layout.Appearance.Background.BackgroundKind);
+        Assert.Equal(BackgroundKind.Gradient, layout.Appearance.Background.Kind);
         Assert.Equal(45, layout.Appearance.Background.Gradient.Angle);
-        Assert.Equal(NewTabBackground.Mode.Plain, layout.Appearance.NewTabBackground.BackgroundMode);
+        Assert.Equal(NewTabBackgroundMode.Plain, layout.Appearance.NewTabBackground.Mode);
         Assert.Empty(layout.Appearance.WorkspaceBackgrounds);
         Assert.Equal([ShellComponent.Back, ShellComponent.AddressField, ShellComponent.Menu], layout.Components(ShellRegion.Toolbar));
     }
@@ -117,16 +117,16 @@ public class CanvasGradientTests
     [Fact]
     public void AMeshBackgroundRoundTripsThroughALayoutFile()
     {
-        var layout = MosaicLayout.PresetLayout(MosaicPresetID.ZenArc);
+        var layout = MosaicLayout.Factory(MosaicPresetID.ZenArc);
         var g = GradientPresets.Named("Aurora")!;
         g.Noise = 0.3;
         g.Opacity = 0.8;
         g.Raw = true;
-        layout.Appearance.Background = new BackgroundSpec(BackgroundSpec.Kind.Gradient, gradient: g);
-        layout.Appearance.NewTabBackground = new NewTabBackground { BackgroundMode = NewTabBackground.Mode.Custom, Custom = new BackgroundSpec(BackgroundSpec.Kind.Solid, "#123456") };
-        layout.Appearance.WorkspaceBackgrounds = new() { ["W1"] = new BackgroundSpec(BackgroundSpec.Kind.Gradient, gradient: GradientPresets.Named("Ocean")) };
+        layout.Appearance.Background = new BackgroundSpec(BackgroundKind.Gradient, gradient: g);
+        layout.Appearance.NewTabBackground = new NewTabBackground { Mode = NewTabBackgroundMode.Custom, Custom = new BackgroundSpec(BackgroundKind.Solid, "#123456") };
+        layout.Appearance.WorkspaceBackgrounds = new() { ["W1"] = new BackgroundSpec(BackgroundKind.Gradient, gradient: GradientPresets.Named("Ocean")) };
         var decoded = MosaicLayout.FromJson(layout.JsonText());
-        Assert.Equal(layout.Normalized(), decoded);
+        CanvasFixtures.AssertSameLayout(layout.Normalized(), decoded);
         Assert.Equal(4, decoded.Appearance.Background.Gradient.Sources.Count);
         Assert.Equal(2, decoded.Appearance.BackgroundForWorkspace("W1").Gradient.Sources.Count);
         Assert.Equal(decoded.Appearance.Background, decoded.Appearance.BackgroundForWorkspace("other"));
@@ -135,16 +135,16 @@ public class CanvasGradientTests
     [Fact]
     public void BoundsClampNumbersDropInvalidColoursAndCapLists()
     {
-        var g = new GradientSpec(GradientSpec.Kind.Mesh, double.PositiveInfinity, Enumerable.Range(0, 40).Select(i => new GradientStop("#000000", i)))
+        var g = new GradientSpec(GradientKind.Mesh, double.PositiveInfinity, [.. Enumerable.Range(0, 40).Select(i => new GradientStop("#000000", i))])
         {
-            Sources = [.. Enumerable.Range(0, 50).Select(i => GradientSource.Make(3, -2, i == 0 ? "nope" : "#FFFFFF", 99))],
+            Sources = [.. Enumerable.Range(0, 50).Select(i => Gradients.NewSource(3, -2, i == 0 ? "nope" : "#FFFFFF", 99))],
             Sharpness = 40, Noise = -1, Opacity = 0, CenterX = 7,
         };
         var c = g.Clamped();
         Assert.Equal(135, c.Angle);
-        Assert.Equal(Gradients.MaxStops, c.Stops.Count);
+        Assert.Equal(GradientSpec.MaxStops, c.Stops.Count);
         Assert.All(c.Stops, s => Assert.InRange(s.Location, 0, 1));
-        Assert.Equal(Gradients.MaxSources, c.Sources.Count);
+        Assert.Equal(GradientSpec.MaxSources, c.Sources.Count);
         Assert.All(c.Sources, s => Assert.True(s.Color == "#FFFFFF" && s.X == 1 && s.Y == 0 && s.Spread == 3));
         Assert.Equal(c.Sources.Count, c.Sources.Select(s => s.Id).Distinct().Count());
         Assert.True(c.Sharpness == 6 && c.Noise == 0 && c.Opacity == 0.1 && c.CenterX == 1);
@@ -153,7 +153,7 @@ public class CanvasGradientTests
     [Fact]
     public void PresetsAreValidAndUnchangedByClamping()
     {
-        foreach (var (name, gradient) in GradientPresets.All) Assert.True(gradient.Clamped() == gradient, name);
+        foreach (var (name, gradient) in GradientPresets.All) Assert.True(Gradients.Same(gradient.Clamped(), gradient), name);
         Assert.NotNull(GradientPresets.Named("four corners"));
         Assert.Equal(12, GradientPresets.MeshPresets.Count);
         Assert.Equal(18, GradientPresets.All.Count);
@@ -170,7 +170,7 @@ public class CanvasGradientTests
         var expected = ColorValue.FromHex("#FF6B6B")!.Value;
         Assert.True(Math.Abs(image.Pixels[0] / 255.0 - expected.R) < 0.12 && Math.Abs(image.Pixels[1] / 255.0 - expected.G) < 0.12);
         Assert.Equal("#6BCB77", g.MeshColor(1, 1, 2).Hex);
-        var empty = new GradientSpec(GradientSpec.Kind.Mesh).RenderMesh(0, double.NaN);
+        var empty = new GradientSpec { Kind = GradientKind.Mesh }.RenderMesh(0, double.NaN);
         Assert.Equal(1, empty.Width);
         Assert.Equal(empty.Width * empty.Height * 4, empty.Pixels.Length);
     }
@@ -178,21 +178,21 @@ public class CanvasGradientTests
     [Fact]
     public void SwitchingKindsKeepsTheColoursInOrder()
     {
-        var linear = new GradientSpec(GradientSpec.Kind.Linear, 0, [new("#FF0000", 0), new("#00FF00", 0.5), new("#0000FF", 1)]);
-        var mesh = linear.Converted(GradientSpec.Kind.Mesh);
-        Assert.Equal(GradientSpec.Kind.Mesh, mesh.GradientKind);
+        var linear = new GradientSpec(GradientKind.Linear, 0, [new("#FF0000", 0), new("#00FF00", 0.5), new("#0000FF", 1)]);
+        var mesh = linear.Converted(GradientKind.Mesh);
+        Assert.Equal(GradientKind.Mesh, mesh.Kind);
         Assert.Equal(["#FF0000", "#00FF00", "#0000FF"], mesh.Sources.Select(s => s.Color));
         Assert.True(mesh.Sources[0].X == 0 && mesh.Sources[2].X == 1);
-        var back = mesh.Converted(GradientSpec.Kind.Linear);
+        var back = mesh.Converted(GradientKind.Linear);
         Assert.Equal(["#FF0000", "#00FF00", "#0000FF"], back.Stops.Select(s => s.Color));
         Assert.True(back.Stops[0].Location == 0 && back.Stops[^1].Location == 1);
-        Assert.Equal(linear.Stops, linear.Converted(GradientSpec.Kind.Radial).Stops);
+        Assert.Equal(linear.Stops.Select(s => (s.Color, s.Location)), linear.Converted(GradientKind.Radial).Stops.Select(s => (s.Color, s.Location)));
     }
 
     [Fact]
     public void ColourAlongTheStops()
     {
-        var g = new GradientSpec(stops: [new("#000000", 0), new("#FFFFFF", 1)]);
+        var g = new GradientSpec(GradientKind.Linear, 135, new("#000000", 0), new("#FFFFFF", 1));
         Assert.Equal("#808080", g.StopColor(0.5).Hex);
         Assert.Equal("#000000", g.StopColor(-3).Hex);
         Assert.Equal("#000000", g.StopColor(double.NaN).Hex);
@@ -213,7 +213,7 @@ public class CanvasGradientTests
             var name = entry!["name"]!.GetValue<string>();
             var g = GradientPresets.Named(name)!;
             AssertNear(entry["average"]!.GetValue<string>(), g.AverageColor(), $"{name} average");
-            if (g.GradientKind == GradientSpec.Kind.Mesh)
+            if (g.Kind == GradientKind.Mesh)
             {
                 var image = g.RenderMesh(24, 1.6);
                 Assert.Equal(entry["meshWidth"]!.GetValue<int>(), image.Width);
@@ -227,7 +227,7 @@ public class CanvasGradientTests
                 AssertNear(at[0], g.MeshColor(0.1, 0.2, 1.6), name);
                 AssertNear(at[1], g.MeshColor(0.5, 0.5, 1.6), name);
                 AssertNear(at[2], g.MeshColor(0.9, 0.7, 1.6), name);
-                var stops = g.Converted(GradientSpec.Kind.Linear).Stops;
+                var stops = g.Converted(GradientKind.Linear).Stops;
                 var expectedStops = entry["asLinear"]!.AsArray();
                 Assert.Equal(expectedStops.Count, stops.Count);
                 for (var i = 0; i < stops.Count; i++)
@@ -241,7 +241,7 @@ public class CanvasGradientTests
                 double[] at = [0, 0.25, 0.5, 0.8, 1];
                 var expected = entry["stopsAt"]!.AsArray().Select(v => v!.GetValue<string>()).ToArray();
                 Assert.Equal(expected, at.Select(t => g.StopColor(t).Hex));
-                var sources = g.Converted(GradientSpec.Kind.Mesh).Sources;
+                var sources = g.Converted(GradientKind.Mesh).Sources;
                 var expectedSources = entry["asMesh"]!.AsArray();
                 Assert.Equal(expectedSources.Count, sources.Count);
                 for (var i = 0; i < sources.Count; i++)
@@ -258,20 +258,20 @@ public class CanvasGradientTests
     public void RasterDrawsEveryKindWithSwiftUIGeometry()
     {
         // Linear at 0°: left edge is the first stop, right edge the last.
-        var linear = new GradientSpec(GradientSpec.Kind.Linear, 0, [new("#000000", 0), new("#FFFFFF", 1)]);
+        var linear = new GradientSpec(GradientKind.Linear, 0, [new("#000000", 0), new("#FFFFFF", 1)]);
         var (pixels, width, height) = GradientRaster.Render(linear, 100, 2, bgra: false);
         Assert.Equal((100, 50), (width, height));
         Assert.True(pixels[0] < 5 && pixels[(width - 1) * 4] > 250);
         // 90° runs top to bottom.
-        var down = GradientRaster.Render(new GradientSpec(GradientSpec.Kind.Linear, 90, linear.Stops), 10, 1, bgra: false);
+        var down = GradientRaster.Render(new GradientSpec(GradientKind.Linear, 90, [.. linear.Stops]), 10, 1, bgra: false);
         Assert.True(down.Pixels[0] < 20 && down.Pixels[(9 * 10) * 4] > 235);
         // Radial: the centre is the first stop.
-        var radial = new GradientSpec(GradientSpec.Kind.Radial, 0, [new("#FF0000", 0), new("#0000FF", 1)], centerX: 0.5, centerY: 0.5);
+        var radial = new GradientSpec(GradientKind.Radial, 0, new("#FF0000", 0), new("#0000FF", 1));
         var r = GradientRaster.Render(radial, 21, 1, bgra: false);
         var centre = (10 * 21 + 10) * 4;
         Assert.True(r.Pixels[centre] > 240 && r.Pixels[centre + 2] < 20);
         // Angular from 0°: just below the +x axis is the start, just above it the end.
-        var angular = new GradientSpec(GradientSpec.Kind.Angular, 0, [new("#000000", 0), new("#FFFFFF", 1)]);
+        var angular = new GradientSpec(GradientKind.Angular, 0, [new("#000000", 0), new("#FFFFFF", 1)]);
         var a = GradientRaster.Render(angular, 41, 1, bgra: false);
         Assert.True(a.Pixels[(21 * 41 + 40) * 4] < 30, "clockwise start below the axis");
         Assert.True(a.Pixels[(19 * 41 + 40) * 4] > 225, "end above the axis");

@@ -118,7 +118,7 @@ public static class CanvasAutomation
             case "canvasAdd":
             {
                 var parts = value.Split('>', 2);
-                if (RawValues.Parse<ShellComponent>(parts[0]) is not { } component) return Unreadable(canvas, value);
+                if (JsonEnum.Parse<ShellComponent>(parts[0]) is not { } component) return Unreadable(canvas, value);
                 if (parts.Length > 1)
                 {
                     if (ParseRegion(parts[1]) is not var (region, index)) return Unreadable(canvas, value);
@@ -147,11 +147,11 @@ public static class CanvasAutomation
             case "canvasRedo": canvas.Redo(); break;
             case "canvasReset": canvas.ResetToPreset(); break;
             case "canvasTabs":
-                if (RawValues.Parse<TabPlacement>(value) is not { } placement) return Unreadable(canvas, value);
+                if (JsonEnum.Parse<TabPlacement>(value) is not { } placement) return Unreadable(canvas, value);
                 canvas.SetTabPlacement(placement);
                 break;
             case "gradientTarget":
-                if (RawValues.Parse<CanvasController.GradientTarget>(value) is not { } gradientTarget) return Unreadable(canvas, value);
+                if (JsonEnum.Parse<CanvasController.GradientTarget>(value) is not { } gradientTarget) return Unreadable(canvas, value);
                 canvas.Target = gradientTarget;
                 break;
             case "gradientApply":
@@ -181,7 +181,7 @@ public static class CanvasAutomation
             {
                 string? text = null;
                 try { text = await File.ReadAllTextAsync(value); } catch (Exception) { }
-                if (text is null || CanvasJson.ReadGradient(text) is not { } spec)
+                if (text is null || ReadGradient(text) is not { } spec)
                 {
                     var message = $"Automation: couldn’t read a gradient from {value}.";
                     canvas.Say(message, true);
@@ -192,8 +192,8 @@ public static class CanvasAutomation
                 break;
             }
             case "newTabBackground":
-                if (RawValues.Parse<NewTabBackground.Mode>(value) is not { } newTabMode) return Unreadable(canvas, value);
-                canvas.Set(l => l.Appearance.NewTabBackground.BackgroundMode = newTabMode);
+                if (JsonEnum.Parse<NewTabBackgroundMode>(value) is not { } newTabMode) return Unreadable(canvas, value);
+                canvas.Set(l => l.Appearance.NewTabBackground.Mode = newTabMode);
                 break;
             case "configSave":
                 canvas.SaveCurrent(value);
@@ -238,7 +238,14 @@ public static class CanvasAutomation
         return null;
     }
 
-    private static T? Parse<T>(string value) where T : struct, Enum => RawValues.Parse<T>(value);
+    private static T? Parse<T>(string value) where T : struct, Enum => JsonEnum.Parse<T>(value);
+
+    /// <summary>A gradient file (a GradientSpec as JSON), or null when it isn't one.</summary>
+    internal static GradientSpec? ReadGradient(string json)
+    {
+        try { return GradientSpec.FromJson(JsonNode.Parse(json)); }
+        catch (Exception) { return null; }
+    }
 
     // MARK: Parsing
 
@@ -246,7 +253,7 @@ public static class CanvasAutomation
     private static (ShellRegion Region, int? Index)? ParseRegion(string text)
     {
         var parts = text.Split(':');
-        if (RawValues.Parse<ShellRegion>(parts[0]) is not { } region) return null;
+        if (JsonEnum.Parse<ShellRegion>(parts[0]) is not { } region) return null;
         if (parts.Length > 1)
         {
             if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var index)) return null;
@@ -259,7 +266,7 @@ public static class CanvasAutomation
     private static CanvasSlot? ParseSlot(string text, CanvasController canvas)
     {
         if (ParseRegion(text) is var (region, index) && index is { } i) return new CanvasSlot(region, i);
-        return RawValues.Parse<ShellComponent>(text) is { } component ? canvas.Locate(component) : null;
+        return JsonEnum.Parse<ShellComponent>(text) is { } component ? canvas.Locate(component) : null;
     }
 
     private static (CanvasSlot From, ShellRegion Region, int? Index)? ParseMove(string text, CanvasController canvas)
@@ -308,7 +315,7 @@ public static class CanvasAutomation
         switch (key)
         {
             case "kind":
-                if (RawValues.Parse<GradientSpec.Kind>(value) is not { } kind) return false;
+                if (JsonEnum.Parse<GradientKind>(value) is not { } kind) return false;
                 g = g.Converted(kind);
                 break;
             case "angle": g.Angle = number ?? g.Angle; break;
@@ -323,8 +330,8 @@ public static class CanvasAutomation
                 var parts = value.Split(',');
                 if (parts.Length != 3 || !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var x)
                     || !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var y)) return false;
-                if (g.Sources.Count == 0) g.Sources = [.. g.MeshSources()];
-                g.Sources.Add(GradientSource.Make(x, y, parts[2]));
+                if (g.Sources.Count == 0) g.Sources = [.. g.MeshSources];
+                g.Sources.Add(Gradients.NewSource(x, y, parts[2]));
                 break;
             }
             case "stops":
@@ -347,7 +354,7 @@ public static class CanvasAutomation
         var layout = canvas.Layout;
         var studio = canvas.Studio;
         var usesGradient = new JsonObject();
-        foreach (var target in RawValues.All<CanvasController.GradientTarget>()) usesGradient[target.Raw()] = canvas.UsesGradient(target);
+        foreach (var target in Enum.GetValues<CanvasController.GradientTarget>()) usesGradient[target.Raw()] = canvas.UsesGradient(target);
         var fields = new JsonObject
         {
             ["created"] = true,
@@ -361,19 +368,19 @@ public static class CanvasAutomation
             ["messageIsError"] = canvas.Message?.IsError ?? false,
             ["palette"] = new JsonArray([.. LayoutCanvasRules.Palette(layout).Select(c => (JsonNode)c.Raw())]),
             ["hasSettingsAccess"] = LayoutCanvasRules.HasSettingsAccess(layout),
-            ["layout"] = layout.ToJson()["regions"]!.DeepClone(),
+            ["layout"] = layout.ToJsonObject()["regions"]!.DeepClone(),
             ["tabPlacement"] = layout.TabPlacement.Raw(),
             ["gradientTarget"] = canvas.Target.Raw(),
             ["usesGradient"] = usesGradient,
             ["workspaceID"] = canvas.WorkspaceID,
             ["meshImagesRendered"] = GradientRaster.RenderCount,
-            ["background"] = LayoutJson.Encode(canvas.Background(canvas.Target)),
-            ["newTabBackground"] = layout.Appearance.NewTabBackground.BackgroundMode.Raw(),
+            ["background"] = canvas.Background(canvas.Target).ToJson(),
+            ["newTabBackground"] = layout.Appearance.NewTabBackground.Mode.Raw(),
             ["studio"] = new JsonObject
             {
-                ["kind"] = studio.Gradient.GradientKind.Raw(),
+                ["kind"] = studio.Gradient.Kind.Raw(),
                 ["selection"] = studio.SelectedSourceIndex ?? studio.SelectedStopIndex ?? -1,
-                ["colors"] = new JsonArray([.. studio.Gradient.Colors().Select(c => (JsonNode)c)]),
+                ["colors"] = new JsonArray([.. studio.Gradient.Colors.Select(c => (JsonNode)c)]),
                 ["inUse"] = studio.IsInUse,
                 ["applied"] = studio.IsApplied,
             },

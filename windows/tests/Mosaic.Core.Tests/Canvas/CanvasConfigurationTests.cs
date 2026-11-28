@@ -7,7 +7,7 @@ namespace Mosaic.Core.Tests.Canvas;
 
 public class CanvasConfigurationTests
 {
-    private static MosaicLayout P(MosaicPresetID id) => MosaicLayout.PresetLayout(id);
+    private static MosaicLayout P(MosaicPresetID id) => MosaicLayout.Factory(id);
 
     [Fact]
     public void SaveUniqueNamesRenameDeleteActive()
@@ -40,7 +40,7 @@ public class CanvasConfigurationTests
     {
         var lib = new ConfigurationLibrary();
         lib.Save("One", P(MosaicPresetID.Opera));
-        lib.Save("Two", P(MosaicPresetID.Safari));
+        lib.Save("Two", P(MosaicPresetID.Edge));
         var dir = Path.Combine(Path.GetTempPath(), "canvas-" + Guid.NewGuid());
         var path = Path.Combine(dir, "configurations.json");
         try
@@ -48,7 +48,7 @@ public class CanvasConfigurationTests
             ConfigurationLibrary.WriteFile(path, lib.ToJson());
             var loaded = ConfigurationLibrary.Load(path);
             Assert.Equal(["One", "Two"], loaded.Configurations.Select(c => c.Name));
-            Assert.Equal(lib.Configurations.Select(c => c.Layout), loaded.Configurations.Select(c => c.Layout));
+            Assert.Equal(lib.Configurations.Select(c => c.Layout.JsonText()), loaded.Configurations.Select(c => c.Layout.JsonText()));
             Assert.Equal(lib.Configurations.Select(c => c.Created), loaded.Configurations.Select(c => c.Created));
 
             var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
@@ -76,14 +76,14 @@ public class CanvasConfigurationTests
         Assert.Empty(report.Messages);
         var expected = LayoutCanvasRules.Usable(layout);
         expected.Name = "GX Mesh";
-        Assert.Equal(expected, report.Layout);
+        CanvasFixtures.AssertSameLayout(expected, report.Layout);
     }
 
     [Fact]
     public void ABareLayoutImports()
     {
-        var report = LayoutTransfer.ImportLayout(P(MosaicPresetID.Safari).JsonText()).Report!;
-        Assert.Equal(P(MosaicPresetID.Safari), report.Layout);
+        var report = LayoutTransfer.ImportLayout(P(MosaicPresetID.Edge).JsonText()).Report!;
+        CanvasFixtures.AssertSameLayout(P(MosaicPresetID.Edge), report.Layout);
         Assert.Empty(report.Messages);
     }
 
@@ -145,20 +145,28 @@ public class CanvasConfigurationTests
     {
         var text = CanvasFixtures.Text($"macos-export-{name}.json");
         var report = LayoutTransfer.ImportLayout(text).Report!;
-        Assert.Empty(report.Messages);
         var file = JsonNode.Parse(text)!.AsObject();
         Assert.Equal(file["name"]!.GetValue<string>(), report.Name);
+        if (name == "safari")
+        {
+            // Windows has no Safari Mosaic: the shell's model reads it as Microsoft Edge, look kept; the import says so.
+            Assert.Equal(["A Safari layout from a Mac: Windows shows it as Microsoft Edge, keeping its colours and backgrounds."], report.Messages);
+            Assert.Equal(MosaicPresetID.Edge, report.Layout.Preset);
+            return;
+        }
+        Assert.Empty(report.Messages);
         if (name != "custom")
         {
-            var preset = RawValues.Parse<MosaicPresetID>(name)!.Value;
-            var expected = MosaicLayout.PresetLayout(preset);
+            var preset = JsonEnum.Parse<MosaicPresetID>(name)!.Value;
+            var expected = MosaicLayout.Factory(preset);
             expected.Name = preset.Title();
-            Assert.Equal(expected, report.Layout);
+            CanvasFixtures.AssertSameLayout(expected, report.Layout);
         }
         // Windows' export of the same layout at the same moment is the same JSON document.
         var exported = Iso8601.Read(file["exported"]!.GetValue<string>())!.Value;
         var windows = LayoutTransfer.Export(report.Name, report.Layout, exported);
         CanvasFixtures.AssertSameJson(file, JsonNode.Parse(windows), $"export {name}");
+        Assert.Equal(text, windows);  // byte for byte, as macOS's JSONEncoder writes it
     }
 
     [Fact]
@@ -166,12 +174,12 @@ public class CanvasConfigurationTests
     {
         var layout = LayoutTransfer.ImportLayout(CanvasFixtures.Text("macos-export-custom.json")).Report!.Layout;
         var a = layout.Appearance;
-        Assert.Equal(GradientSpec.Kind.Mesh, a.Background.Gradient.GradientKind);
+        Assert.Equal(GradientKind.Mesh, a.Background.Gradient.Kind);
         Assert.Equal(4, a.Background.Gradient.Sources.Count);
         Assert.Equal(0.35, a.Background.Gradient.Noise);
         Assert.True(a.Background.Gradient.Raw);
-        Assert.Equal(NewTabBackground.Mode.Custom, a.NewTabBackground.BackgroundMode);
-        Assert.Equal(GradientSpec.Kind.Radial, a.NewTabBackground.Custom.Gradient.GradientKind);
+        Assert.Equal(NewTabBackgroundMode.Custom, a.NewTabBackground.Mode);
+        Assert.Equal(GradientKind.Radial, a.NewTabBackground.Custom.Gradient.Kind);
         Assert.Equal(0.3, a.NewTabBackground.Custom.Gradient.CenterX);
         Assert.Equal(2, a.WorkspaceBackgrounds.Count);
         Assert.Equal("#336699", a.BackgroundForWorkspace("A0B1C2D3-0000-4000-8000-000000000001").Color);
@@ -188,10 +196,11 @@ public class CanvasConfigurationTests
         Assert.Equal("66666666-7777-4888-9999-AAAAAAAAAAAA", lib.ActiveID);
         Assert.Equal(new DateTimeOffset(2026, 9, 21, 14, 13, 20, TimeSpan.Zero), lib.Configurations[0].Created);
         Assert.Equal(lib.Configurations[0].Created.AddHours(1), lib.Configurations[0].Modified);
-        Assert.Equal(GradientSpec.Kind.Mesh, lib.Find("gx aurora")!.Layout.Appearance.Background.Gradient.GradientKind);
+        Assert.Equal(GradientKind.Mesh, lib.Find("gx aurora")!.Layout.Appearance.Background.Gradient.Kind);
         CanvasFixtures.AssertSameJson(JsonNode.Parse(text), JsonNode.Parse(lib.ToJson()), "configurations.json");
+        Assert.Equal(text, lib.ToJson());  // byte for byte
         // Dates are written the way macOS's decoder demands (no fractional seconds).
-        Assert.Contains("\"created\": \"2026-09-21T14:13:20Z\"", lib.ToJson());
+        Assert.Contains("\"created\" : \"2026-09-21T14:13:20Z\"", lib.ToJson());
     }
 
     [Fact]
@@ -199,7 +208,7 @@ public class CanvasConfigurationTests
     {
         var report = LayoutTransfer.ImportLayout(CanvasFixtures.Text("macos-bare-zenArc.json")).Report!;
         Assert.Empty(report.Messages);
-        Assert.Equal(P(MosaicPresetID.ZenArc), report.Layout);
+        CanvasFixtures.AssertSameLayout(P(MosaicPresetID.ZenArc), report.Layout);
     }
 
     [Fact]
@@ -208,6 +217,13 @@ public class CanvasConfigurationTests
         foreach (var (name, expected) in CanvasFixtures.Expectations["imports"]!.AsObject())
         {
             var result = LayoutTransfer.ImportLayout(expected!["input"]!.GetValue<string>());
+            if (name == "edge")
+            {
+                // macOS doesn't know the Edge preset (Windows only); Windows reads it as Edge.
+                Assert.Equal(MosaicPresetID.Edge, result.Report!.Layout.Preset);
+                Assert.DoesNotContain(result.Report.Messages, m => m.Contains("Unknown preset"));
+                continue;
+            }
             if (expected["error"] is { } error)
             {
                 Assert.True(result.Error is not null, $"{name}: expected an error");
@@ -218,7 +234,7 @@ public class CanvasConfigurationTests
             Assert.Equal(expected["name"]!.GetValue<string>(), result.Report!.Name);
             Assert.Equal(expected["messages"]!.AsArray().Select(m => m!.GetValue<string>()), result.Report.Messages);
             // Sources without an ID get a fresh random one on both platforms.
-            CanvasFixtures.AssertSameJson(WithoutSourceIds(expected["layout"]!.DeepClone()), WithoutSourceIds(result.Report.Layout.ToJson()), $"import {name}");
+            CanvasFixtures.AssertSameJson(WithoutSourceIds(expected["layout"]!.DeepClone()), WithoutSourceIds(result.Report.Layout.ToJsonObject()), $"import {name}");
         }
     }
 
@@ -242,7 +258,7 @@ public class CanvasConfigurationTests
         var layout = P(MosaicPresetID.Chrome);
         var text = LayoutTransfer.Export("Café “Mosaic”", layout, DateTimeOffset.UnixEpoch);
         Assert.Contains("Café “Mosaic”", text);
-        Assert.Contains("\"exported\": \"1970-01-01T00:00:00Z\"", text);
+        Assert.Contains("\"exported\" : \"1970-01-01T00:00:00Z\"", text);
         Assert.Equal("Café “Mosaic”", LayoutTransfer.ImportLayout(Encoding.UTF8.GetBytes(text)).Report!.Name);
     }
 }

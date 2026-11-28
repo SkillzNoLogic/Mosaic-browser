@@ -136,7 +136,7 @@ public sealed class CanvasController
         get
         {
             if (!histories.TryGetValue(host.ActivePreset, out var history))
-                histories[host.ActivePreset] = history = new EditHistory<MosaicLayout>(100);
+                histories[host.ActivePreset] = history = new EditHistory<MosaicLayout>(100, Gradients.LayoutComparer);
             return history;
         }
     }
@@ -153,7 +153,7 @@ public sealed class CanvasController
     {
         var current = Layout;
         var usable = LayoutCanvasRules.Usable(newLayout);
-        if (usable == current) return;
+        if (usable.ContentEquals(current)) return;
         var now = Clock();
         if (!(coalesce is not null && lastRecord is { } last && last.Key == coalesce && (now - last.At).TotalSeconds < 1))
             History.Record(current);
@@ -187,7 +187,7 @@ public sealed class CanvasController
     {
         EndGrab(true);
         var preset = host.ActivePreset;
-        Apply(MosaicLayout.PresetLayout(preset));
+        Apply(MosaicLayout.Factory(preset));
         Selection = null;
         Say($"{preset.Title()} restored to its defaults. Undo brings your changes back.", false);
     }
@@ -361,7 +361,7 @@ public sealed class CanvasController
         Grab = null;
         if (commit)
         {
-            if (grab.Start != Layout)
+            if (!grab.Start.ContentEquals(Layout))
             {
                 History.Record(grab.Start);
                 lastRecord = null;
@@ -427,7 +427,7 @@ public sealed class CanvasController
         return target switch
         {
             GradientTarget.Window => a.Background,
-            GradientTarget.NewTab => a.NewTabBackground.BackgroundMode == NewTabBackground.Mode.Window
+            GradientTarget.NewTab => a.NewTabBackground.Mode == NewTabBackgroundMode.Window
                 ? a.BackgroundForWorkspace(WorkspaceID) : a.NewTabBackground.Custom,
             _ => a.BackgroundForWorkspace(WorkspaceID),
         };
@@ -439,10 +439,10 @@ public sealed class CanvasController
         var a = Layout.Appearance;
         return target switch
         {
-            GradientTarget.Window => a.Background.BackgroundKind == BackgroundSpec.Kind.Gradient,
-            GradientTarget.NewTab => a.NewTabBackground.BackgroundMode == NewTabBackground.Mode.Custom
-                && a.NewTabBackground.Custom.BackgroundKind == BackgroundSpec.Kind.Gradient,
-            _ => a.WorkspaceBackgrounds.TryGetValue(WorkspaceID, out var spec) && spec.BackgroundKind == BackgroundSpec.Kind.Gradient,
+            GradientTarget.Window => a.Background.Kind == BackgroundKind.Gradient,
+            GradientTarget.NewTab => a.NewTabBackground.Mode == NewTabBackgroundMode.Custom
+                && a.NewTabBackground.Custom.Kind == BackgroundKind.Gradient,
+            _ => a.WorkspaceBackgrounds.TryGetValue(WorkspaceID, out var spec) && spec.Kind == BackgroundKind.Gradient,
         };
     }
 
@@ -454,17 +454,17 @@ public sealed class CanvasController
         switch (target)
         {
             case GradientTarget.Window:
-                a.Background.BackgroundKind = BackgroundSpec.Kind.Gradient;
+                a.Background.Kind = BackgroundKind.Gradient;
                 a.Background.Gradient = clean;
                 break;
             case GradientTarget.NewTab:
-                a.NewTabBackground.BackgroundMode = NewTabBackground.Mode.Custom;
-                a.NewTabBackground.Custom.BackgroundKind = BackgroundSpec.Kind.Gradient;
+                a.NewTabBackground.Mode = NewTabBackgroundMode.Custom;
+                a.NewTabBackground.Custom.Kind = BackgroundKind.Gradient;
                 a.NewTabBackground.Custom.Gradient = clean;
                 break;
             default:
                 var spec = (a.WorkspaceBackgrounds.TryGetValue(WorkspaceID, out var own) ? own : a.Background).Clone();
-                spec.BackgroundKind = BackgroundSpec.Kind.Gradient;
+                spec.Kind = BackgroundKind.Gradient;
                 spec.Gradient = clean;
                 a.WorkspaceBackgrounds[WorkspaceID] = spec;
                 break;
@@ -484,7 +484,7 @@ public sealed class CanvasController
 
     /// <summary>The saved configuration the window shows unchanged, if any.</summary>
     public LayoutConfiguration? ActiveConfiguration =>
-        Library.Configurations.FirstOrDefault(c => c.Layout == Layout && host.ActivePreset == c.Layout.Preset);
+        Library.Configurations.FirstOrDefault(c => c.Layout.ContentEquals(Layout) && host.ActivePreset == c.Layout.Preset);
 
     public LayoutConfiguration? SaveCurrent(string name)
     {
@@ -616,7 +616,7 @@ public sealed class CanvasController
     public void RestoreAllPresetDefaults()
     {
         EndGrab(true);
-        foreach (var preset in RawValues.All<MosaicPresetID>().Where(p => p != host.ActivePreset)) host.RestoreDefaults(preset);
+        foreach (var preset in Enum.GetValues<MosaicPresetID>().Where(p => p != host.ActivePreset)) host.RestoreDefaults(preset);
         ResetToPreset();
         Say("All presets restored to their defaults. Your saved configurations are kept.", false);
     }

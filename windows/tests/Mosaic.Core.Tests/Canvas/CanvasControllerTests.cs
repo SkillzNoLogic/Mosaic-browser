@@ -12,7 +12,7 @@ namespace Mosaic.Core.Tests.Canvas;
 internal sealed class CanvasHarness : IDisposable
 {
     public string Directory { get; } = Path.Combine(Path.GetTempPath(), "mosaic-canvas-" + Guid.NewGuid().ToString("N"));
-    public InterimLayoutHost Host { get; }
+    public MosaicStoreHost Host { get; }
     public CanvasController Canvas { get; }
     public DateTime Now { get; set; } = new(2026, 11, 28, 12, 0, 0, DateTimeKind.Utc);
     public List<string> Announcements { get; } = [];
@@ -22,7 +22,9 @@ internal sealed class CanvasHarness : IDisposable
     public CanvasHarness(MosaicPresetID preset = MosaicPresetID.Chrome)
     {
         System.IO.Directory.CreateDirectory(Directory);
-        Host = new InterimLayoutHost(preset);
+        var store = new MosaicStore(null);
+        store.Apply(preset);
+        Host = new MosaicStoreHost(store);
         Canvas = new CanvasController(Host, LibraryPath, () => ("W-1", "Research")) { Clock = () => Now };
         Canvas.Announce += Announcements.Add;
         Canvas.Notice += Notices.Add;
@@ -54,7 +56,7 @@ public class CanvasControllerTests
         Assert.True(h.Canvas.CanUndo);
         Assert.Contains("Home, Title Bar, 1 of 4", h.Announcements);
         h.Canvas.Undo();
-        Assert.Equal(original, h.Layout);
+        CanvasFixtures.AssertSameLayout(original, h.Layout);
         Assert.Equal("Undone.", h.Canvas.Message?.Text);
         Assert.True(h.Canvas.CanRedo);
         h.Canvas.Redo();
@@ -68,7 +70,7 @@ public class CanvasControllerTests
         using var h = new CanvasHarness();
         var before = h.Layout;
         h.Canvas.Remove(new(ShellRegion.Toolbar, h.Index(ShellRegion.Toolbar, ShellComponent.AddressField)));
-        Assert.Equal(before, h.Layout);
+        CanvasFixtures.AssertSameLayout(before, h.Layout);
         Assert.True(h.Canvas.Message!.IsError);
         Assert.StartsWith("The address field is always part of the window", h.Canvas.Message.Text);
         Assert.False(h.Canvas.CanUndo);
@@ -111,14 +113,14 @@ public class CanvasControllerTests
         Assert.Null(h.Canvas.Grab);
         Assert.Equal(1, h.Canvas.UndoDepth);
         h.Canvas.Undo();
-        Assert.Equal(original, h.Layout);
+        CanvasFixtures.AssertSameLayout(original, h.Layout);
 
         h.Canvas.Selection = new CanvasSlot(ShellRegion.Toolbar, 0);
         h.Canvas.ToggleGrab();
         h.Canvas.MoveSelected(Key.Up);
         Assert.Contains(ShellComponent.Back, h.Layout.Components(ShellRegion.TitleBar));
         h.Canvas.EndGrab(commit: false);
-        Assert.Equal(original, h.Layout);
+        CanvasFixtures.AssertSameLayout(original, h.Layout);
         Assert.Equal(new CanvasSlot(ShellRegion.Toolbar, 0), h.Canvas.Selection);
         Assert.Equal("Move cancelled.", h.Canvas.Message?.Text);
     }
@@ -154,7 +156,7 @@ public class CanvasControllerTests
         h.Canvas.Undo();
         Assert.Equal(TabPlacement.Top, h.Layout.TabPlacement);
         h.Canvas.ResetToPreset();
-        Assert.Equal(MosaicLayout.PresetLayout(MosaicPresetID.Chrome), h.Layout);
+        CanvasFixtures.AssertSameLayout(MosaicLayout.Factory(MosaicPresetID.Chrome), h.Layout);
     }
 
     [Fact]
@@ -177,14 +179,14 @@ public class CanvasControllerTests
         await h.Canvas.FlushAsync();
         var onDisk = ConfigurationLibrary.Load(h.LibraryPath);
         Assert.Equal(["Focus"], onDisk.Configurations.Select(c => c.Name));
-        Assert.Equal(h.Layout, onDisk.Configurations[0].Layout);
+        CanvasFixtures.AssertSameLayout(h.Layout, onDisk.Configurations[0].Layout);
         h.Canvas.DeleteConfiguration(saved.Id);
         await h.Canvas.FlushAsync();
         Assert.Empty(ConfigurationLibrary.Load(h.LibraryPath).Configurations);
         // A new controller reads the file.
         h.Canvas.SaveCurrent("Again");
         await h.Canvas.FlushAsync();
-        var again = new CanvasController(new InterimLayoutHost(), h.LibraryPath);
+        var again = new CanvasController(new MosaicStoreHost(new MosaicStore(null)), h.LibraryPath);
         Assert.Equal("Again", again.Library.Configurations.Single().Name);
     });
 
@@ -197,7 +199,7 @@ public class CanvasControllerTests
         Assert.Equal("GX Aurora", outcome.Name);
         Assert.Empty(outcome.Messages);
         Assert.Equal(MosaicPresetID.Opera, h.Host.ActivePreset);
-        Assert.Equal(GradientSpec.Kind.Mesh, h.Layout.Appearance.Background.Gradient.GradientKind);
+        Assert.Equal(GradientKind.Mesh, h.Layout.Appearance.Background.Gradient.Kind);
         Assert.Equal("GX Aurora", h.Canvas.ActiveConfiguration?.Name);
         Assert.Equal("Imported “GX Aurora”.", h.Canvas.Message?.Text);
 
@@ -206,7 +208,7 @@ public class CanvasControllerTests
         var before = h.Layout;
         var refused = await h.Canvas.ImportFileAsync(junk);
         Assert.Equal("The file doesn’t contain a Mosaic layout.", refused.Error);
-        Assert.Equal(before, h.Layout);
+        CanvasFixtures.AssertSameLayout(before, h.Layout);
         Assert.Single(h.Canvas.Library.Configurations);
         var missing = await h.Canvas.ImportFileAsync(Path.Combine(h.Directory, "missing.json"));
         Assert.Equal("The file couldn’t be opened.", missing.Error);
@@ -222,7 +224,7 @@ public class CanvasControllerTests
         Assert.Equal("dev.mosaic.layout", (string)file["format"]!);
         Assert.Equal(1, (int)file["version"]!);
         Assert.Matches(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", (string)file["exported"]!);
-        Assert.Equal(MosaicLayout.PresetLayout(MosaicPresetID.Opera), LayoutTransfer.ImportLayout(await File.ReadAllTextAsync(path)).Report!.Layout);
+        CanvasFixtures.AssertSameLayout(MosaicLayout.Factory(MosaicPresetID.Opera), LayoutTransfer.ImportLayout(await File.ReadAllTextAsync(path)).Report!.Layout);
     });
 
     [Fact]
@@ -250,7 +252,7 @@ public class GradientStudioTests
         var studio = h.Canvas.Studio;
         studio.Load();
         Assert.True(studio.IsInUse);
-        Assert.Equal(GradientSpec.Kind.Linear, studio.Gradient.GradientKind);
+        Assert.Equal(GradientKind.Linear, studio.Gradient.Kind);
         for (var i = 1; i <= 5; i++)
         {
             studio.SetAngle(100 + i);
@@ -269,14 +271,14 @@ public class GradientStudioTests
         using var h = new CanvasHarness(MosaicPresetID.ZenArc);
         var studio = h.Canvas.Studio;
         studio.Load();
-        studio.ChangeKind(GradientSpec.Kind.Mesh);
-        Assert.Equal(GradientSpec.Kind.Mesh, h.Layout.Appearance.Background.Gradient.GradientKind);
+        studio.ChangeKind(GradientKind.Mesh);
+        Assert.Equal(GradientKind.Mesh, h.Layout.Appearance.Background.Gradient.Kind);
         var id = studio.Gradient.Sources[0].Id;
         var before = h.Layout;
         studio.BeginDrag();
         studio.MoveSource(id, 0.9, 0.9);
         studio.MoveSource(id, 0.8, 0.7);
-        Assert.Equal(before, h.Layout);
+        CanvasFixtures.AssertSameLayout(before, h.Layout);
         studio.EndDrag();
         var source = h.Layout.Appearance.Background.Gradient.Sources.Single(s => s.Id == id);
         Assert.Equal((0.8, 0.7), (source.X, source.Y));
@@ -301,15 +303,15 @@ public class GradientStudioTests
         Assert.Equal(0.3, studio.Gradient.Sources[^1].X, 9);
         studio.RemoveSelected();
         Assert.Equal(3, studio.Gradient.Sources.Count);
-        Assert.Equal(MosaicLayout.PresetLayout(MosaicPresetID.Chrome), h.Layout);  // not in use: the window is untouched
+        CanvasFixtures.AssertSameLayout(MosaicLayout.Factory(MosaicPresetID.Chrome), h.Layout);  // not in use: the window is untouched
 
-        studio.ChangeKind(GradientSpec.Kind.Linear);
+        studio.ChangeKind(GradientKind.Linear);
         Assert.True(studio.AddStop(0.5));
         Assert.Equal($"stop-{studio.Gradient.Stops.Count - 1}", studio.Selection);
         Assert.Equal(studio.Gradient.Clone().StopColor(0.5).Hex, studio.Gradient.Stops[^1].Color);
         studio.Use();
         Assert.True(studio.IsApplied);
-        Assert.Equal(BackgroundSpec.Kind.Gradient, h.Layout.Appearance.Background.BackgroundKind);
+        Assert.Equal(BackgroundKind.Gradient, h.Layout.Appearance.Background.Kind);
     }
 
     [Fact]
@@ -333,7 +335,7 @@ public class GradientStudioTests
         using var h = new CanvasHarness();
         h.Canvas.Target = Target.NewTab;
         h.Canvas.Studio.Use();
-        Assert.Equal(NewTabBackground.Mode.Custom, h.Layout.Appearance.NewTabBackground.BackgroundMode);
+        Assert.Equal(NewTabBackgroundMode.Custom, h.Layout.Appearance.NewTabBackground.Mode);
         Assert.True(h.Canvas.UsesGradient(Target.NewTab));
         Assert.False(h.Canvas.UsesGradient(Target.Window));
 
@@ -343,7 +345,7 @@ public class GradientStudioTests
         h.Canvas.Studio.Use();
         Assert.True(h.Canvas.UsesGradient(Target.Workspace));
         Assert.True(h.Layout.Appearance.WorkspaceBackgrounds["W-1"].Gradient.SameDesign(GradientPresets.Named("Forest")!));
-        Assert.Equal(BackgroundSpec.Kind.System, h.Layout.Appearance.BackgroundForWorkspace("W-2").BackgroundKind);
+        Assert.Equal(BackgroundKind.System, h.Layout.Appearance.BackgroundForWorkspace("W-2").Kind);
         h.Canvas.ClearWorkspaceBackground();
         Assert.Empty(h.Layout.Appearance.WorkspaceBackgrounds);
     }

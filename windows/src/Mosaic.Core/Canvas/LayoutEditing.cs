@@ -35,12 +35,13 @@ public static class LayoutCanvasRules
     [
         ShellRegion.TitleBar, ShellRegion.Toolbar, ShellRegion.TabBar, ShellRegion.Rail,
         ShellRegion.SidebarTop, ShellRegion.SidebarMiddle, ShellRegion.SidebarBottom,
+        ShellRegion.TrailingRail,  // Windows: Edge's column at the trailing edge
     ];
 
     /// <summary>Regions on screen whenever the window is (a horizontal layout's sidebar is hidden until opened).</summary>
     public static HashSet<ShellRegion> AlwaysVisibleRegions(MosaicLayout layout)
     {
-        var regions = new HashSet<ShellRegion> { ShellRegion.TitleBar, ShellRegion.Toolbar, ShellRegion.TabBar, ShellRegion.Rail };
+        var regions = new HashSet<ShellRegion> { ShellRegion.TitleBar, ShellRegion.Toolbar, ShellRegion.TabBar, ShellRegion.Rail, ShellRegion.TrailingRail };
         if (layout.TabPlacement.IsVertical() && layout.Sidebar != SidebarBehavior.AutoHide)
             regions.UnionWith([ShellRegion.SidebarTop, ShellRegion.SidebarMiddle, ShellRegion.SidebarBottom]);
         return regions;
@@ -67,7 +68,7 @@ public static class LayoutCanvasRules
         if (!HasSettingsAccess(result))
         {
             var visible = AlwaysVisibleRegions(result);
-            ShellRegion[] candidates = [ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.SidebarBottom, ShellRegion.SidebarTop, ShellRegion.TabBar, ShellRegion.Rail];
+            ShellRegion[] candidates = [ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.SidebarBottom, ShellRegion.SidebarTop, ShellRegion.TabBar, ShellRegion.Rail, ShellRegion.TrailingRail];
             ShellRegion? found = null;
             foreach (var c in candidates)
             {
@@ -84,7 +85,7 @@ public static class LayoutCanvasRules
     public static IReadOnlyList<ShellComponent> Palette(MosaicLayout layout)
     {
         var list = new List<ShellComponent> { ShellComponent.FlexibleSpace };
-        foreach (var component in RawValues.All<ShellComponent>())
+        foreach (var component in Enum.GetValues<ShellComponent>())
         {
             if (component == ShellComponent.FlexibleSpace || layout.Contains(component)) continue;
             if (component == ShellComponent.TabStrip && layout.TabPlacement.IsVertical()) continue;
@@ -106,7 +107,7 @@ public static class LayoutCanvasRules
     {
         if (!region.Accepts(component))
         {
-            if (region == ShellRegion.Rail) return CanvasVerdict.Rejected($"The quick-access rail is too narrow for the {Lower(component)}.");
+            if (region.IsRail()) return CanvasVerdict.Rejected($"The {region.Title().ToLowerInvariant()} is too narrow for the {Lower(component)}.");
             if (component == ShellComponent.TabStrip)
                 return CanvasVerdict.Rejected("The tab strip needs a horizontal row. For tabs in a sidebar, set Tabs to Left or Right Sidebar.");
             return CanvasVerdict.Rejected($"{region.Title()} can’t hold the {Lower(component)}.");
@@ -115,7 +116,7 @@ public static class LayoutCanvasRules
             return CanvasVerdict.Rejected("With tabs on top the sidebar starts hidden, so the address field stays in a row that is always visible.");
         if (component == ShellComponent.SidebarToggle && region.IsSidebar() && !layout.TabPlacement.IsVertical())
             return CanvasVerdict.Rejected("With tabs on top the sidebar starts hidden, so its button must stay outside it.");
-        if (component == ShellComponent.TabStrip && (region.IsSidebar() || region == ShellRegion.Rail))
+        if (component == ShellComponent.TabStrip && (region.IsSidebar() || region.IsRail()))
             return CanvasVerdict.Rejected("The tab strip needs a horizontal row.");
         if (component is ShellComponent.Settings or ShellComponent.Menu)
         {
@@ -248,8 +249,8 @@ public static class LayoutCanvasRules
     public static ShellRegion? SuggestedRegion(ShellComponent component, MosaicLayout layout)
     {
         ShellRegion[] order = layout.TabPlacement.IsVertical()
-            ? [ShellRegion.SidebarBottom, ShellRegion.SidebarTop, ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.TabBar, ShellRegion.Rail]
-            : [ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.TabBar, ShellRegion.Rail, ShellRegion.SidebarBottom];
+            ? [ShellRegion.SidebarBottom, ShellRegion.SidebarTop, ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.TabBar, ShellRegion.Rail, ShellRegion.TrailingRail]
+            : [ShellRegion.Toolbar, ShellRegion.TitleBar, ShellRegion.TabBar, ShellRegion.Rail, ShellRegion.SidebarBottom, ShellRegion.TrailingRail];
         foreach (var region in order.Where(r => layout.Components(r).Count > 0).Concat(order))
         {
             if (VerdictPlacing(component, region, layout).IsAllowed) return region;
@@ -273,8 +274,9 @@ public static class LayoutCanvasRules
 }
 
 /// <summary>Undo and redo for values: <c>Record</c> the value before each change.</summary>
-public sealed class EditHistory<T>(int limit = 100)
+public sealed class EditHistory<T>(int limit = 100, IEqualityComparer<T>? comparer = null)
 {
+    private readonly IEqualityComparer<T> comparer = comparer ?? EqualityComparer<T>.Default;
     private readonly List<T> undo = [];
     private readonly List<T> redo = [];
 
@@ -287,7 +289,7 @@ public sealed class EditHistory<T>(int limit = 100)
     /// <summary>Call before changing <paramref name="previous"/> into something else. Clears redo.</summary>
     public void Record(T previous)
     {
-        if (undo.Count > 0 && EqualityComparer<T>.Default.Equals(undo[^1], previous)) return;
+        if (undo.Count > 0 && comparer.Equals(undo[^1], previous)) return;
         undo.Add(previous);
         if (undo.Count > Limit) undo.RemoveRange(0, undo.Count - Limit);
         redo.Clear();

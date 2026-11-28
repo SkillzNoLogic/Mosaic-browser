@@ -40,7 +40,7 @@ public static class GradientRaster
     {
         var (width, height, aspect) = Size(requestedWidth, requestedAspect);
         var pixels = new byte[width * height * 4];
-        if (gradient.GradientKind == GradientSpec.Kind.Mesh) FillMesh(gradient, pixels, width, height, aspect, bgra);
+        if (gradient.Kind == GradientKind.Mesh) FillMesh(gradient, pixels, width, height, aspect, bgra);
         else FillStops(gradient, pixels, width, height, bgra);
         Interlocked.Increment(ref renderCount);
         return (pixels, width, height);
@@ -59,8 +59,8 @@ public static class GradientRaster
 
     internal static void FillMesh(GradientSpec g, byte[] pixels, int width, int height, double aspect, bool bgra)
     {
-        var sources = g.MeshSources();
-        var labs = sources.Select(s => s.ColorValue.Oklab).ToArray();
+        var sources = g.MeshSources;
+        var labs = sources.Select(s => s.ColorValue().Oklab).ToArray();
         var points = sources.Select(s => (s.X, s.Y, Inverse: 1 / Math.Max(s.Spread, 0.05))).ToArray();
         var power = Math.Min(Math.Max(double.IsFinite(g.Sharpness) ? g.Sharpness : 2.2, 0.5), 8);
         for (var py = 0; py < height; py++)
@@ -108,12 +108,12 @@ public static class GradientRaster
             {
                 var x = px + 0.5;
                 double t;
-                switch (g.GradientKind)
+                switch (g.Kind)
                 {
-                    case GradientSpec.Kind.Radial:
+                    case GradientKind.Radial:
                         t = double.Hypot(x - cx, y - cy) / radius;
                         break;
-                    case GradientSpec.Kind.Angular:
+                    case GradientKind.Angular:
                         var theta = Math.Atan2(y - cy, x - cx) * 180 / Math.PI;  // clockwise from +x (y down)
                         t = (((theta - start) % 360) + 360) % 360 / 360;
                         break;
@@ -159,7 +159,7 @@ public static class GradientRaster
     public static (bool White, double Opacity)? Adaptation(GradientSpec g, bool darkMode)
     {
         if (g.Raw) return null;
-        var luminance = Gradients.Luminance(g.Colors());
+        var luminance = HexColor.Luminance(g.Colors);
         if (darkMode && luminance > 0.55) return (false, 0.66);
         if (!darkMode && luminance < 0.35) return (true, 0.62);
         return null;
