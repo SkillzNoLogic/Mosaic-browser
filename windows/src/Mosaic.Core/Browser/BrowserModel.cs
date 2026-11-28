@@ -413,6 +413,7 @@ public sealed partial class BrowserModel : ObservableObject
 
     private void InsertAfterSelected(BrowserTab tab)
     {
+        if (InsertTab(tab)) return;  // tabs: workspace, pinned tabs, groups (Tabs/BrowserModel.Tabs.cs)
         var index = selectedTab is null ? -1 : Tabs.IndexOf(selectedTab);
         if (index >= 0) Tabs.Insert(index + 1, tab);
         else Tabs.Add(tab);
@@ -430,21 +431,24 @@ public sealed partial class BrowserModel : ObservableObject
     {
         var index = Tabs.IndexOf(tab);
         if (index < 0) return;
+        var successor = TabClosing(tab);  // tabs: Recently Closed; the neighbour in the same workspace
         DetachFromEngine(tab);
         Tabs.RemoveAt(index);
+        TabRemoved(tab);  // tabs: empty groups, remembered selection, session
         var wasSelected = ReferenceEquals(selectedTab, tab);
         if (wasSelected) SelectedTab = null;
-        if (Tabs.Count == 0) NewTab();
-        else if (wasSelected) Select(Tabs[Math.Min(index, Tabs.Count - 1)]);
+        if (Tabs.Count == 0 || (wasSelected && successor is null)) NewTab();  // tabs: last tab of its workspace
+        else if (wasSelected) Select(successor!);  // tabs: stays in the workspace
     }
 
     public void CloseSelectedTab()
     {
-        if (selectedTab is { } tab) Close(tab);
+        if (selectedTab is { } tab && ConfirmsClose(tab)) Close(tab);  // tabs: pinned tabs need a second Ctrl+W
     }
 
     public void SelectAdjacentTab(int offset)
     {
+        if (SelectAdjacentNavigable(offset)) return;  // tabs: within the workspace, skipping collapsed groups
         if (selectedTab is null || Tabs.Count < 2) return;
         var index = Tabs.IndexOf(selectedTab);
         Select(Tabs[(index + offset + Tabs.Count) % Tabs.Count]);
@@ -466,6 +470,7 @@ public sealed partial class BrowserModel : ObservableObject
         if ((InternalPageHost(trimmed) is not null ? trimmed : rules.ResolveAddress(input, searchEngine)) is not { } url) return;
         var tab = selectedTab ?? NewTab();
         IsEditingAddress = false;
+        OfferSwitchIfAlreadyOpen(tab, url);  // tabs: duplicate-tab detection
         Load(url, tab);
         FocusContent();
     }
@@ -783,7 +788,7 @@ public sealed partial class BrowserModel : ObservableObject
         };
         browser.NewTabRequested += url =>
         {
-            if (Current()) NewTab(url, tab.Engine);
+            if (Current()) OpenLinkedTab(url, tab);  // tabs: next to its opener, in its group
         };
         browser.BlockedCountChanged += count =>
         {
@@ -829,7 +834,7 @@ public sealed partial class BrowserModel : ObservableObject
                 if (closedGeckoIds.Contains(state.Id)) continue;
                 if (byGeckoId.TryGetValue(state.Id, out var known))
                 {
-                    Apply(state, known);
+                    if (!known.IsAsleep) Apply(state, known);  // tabs: a discarded tab reports placeholder state
                 }
                 else if (pendingGeckoOpens == 0)
                 {
@@ -912,6 +917,7 @@ public sealed partial class BrowserModel : ObservableObject
         IsEditingAddress = false;
         AddressText = tab.Url;
         UpdatePresentation();
+        TabSelected(tab);  // tabs: workspace, remembered selection, wakes a sleeping tab
     }
 
     /// <summary>Keyboard shortcuts pressed inside Gecko arrive here as snapshot events.</summary>
@@ -935,6 +941,7 @@ public sealed partial class BrowserModel : ObservableObject
             case "toggleBlocker":
                 ToggleBlocker();
                 break;
+            case var tabs when tabs.StartsWith("tabs.", StringComparison.Ordinal): HandleTabsEvent(tabs); break;  // tabs: Ctrl+Shift+T, Ctrl+Shift+A, Ctrl+1–9
         }
     }
 
@@ -1124,6 +1131,7 @@ public sealed partial class BrowserModel : ObservableObject
     {
         if (isShutDown) return;
         isShutDown = true;
+        FinishTabs();  // tabs: final session save, clean-exit marker
         foreach (var tab in Tabs)
         {
             if (tab.Chromium is not { } browser) continue;

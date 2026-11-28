@@ -5,7 +5,7 @@ namespace Mosaic.Core.Browser;
 /// which reloads its page there.
 /// </summary>
 /// <remarks>Only <see cref="BrowserModel"/> changes a tab; everything else observes it.</remarks>
-public sealed class BrowserTab : ObservableObject
+public sealed partial class BrowserTab : ObservableObject
 {
     private EngineKind engine;
     private string url = "";
