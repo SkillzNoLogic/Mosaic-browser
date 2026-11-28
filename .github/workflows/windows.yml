@@ -1,8 +1,9 @@
-# Mosaic for Windows: build, unit-test and package the app, then try it for real.
+# Mosaic for Windows: build, unit-test and package the app (WinUI 3, self-contained, for
+# win-x64 and win-arm64), then try each package for real on its own architecture: x64 on
+# windows-latest, ARM64 on windows-11-arm.
 #
-# Kept cheap on purpose (the repository is private and Windows minutes count double):
-# one runner image, no matrix, superseded runs are cancelled, NuGet packages are cached,
-# artifacts expire after a week.
+# Kept cheap: one build job (it cross-publishes ARM64), superseded runs are cancelled, NuGet
+# packages are cached, artifacts expire after a week.
 name: Windows
 
 on:
@@ -108,10 +109,10 @@ jobs:
           Write-Host '--- with a window (as Mosaic runs it) ---'
           .\windows\scripts\diagnose-gecko.ps1 -Seconds 20
 
-      - name: Publish win-x64
-        run: .\windows\scripts\build.ps1 -Runtime win-x64 -Zip -SkipTests
+      - name: Publish win-x64 and win-arm64
+        run: .\windows\scripts\build.ps1 -Runtime win-x64, win-arm64 -Zip -SkipTests
 
-      - name: Upload the package
+      - name: Upload the x64 package
         uses: actions/upload-artifact@v7
         with:
           name: Mosaic-win-x64
@@ -120,14 +121,33 @@ jobs:
           retention-days: 7
           compression-level: 0   # it is a zip already
 
+      - name: Upload the ARM64 package
+        uses: actions/upload-artifact@v7
+        with:
+          name: Mosaic-win-arm64
+          path: windows/publish/Mosaic-*-win-arm64.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   smoke:
-    name: Smoke test (may fail)
+    name: Smoke test (${{ matrix.arch }})
     needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rid: win-x64
+            runner: windows-latest
+          - arch: arm64
+            rid: win-arm64
+            runner: windows-11-arm
     # This drives UI code that could not be run where it was written. A failure here is
     # information, not a broken build: look at the uploaded screenshots and logs.
     continue-on-error: true
-    runs-on: windows-latest
-    timeout-minutes: 20
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
     steps:
       - name: Check out the scripts
         uses: actions/checkout@v7
@@ -138,14 +158,15 @@ jobs:
       - name: Download the package
         uses: actions/download-artifact@v8
         with:
-          name: Mosaic-win-x64
+          name: Mosaic-${{ matrix.rid }}
           path: windows/publish
 
       - name: Unpack
         run: |
-          $package = Get-ChildItem -Path windows\publish -Filter 'Mosaic-*-win-x64.zip' | Select-Object -First 1
+          $package = Get-ChildItem -Path windows\publish -Filter 'Mosaic-*-${{ matrix.rid }}.zip' | Select-Object -First 1
           if (-not $package) { throw 'The package was not downloaded.' }
-          Expand-Archive -LiteralPath $package.FullName -DestinationPath windows\publish\win-x64 -Force
+          Expand-Archive -LiteralPath $package.FullName -DestinationPath windows\publish\${{ matrix.rid }} -Force
+          Write-Host "Runner: $env:PROCESSOR_ARCHITECTURE, $((Get-CimInstance Win32_OperatingSystem).Caption) $((Get-CimInstance Win32_OperatingSystem).Version)"
 
       - name: Install the Gecko engine (Firefox ESR)
         # If Mozilla's download is unavailable, smoke.ps1 falls back to the runner's Firefox.
@@ -184,13 +205,13 @@ jobs:
           Write-Host "WebView2 runtime $version"
 
       - name: Smoke test
-        run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\win-x64\Mosaic.exe -OutputDirectory windows\artifacts\smoke
+        run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke
 
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: smoke-test-output
+          name: smoke-test-output-${{ matrix.arch }}
           path: |
             windows/artifacts/smoke
             !windows/artifacts/smoke/data/**

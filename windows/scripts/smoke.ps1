@@ -15,7 +15,10 @@
       5. the content blocker is ready, and in each engine blocks the ad script a page served by
          this script asks for (a non-zero "blocked" count), lets it through once switched off
          for the site (zero after the reload), and blocks it again once switched back on;
-      6. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
+      6. the window (WinUI): Gecko's page window is shown in the page area and hidden while
+         Mosaic draws over the page (a page cover); the window maximises, restores, and fits a
+         1024x768 screen;
+      7. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
 
     A screenshot is requested after each of steps 1-5. Screenshots, the state at each step,
     Mosaic's output and any crash reports from the Windows event log are collected in the
@@ -355,9 +358,24 @@ function Save-Screenshot {
     }
 }
 
+function Invoke-SoftCheck {
+    # Runs a check whose failure is reported at the end without stopping the run.
+    param([Parameter(Mandatory = $true)] [string]$Name, [Parameter(Mandatory = $true)] [scriptblock]$Check)
+    try { & $Check }
+    catch {
+        $script:SoftFailures += "$Name failed: $($_.Exception.Message)"
+        Write-Host "    $Name FAILED: $($_.Exception.Message)"
+    }
+}
+
+function Get-WindowState {
+    param($State)
+    Get-MosaicProperty $State 'winui'
+}
+
 function Save-WindowTree {
     # Every native window inside Mosaic's main window, with its class, owning process and
-    # place. The embedded Gecko window and WebView2 are native windows that WPF knows nothing
+    # place. The embedded Gecko window is a native window that WinUI knows nothing
     # about, so this is the way to see what is really drawn where, and by which process.
     param([Parameter(Mandatory = $true)] [string] $Name)
     try {
@@ -580,8 +598,32 @@ try {
         }
     }
     Write-Host "    loaded; Gecko process $(Get-MosaicProperty $state 'geckoProcessId'), window attached"
+    Invoke-SoftCheck 'Gecko page shown' {
+        $shown = Wait-MosaicState -Name '1-gecko-shown' -What "Gecko's page to be shown in the page area (winui.geckoShown)" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        }
+        $window = Get-WindowState $shown
+        $area = Get-MosaicProperty $window 'contentArea'
+        Write-Host ("    page area {0}x{1} at {2},{3} (scale {4}), Gecko hosted as a {5} window, material {6}" -f `
+            (Get-MosaicProperty $area 'width'), (Get-MosaicProperty $area 'height'), (Get-MosaicProperty $area 'x'), (Get-MosaicProperty $area 'y'),
+            (Get-MosaicProperty $window 'scale'), (Get-MosaicProperty $window 'geckoHostMode'), (Get-MosaicProperty $window 'effectiveMaterial'))
+    }
     Save-Screenshot '1-gecko'
     Save-WindowTree '1-gecko'
+
+    Write-Host '==> 1b. A page cover hides the Gecko page'
+    Invoke-SoftCheck 'Page cover' {
+        Invoke-Mosaic -Do 'coverPage' -Value 'on' | Out-Null
+        Wait-MosaicState -Name '1b-covered' -What "Gecko's page to be hidden under a page cover" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $false
+        } | Out-Null
+        Save-Screenshot '1b-gecko-covered'
+        Invoke-Mosaic -Do 'coverPage' -Value 'off' | Out-Null
+        Wait-MosaicState -Name '1b-uncovered' -What "Gecko's page to show again once the cover is gone" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        } | Out-Null
+        Write-Host '    hidden while covered, shown again after'
+    }
 
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {
@@ -672,7 +714,30 @@ try {
         }
     }
 
-    Write-Host '==> 6. Quit'
+    Write-Host '==> 6. Window'
+    Invoke-SoftCheck 'Window states' {
+        Invoke-Mosaic -Do 'window' -Value 'maximize' | Out-Null
+        Wait-MosaicState -Name '6-maximized' -What 'the window to be maximised' -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'state') -eq 'maximized'
+        } | Out-Null
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot '6-maximized'
+        Invoke-Mosaic -Do 'window' -Value '1024x700' | Out-Null
+        $small = Wait-MosaicState -Name '6-small' -What 'the window to be restored at 1024x700' -Condition {
+            param($s)
+            $w = Get-WindowState $s
+            $bounds = Get-MosaicProperty $w 'bounds'
+            (Get-MosaicProperty $w 'state') -eq 'restored' -and
+                [Math]::Abs([int](Get-MosaicProperty $bounds 'width') - [int](1024 * [double](Get-MosaicProperty $w 'scale'))) -le 2
+        }
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot '6-1024x700'
+        Save-WindowTree '6-1024x700'
+        $area = Get-MosaicProperty (Get-WindowState $small) 'contentArea'
+        Write-Host "    maximised, then restored at 1024x700; page area $(Get-MosaicProperty $area 'width')x$(Get-MosaicProperty $area 'height')"
+    }
+
+    Write-Host '==> 7. Quit'
     $geckoProcessId = 0
     $reported = Get-MosaicProperty $state 'geckoProcessId'
     if ($reported) { $geckoProcessId = [int]$reported }
