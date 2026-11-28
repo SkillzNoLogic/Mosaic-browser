@@ -60,7 +60,12 @@ public class CanvasColorTests
                 var expected = entry[encoding.Raw()]!.AsArray().Select(v => v!.GetValue<double>()).ToArray();
                 var actual = encoding.Values(color);
                 Assert.Equal(expected.Length, actual.Length);
-                for (var i = 0; i < expected.Length; i++) Assert.True(Math.Abs(expected[i] - actual[i]) < 1e-9, $"{hex} {encoding} [{i}]: {expected[i]} vs {actual[i]}");
+                for (var i = 0; i < expected.Length; i++)
+                {
+                    // A grey's OKLCH hue is the angle of a ~1e-8 chroma: noise that differs between maths libraries.
+                    if (encoding == ColorEncoding.Oklch && i == 2 && actual[1] < 1e-4) continue;
+                    Assert.True(Math.Abs(expected[i] - actual[i]) < 1e-9, $"{hex} {encoding} [{i}]: {expected[i]} vs {actual[i]}");
+                }
                 Assert.Equal(entry[encoding.Raw() + "-string"]!.GetValue<string>(), encoding.String(color));
             }
             var ok = entry["oklab"]!.AsArray().Select(v => v!.GetValue<double>()).ToArray();

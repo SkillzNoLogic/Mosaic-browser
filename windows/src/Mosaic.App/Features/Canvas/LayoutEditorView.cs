@@ -111,7 +111,10 @@ internal sealed class LayoutEditorView : UserControl, ICanvasView
         }
 
         // Rebuilding while a drag is in flight would remove the element being dragged.
-        var key = $"{layout.JsonText(pretty: false)}|{canvas.Selection}|{canvas.Grab?.Component}|{canvas.WorkspaceID}|{ActualTheme}";
+        // The sidebar width isn't drawn in the miniature; leaving it out keeps its slider alive while dragged.
+        var keyLayout = layout.Clone();
+        keyLayout.SidebarWidth = 0;
+        var key = $"{keyLayout.JsonText(pretty: false)}|{canvas.Selection}|{canvas.Grab?.Component}|{canvas.WorkspaceID}|{ActualTheme}";
         if (canvas.Dragging is not null || key == shownKey) return;
         shownKey = key;
         optionsHost.Content = OptionsBar(layout);
