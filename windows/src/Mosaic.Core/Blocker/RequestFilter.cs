@@ -56,9 +56,13 @@ public sealed class RequestFilter
     /// many third-party frames fast. A main frame committing a new document also starts its
     /// dashboard log over. Port of <c>ContentBlocker.cosmeticScript</c> on macOS.
     /// </summary>
-    public string? CosmeticScript(string frameUrl, string pageUrl, bool isMainFrame)
+    /// <param name="frameUrl">The frame's document.</param>
+    /// <param name="pageUrl">The tab's page (the top-level document).</param>
+    /// <param name="isMainFrame">The frame is the page itself.</param>
+    /// <param name="newDocument">False when asking again for a document already asked about (the log is kept).</param>
+    public string? CosmeticScript(string frameUrl, string pageUrl, bool isMainFrame, bool newDocument = true)
     {
-        if (isMainFrame) Log.Clear(frameUrl);
+        if (isMainFrame && newDocument) Log.Clear(frameUrl);
         CosmeticStyleCache? cache;
         BlockerSettings choices;
         lock (gate)

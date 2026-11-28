@@ -212,12 +212,15 @@ public static class ConnectionSecurities
         _ => "",
     };
 
-    /// <summary>The Fluent icon name for <c>Icons.Make</c>, or null for no padlock.</summary>
+    /// <summary>
+    /// The icon name for the system area's <c>Icons.Make</c> (macOS's SF Symbol names, which it
+    /// maps to Fluent glyphs), or null for no padlock.
+    /// </summary>
     public static string? IconName(this ConnectionSecurity security) => security switch
     {
-        ConnectionSecurity.Secure => "lock",
-        ConnectionSecurity.Insecure => "lockWarning",
-        ConnectionSecurity.Local => "lockOpen",
+        ConnectionSecurity.Secure => "lock.fill",
+        ConnectionSecurity.Insecure => "lock.open.trianglebadge.exclamationmark",
+        ConnectionSecurity.Local => "lock.open",
         _ => null,
     };
 }
