@@ -1,4 +1,4 @@
-using System.Windows.Controls;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
 using Mosaic.Core;
 using Mosaic.Core.Blocker;
@@ -7,8 +7,8 @@ using Mosaic.Core.Browser;
 namespace Mosaic.App.Chromium;
 
 /// <summary>
-/// Mosaic's Chromium engine: the Microsoft Edge WebView2 Runtime, with one
-/// <see cref="WebView2Browser"/> per Chromium tab and one environment (and so one profile, in
+/// Mosaic's Chromium engine: the Microsoft Edge WebView2 Runtime through WinUI's
+/// <c>WebView2</c> control, with one <see cref="WebView2Browser"/> per Chromium tab and one environment (and so one profile, in
 /// <see cref="AppPaths.ChromiumData"/>) shared by all of them.
 /// </summary>
 /// <remarks>
@@ -39,8 +39,8 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
         }
         catch (Exception)
         {
-            // WebView2RuntimeNotFoundException when the runtime is not installed; a loader that
-            // cannot be found or loaded surfaces as other exception types. Whatever the cause,
+            // A COM error when the runtime is not installed; a loader that cannot be found or
+            // loaded surfaces as other exception types. Whatever the cause,
             // the outcome is the same: no Chromium engine, and Mosaic carries on with Gecko.
             IsAvailable = false;
         }
@@ -88,7 +88,7 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
         if (environment is null or { IsFaulted: true } or { IsCanceled: true })
         {
             var options = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
-            environment = CoreWebView2Environment.CreateAsync(null, AppPaths.ChromiumData, options);
+            environment = CoreWebView2Environment.CreateWithOptionsAsync("", AppPaths.ChromiumData, options).AsTask();
         }
         return environment;
     }
@@ -117,7 +117,9 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
 
     /// <summary>User-presentable text for a WebView2 failure.</summary>
     internal static string Describe(Exception error) =>
-        error is WebView2RuntimeNotFoundException
+        // HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND): what creating an environment reports when
+        // the runtime is not installed (the WinRT projection has no dedicated exception type).
+        error.HResult == unchecked((int)0x80070002)
             ? $"The Microsoft Edge WebView2 Runtime is no longer installed. Install it from {RuntimeDownloadPage}."
             : $"The Chromium engine could not start: {error.Message}";
 

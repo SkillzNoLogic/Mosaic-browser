@@ -13,15 +13,15 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 *deferred* = parked on purpose, with the reason.
 
 ## winui — the app, window and engines
-- [ ] WinUI 3 app replaces the WPF app; UI written in C# code (no XAML files), builds on macOS, runs on Windows
-- [ ] Parity with the v0.1 WPF app: tabs, both engines, engine switching, search engines, extensions, blocker, automation pipe and smoke test
-- [ ] Gecko embedded as a child window of the WinUI window; hidden whenever Mosaic draws over the page (settings, internal pages, overlays that would be covered)
-- [ ] Chromium tabs on WinUI's WebView2 control, one shared environment
-- [ ] Native title bar area with caption buttons, Snap Layouts on the maximise button, drag regions
-- [ ] Mica (window) and Acrylic (transient surfaces) with solid fallbacks (transparency off, Windows 10, battery saver)
-- [ ] Per-monitor DPI, resize/maximise/minimise, restores size and position, fits 1024×768 and 1366×768
-- [ ] Single instance; opening a URL from outside goes to the running window
-- [ ] Self-contained publish for win-x64 and win-arm64; smoke test on both CI architectures
+- [x] ~~WinUI 3 app replaces the WPF app; UI written in C# code (no XAML files), builds on macOS, runs on Windows~~ — `dotnet build windows/Mosaic.slnx` on macOS; CI run 46136897428 runs the published app on x64 and ARM64; `src/Mosaic.App.Wpf` deleted
+- [x] ~~Parity with the v0.1 WPF app: tabs, both engines, engine switching, search engines, extensions, blocker, automation pipe and smoke test~~ — CI 46136897428, smoke steps 1–7 on windows-latest (x64) and windows-11-arm (ARM64): Gecko page, switch to Chromium, DuckDuckGo search, MV3 extension installed and loaded, blocker blocks/allows/blocks in both engines, quit leaves no process; screenshots in the `smoke-test-output-*` artifacts
+- [x] ~~Gecko embedded as a child window of the WinUI window; hidden whenever Mosaic draws over the page (settings, internal pages, overlays that would be covered)~~ — CI 46136897428 (x64, ARM64): `winui.geckoHostMode` = child, page visible in `1-gecko.png`; hidden under a page cover (`1b`, `coverPage`), under the Extensions sheet, and on a `mosaic://` page (`1c`); owned-window fallback run too (`variant-owned`). The container is a layered child window: WinUI's window has no redirection surface and Gecko's page was blank in a plain one (CI 46136222096)
+- [x] ~~Chromium tabs on WinUI's WebView2 control, one shared environment~~ — CI 46136897428 step 2 (page loads, `hasChromiumView`), step 5 (blocker via WebResourceRequested: 4 requests blocked, 0 when exempted)
+- [~] Native title bar area with caption buttons, Snap Layouts on the maximise button, drag regions — content extends into the title bar with system caption buttons (screenshots), tabs as passthrough regions (`SetInteractiveTitleBarElements`), `window maximize` on CI; Snap Layouts flyout and dragging need a human with a mouse
+- [~] Mica (window) and Acrylic (transient surfaces) with solid fallbacks (transparency off, Windows 10, battery saver) — `MainWindow.Material` (Mica / Mica Alt / Acrylic / solid) with fallbacks; `winui.effectiveMaterial` = Mica on CI; Windows 10 and transparency-off fallbacks never run; Acrylic on transient surfaces is the shell's
+- [~] Per-monitor DPI, resize/maximise/minimise, restores size and position, fits 1024×768 and 1366×768 — CI 46136897428 step 6: maximise, restore at 1024×700 with the page area following (`windows-6-1024x700.txt`); default size fits the work area; placement saved in settings.json (unit-tested); mixed-DPI monitors never run
+- [~] Single instance; opening a URL from outside goes to the running window — mutex per data folder plus a pipe that hands a second launch's addresses to the running window; compiled, not yet run on CI
+- [x] ~~Self-contained publish for win-x64 and win-arm64; smoke test on both CI architectures~~ — CI 46136897428: one job publishes both RIDs (Windows App SDK self-contained), smoke on windows-latest and windows-11-arm
 
 ## shell — Mosaics and the composed window
 - [ ] Layout model shared with macOS (regions × components, appearance), same JSON

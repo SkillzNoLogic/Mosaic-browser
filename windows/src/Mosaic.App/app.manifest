@@ -3,13 +3,22 @@
   <assemblyIdentity version="0.1.0.0" name="Mosaic.app" />
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- Per-monitor DPI awareness: required so the embedded Gecko window and the WPF
-           window agree about pixel sizes on mixed-DPI setups. -->
+      <!-- Per-monitor DPI awareness (v2): required so the embedded Gecko window (Firefox is
+           Per-Monitor V2 too) and Mosaic's window agree about pixel sizes on mixed-DPI setups;
+           SetParent across processes with different awareness would reset Firefox's. -->
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>
+  <dependency>
+    <!-- Common Controls 6: SetWindowSubclass, with which Hosting/WindowMessages.cs observes the
+         top-level window's messages. -->
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
+                        processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*" />
+    </dependentAssembly>
+  </dependency>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!-- Windows 10 / 11 -->

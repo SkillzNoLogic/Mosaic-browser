@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
-using System.Windows;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
 using Mosaic.Core.Blocker;
 using Mosaic.Core.Browser;
 
@@ -25,7 +25,7 @@ namespace Mosaic.App.Chromium;
 /// filter's settings check and, for web pages, one call into the engine.
 /// </para>
 /// </remarks>
-internal sealed class WebView2Browser : IChromiumBrowser
+public sealed class WebView2Browser : IChromiumBrowser
 {
     /// <summary>Status of the response a blocked request gets in place of the real one.</summary>
     private const int BlockedStatus = 403;
@@ -42,7 +42,7 @@ internal sealed class WebView2Browser : IChromiumBrowser
     private string? navigationKey;
     private int blockedCount;
 
-    public WebView2Browser(WebView2Engine engine, string url)
+    internal WebView2Browser(WebView2Engine engine, string url)
     {
         this.engine = engine;
         pendingUrl = url;
@@ -54,8 +54,8 @@ internal sealed class WebView2Browser : IChromiumBrowser
     public bool IsShown
     {
         get => View.Visibility == Visibility.Visible;
-        // Collapsed, not covered: the control is a child window and would draw over any WPF
-        // content placed on top of it. WebView2 also stops rendering while it is not visible.
+        // Collapsed rather than covered: WebView2 stops rendering while it is not visible, and
+        // only the selected tab's page should take memory and GPU time.
         set => View.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -153,7 +153,7 @@ internal sealed class WebView2Browser : IChromiumBrowser
 
     public void Focus()
     {
-        if (!isClosed && View.IsVisible) View.Focus();
+        if (!isClosed && View.Visibility == Visibility.Visible) View.Focus(FocusState.Programmatic);
     }
 
     public void Close()
@@ -163,7 +163,7 @@ internal sealed class WebView2Browser : IChromiumBrowser
         engine.BrowserClosed(this);
         try
         {
-            View.Dispose();
+            View.Close();
         }
         catch (Exception error) when (error is COMException or InvalidOperationException)
         {

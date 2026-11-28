@@ -1,10 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Input;
-using System.Windows.Interop;
-using System.Windows.Threading;
+using Microsoft.UI.Dispatching;
+using Windows.Graphics;
 using static Mosaic.App.Hosting.NativeMethods;
 
 namespace Mosaic.App.Hosting;
@@ -20,27 +19,31 @@ public enum GeckoHostMode
 }
 
 /// <summary>
-/// A WPF element that shows the Gecko engine's chromeless browser window in its own bounds.
-/// Place one in the content area; it is the Windows counterpart of the transparent "hole" on macOS.
+/// Shows the Gecko engine's chromeless browser window over a rectangle of Mosaic's window. The
+/// <see cref="ContentArea"/> owns one and tells it where the page goes (<see cref="Place"/>);
+/// it is the Windows counterpart of the transparent "hole" on macOS.
 /// </summary>
 /// <remarks>
-/// Contract (the app shell codes against this; the hosting work implements it):
+/// Contract:
 /// <list type="bullet">
 /// <item>All members are called on the UI thread.</item>
 /// <item><see cref="Attach"/> adopts the given Gecko window; <see cref="Detach"/> lets go of it
 /// (Gecko stopped or is about to). Both are safe to call repeatedly.</item>
-/// <item>While attached, the Gecko window exactly fills this element and follows it when the
-/// Mosaic window moves, resizes, changes DPI, minimises or restores.</item>
-/// <item>WPF <c>Visibility</c> controls whether the page shows: when this element is not
-/// <c>Visible</c> the Gecko window is hidden; no other call is needed.</item>
+/// <item>While attached, the Gecko window exactly fills the rectangle last given to
+/// <see cref="Place"/> and follows it when the Mosaic window moves, resizes, changes DPI,
+/// minimises or restores.</item>
+/// <item><see cref="Place"/>'s <c>visible</c> decides whether the page shows; no other call is
+/// needed. A Win32 child window draws over all WinUI content in the same place, so the page
+/// must be hidden whenever Mosaic draws over it.</item>
 /// <item>The Gecko process must never keep Mosaic's window from closing, and closing Mosaic
-/// must not destroy Gecko's window out from under it: detach first.</item>
+/// must not destroy Gecko's window out from under it: detach first (<see cref="Dispose"/> does).</item>
 /// </list>
-/// <para><b>How it is built.</b> <see cref="BuildWindowCore"/> creates a plain child window of the
-/// WPF window, the <i>container</i>. WPF positions, sizes, shows and hides the container like
-/// any hosted HWND, in physical pixels and with per-monitor DPI already applied, so the
-/// container is the single source of truth for where the page belongs. Gecko's window, which
-/// belongs to another process, is then bound to the container in one of two ways:</para>
+/// <para><b>How it is built.</b> The constructor creates a plain child window of Mosaic's
+/// top-level window, the <i>container</i>, above WinUI's content (which is itself a child
+/// window, <c>DesktopChildSiteBridge</c>). <see cref="Place"/> positions, sizes, shows and hides
+/// the container in physical pixels, so the container is the single source of truth for where
+/// the page belongs. Gecko's window, which belongs to another process, is then bound to the
+/// container in one of two ways:</para>
 /// <list type="bullet">
 /// <item><see cref="GeckoHostMode.Child"/>: it becomes a <c>WS_CHILD</c> of the container
 /// (<c>SetParent</c>). Windows then clips, moves, stacks and hides it with the container for
@@ -75,8 +78,12 @@ public enum GeckoHostMode
 /// against <c>widget/windows/nsWindow.cpp</c> of Firefox ESR 153 and none of it has been run.</para>
 /// <para>Failures are traced (<see cref="Trace"/>, prefix <c>[GeckoWindowHost]</c>) and degrade
 /// to "the Gecko page is not shown".</para>
+/// <para>Ported from the v0.1 WPF host (an <c>HwndHost</c>); the Win32 side is unchanged, the
+/// WPF integration (layout, keyboard focus, the window's message hook) is replaced by
+/// <see cref="Place"/>, <see cref="OnXamlGotFocus"/>, <see cref="OnXamlPointerPressed"/> and
+/// <see cref="WindowMessages"/>.</para>
 /// </remarks>
-public sealed class GeckoWindowHost : HwndHost
+public sealed class GeckoWindowHost : IDisposable
 {
     private const string ContainerClassName = "MosaicGeckoHost";
 
@@ -92,16 +99,21 @@ public sealed class GeckoWindowHost : HwndHost
     /// <summary>What Gecko's window looked like before Mosaic adopted it, to put it back.</summary>
     private readonly record struct SavedWindowState(nint Style, nint ExStyle, nint Owner, RECT Bounds);
 
-    private readonly HwndSourceHook _sourceHook;
-    private readonly KeyboardFocusChangedEventHandler _wpfGotKeyboardFocus;
-    private readonly MouseButtonEventHandler _wpfMouseDown;
+    private static readonly Dictionary<nint, GeckoWindowHost> s_containers = [];
+
+    private readonly nint _topLevel;
+    private readonly DispatcherQueue _dispatcher;
+    private readonly WindowMessages? _messages;
     private readonly WinEventProc _winEventProc; // field: must outlive the native hooks
     private readonly List<nint> _winEventHooks = [];
 
     private nint _container;
-    private HwndSource? _source;
-    private UIElement? _sourceRoot;
     private (nint Window, int ProcessId)? _pending;
+    private RectInt32 _placement;
+    private bool _placementVisible;
+    private bool _placed;
+    /// <summary>The page had the keyboard; XAML focus changes while restoring it are ignored until then.</summary>
+    private long _restoringUntil;
 
     private nint _gecko;
     private int _geckoProcessId;
@@ -122,14 +134,45 @@ public sealed class GeckoWindowHost : HwndHost
     private bool _activationNotificationQueued;
     private bool _dpiNoteTraced;
 
-    public GeckoWindowHost()
+    /// <param name="topLevel">Mosaic's top-level window (the WinUI window's HWND).</param>
+    /// <param name="messages">That window's messages, for activation and (owned mode) moves.</param>
+    /// <param name="dispatcher">The UI thread's queue.</param>
+    public GeckoWindowHost(nint topLevel, WindowMessages? messages, DispatcherQueue dispatcher)
     {
-        _sourceHook = SourceHook;
-        _wpfGotKeyboardFocus = OnWpfGotKeyboardFocus;
-        _wpfMouseDown = OnWpfMouseDown;
+        _topLevel = topLevel;
+        _dispatcher = dispatcher;
+        _messages = messages;
         _winEventProc = OnWinEvent;
-        PresentationSource.AddSourceChangedHandler(this, OnSourceChanged);
+        try
+        {
+            _container = CreateContainer(topLevel);
+            lock (s_containers) s_containers[_container] = this;
+        }
+        catch (Win32Exception error)
+        {
+            // Mosaic still runs; the Gecko page cannot be shown.
+            Error(error.Message);
+        }
+        _messages?.Add(OnTopLevelMessage);
     }
+
+    /// <summary>The container window (for diagnostics); 0 if it could not be created.</summary>
+    public nint ContainerWindow => _container;
+
+    /// <summary>Gecko's window while attached, else 0.</summary>
+    public nint GeckoWindow => _gecko;
+
+    /// <summary>Where the page is placed (client pixels of the top-level window) and whether it shows.</summary>
+    public (RectInt32 Bounds, bool Visible) Placement => (_placement, _placementVisible);
+
+    /// <summary>The mode of the current attachment (which may differ from <see cref="Mode"/> after a fallback).</summary>
+    public GeckoHostMode AttachedMode => _attachedMode;
+
+    /// <summary>
+    /// Asks the host to give the keyboard back to Mosaic's own (XAML) UI, after Gecko's window
+    /// went away while it had the focus. Set by <see cref="ContentArea"/>.
+    /// </summary>
+    public Action? FocusXaml { get; set; }
 
     /// <summary>Set before the first <see cref="Attach"/>. Default <see cref="GeckoHostMode.Child"/>;
     /// the command-line switch <c>--gecko-host=owned</c> selects the fallback.</summary>
@@ -145,10 +188,9 @@ public sealed class GeckoWindowHost : HwndHost
     /// <remarks>
     /// Also returns false, leaving Gecko's window hidden, if the window does not belong to
     /// <paramref name="geckoProcessId"/>, does not answer within two seconds, or cannot be bound
-    /// to Mosaic's window in either mode. If this element has no native window yet (it is not in
-    /// a shown window), the attachment is remembered and completed when it gets one; the call
-    /// returns true and <see cref="IsAttached"/> turns true at that point. Never activates
-    /// Mosaic or Gecko.
+    /// to Mosaic's window in either mode. If the page area has not been placed yet, the
+    /// attachment is remembered and completed at the first <see cref="Place"/>; the call returns
+    /// true and <see cref="IsAttached"/> turns true at that point. Never activates Mosaic or Gecko.
     /// </remarks>
     public bool Attach(nint geckoWindow, int geckoProcessId)
     {
@@ -169,8 +211,15 @@ public sealed class GeckoWindowHost : HwndHost
         Detach(); // a different window than before: let go of the old one first
         if (_container == 0)
         {
+            Warn($"Attach of 0x{geckoWindow:X} refused: there is no container window.");
+            ShowWindowAsync(geckoWindow, SW_HIDE);
+            return false;
+        }
+        if (!_placed)
+        {
+            // Not placed yet: the content area has not been laid out. Adopted on the first Place.
             _pending = (geckoWindow, processId);
-            Info($"Attach of 0x{geckoWindow:X} deferred until the host element has a window.");
+            Info($"Attach of 0x{geckoWindow:X} deferred until the page area has been laid out.");
             return true;
         }
         return Adopt(geckoWindow, processId);
@@ -243,112 +292,133 @@ public sealed class GeckoWindowHost : HwndHost
     public event EventHandler? PageActivated;
 
     // =====================================================================================
-    // HwndHost
+    // Placement and lifetime
     // =====================================================================================
 
-    protected override HandleRef BuildWindowCore(HandleRef hwndParent)
+    /// <summary>
+    /// Puts the page at <paramref name="bounds"/> (physical pixels, relative to the top-level
+    /// window's client area) and shows or hides it. Cheap when nothing changed.
+    /// </summary>
+    public void Place(RectInt32 bounds, bool visible)
     {
-        // A failure here is the one error that is allowed to propagate: HwndHost has no way to
-        // continue without a window, and creating a plain child window does not fail in practice.
-        _container = CreateContainer(hwndParent.Handle);
-        SetSource(PresentationSource.FromVisual(this) as HwndSource);
+        VerifyAccess();
+        if (_container == 0) return;
+        visible = visible && bounds.Width > 0 && bounds.Height > 0;
+        bool firstPlacement = !_placed;
+        // WinUI creates its content window after the container, and may re-create or re-order
+        // it later; a sibling above the container would hide the page.
+        bool buried = visible && GetWindow(_container, GW_HWNDPREV) != 0;
+        if (_placed && bounds.Equals(_placement) && visible == _placementVisible && !buried) return;
+        if (buried && _placed) Info("The container was below another window of Mosaic's; raising it.");
+        _placed = true;
+        _placement = bounds;
+        _placementVisible = visible;
 
-        if (_pending is not null)
+        // Our own window: synchronous, and it answers immediately. HWND_TOP keeps the container
+        // above WinUI's content window, which is a sibling.
+        uint flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+        if (!SetWindowPos(_container, HWND_TOP, bounds.X, bounds.Y, Math.Max(bounds.Width, 0), Math.Max(bounds.Height, 0), flags))
         {
-            // After HwndHost has finished adopting the container (it subclasses it once this
-            // method returns, which is what routes the container's messages to WndProc below).
-            Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(CompletePendingAttach));
+            Warn($"Placing the container failed: {LastError()}");
         }
-        return new HandleRef(this, _container);
+        // WM_WINDOWPOSCHANGED on the container has run SyncGecko already; this covers a call
+        // that changed nothing Windows reports (and the first placement's pending attach).
+        if (firstPlacement && _pending is not null)
+        {
+            _dispatcher.TryEnqueue(DispatcherQueuePriority.Normal, CompletePendingAttach);
+        }
+        SyncGecko();
     }
 
-    protected override void DestroyWindowCore(HandleRef hwnd)
+    /// <summary>
+    /// Lets go of Gecko's window and destroys the container. Call while Mosaic's window still
+    /// exists (as it closes); the container's WM_DESTROY covers the case where it does not.
+    /// </summary>
+    public void Dispose()
     {
-        // Order matters: Gecko's window must be out of the container before the container is
-        // destroyed, or Windows destroys Gecko's window with it.
-        try
+        _messages?.Remove(OnTopLevelMessage);
+        _pending = null;
+        if (_gecko != 0)
         {
-            _pending = null;
-            if (_gecko != 0)
+            try
             {
                 Release();
             }
+            catch (Exception error)
+            {
+                Error($"Releasing the Gecko window failed: {error}");
+            }
         }
-        catch (Exception error)
-        {
-            Error($"Releasing the Gecko window failed: {error}");
-        }
-
+        nint container = _container;
         _container = 0;
-        if (IsWindow(hwnd.Handle) && !DestroyWindow(hwnd.Handle))
+        if (container != 0)
         {
-            Warn($"DestroyWindow on the container failed: {LastError()}");
+            lock (s_containers) s_containers.Remove(container);
+            if (IsWindow(container) && !DestroyWindow(container))
+            {
+                Warn($"DestroyWindow on the container failed: {LastError()}");
+            }
         }
     }
 
-    protected override void Dispose(bool disposing)
+    /// <summary>Messages of the container window.</summary>
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static nint ContainerProc(nint hwnd, int msg, nint wParam, nint lParam)
     {
-        if (disposing)
-        {
-            PresentationSource.RemoveSourceChangedHandler(this, OnSourceChanged);
-        }
-        base.Dispose(disposing); // DestroyWindowCore
-        if (disposing)
-        {
-            SetSource(null);
-        }
-    }
-
-    /// <summary>Messages of the container window (HwndHost subclasses it for us).</summary>
-    protected override nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
-    {
+        GeckoWindowHost? host;
+        lock (s_containers) s_containers.TryGetValue(hwnd, out host);
         // Nothing may escape into the native window procedure.
         try
         {
-            switch (msg)
-            {
-                case WM_WINDOWPOSCHANGED:
-                    // Moved, resized, shown or hidden by WPF layout or Visibility. (Not
-                    // WM_SHOWWINDOW: that arrives before the visibility actually changes.)
-                    SyncGecko();
-                    break;
-
-                case WM_SETFOCUS:
-                    OnContainerGotFocus();
-                    break;
-
-                case WM_PARENTNOTIFY:
-                    OnParentNotify(wParam, lParam);
-                    break;
-
-                case WM_DESTROY:
-                    // The container is being destroyed by something other than
-                    // DestroyWindowCore (its parent window is going away). WM_DESTROY reaches a
-                    // window before its children are destroyed, so Gecko's window can still be
-                    // taken out here.
-                    _pending = null;
-                    if (_gecko != 0)
-                    {
-                        Release();
-                    }
-                    _container = 0;
-                    break;
-            }
+            host?.ContainerMessage(msg, wParam, lParam);
         }
         catch (Exception error)
         {
             Error($"Handling container message 0x{msg:X4} failed: {error}");
         }
-        return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
-    /// <summary>Tabbing from WPF into the page (<c>IKeyboardInputSink.TabInto</c>).</summary>
+    private void ContainerMessage(int msg, nint wParam, nint lParam)
+    {
+        switch (msg)
+        {
+            case WM_WINDOWPOSCHANGED:
+                // Moved, resized, shown or hidden by Place. (Not WM_SHOWWINDOW: that arrives
+                // before the visibility actually changes.)
+                SyncGecko();
+                break;
+
+            case WM_SETFOCUS:
+                OnContainerGotFocus();
+                break;
+
+            case WM_PARENTNOTIFY:
+                OnParentNotify(wParam, lParam);
+                break;
+
+            case WM_DESTROY:
+                // The container is being destroyed by something other than Dispose (Mosaic's
+                // window is going away). WM_DESTROY reaches a window before its children are
+                // destroyed, so Gecko's window can still be taken out here.
+                _pending = null;
+                if (_gecko != 0)
+                {
+                    Release();
+                }
+                lock (s_containers) s_containers.Remove(_container);
+                _container = 0;
+                break;
+        }
+    }
+
+    /// <summary>Tabbing from Mosaic's controls into the page.</summary>
     /// <remarks>
     /// The way back is not symmetric: once the page has the focus, Tab is Gecko's, and Gecko has
     /// no notion of a host to tab out to. Ctrl+L (forwarded by the agent as <c>focusAddress</c>)
     /// or a click returns the focus to Mosaic's own controls.
     /// </remarks>
-    protected override bool TabIntoCore(TraversalRequest request)
+    public bool TabInto()
     {
         if (_gecko == 0 || _container == 0 || !IsWindowVisible(_container))
         {
@@ -359,38 +429,28 @@ public sealed class GeckoWindowHost : HwndHost
         return true;
     }
 
-    protected override bool HasFocusWithinCore() =>
-        // The base class covers child mode (focus is on a descendant of the container). In
-        // owned mode Gecko's window is not a descendant; the shared input queue still lets
-        // GetFocus see it.
-        base.HasFocusWithinCore() || (_gecko != 0 && GetFocus() == _gecko);
+    /// <summary>True while the page has the keyboard focus.</summary>
+    public bool HasFocusWithin =>
+        _gecko != 0 && (GetFocus() is var focus && (focus == _gecko || (_container != 0 && IsChild(_container, focus))));
 
-    /// <summary>Focusing the element the WPF way (<c>host.Focus()</c>) focuses the page.</summary>
-    protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    /// <summary>
+    /// Mosaic's window moved to a monitor with another DPI. Sizes stay right (the content area
+    /// places the container in physical pixels and Gecko's window follows); the page's own scale
+    /// may not, see the note below.
+    /// </summary>
+    private void OnDpiChanged(int newDpi)
     {
-        base.OnGotKeyboardFocus(e);
-        if (ReferenceEquals(e.NewFocus, this))
-        {
-            FocusPage();
-        }
-    }
-
-    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
-    {
-        base.OnDpiChanged(oldDpi, newDpi); // repositions the container in the new pixel size
         if (_gecko != 0 && _attachedMode == GeckoHostMode.Child && !_dpiNoteTraced)
         {
-            // Sizes stay right: the container is resized in physical pixels and Gecko's window
-            // with it. The page's own scale may not follow. Gecko computes its scale from the
-            // DPI of the root window (WinUtils::LogToPhysFactor, which is Mosaic's window here)
-            // but only re-reads it on WM_DPICHANGED, and Windows sends that message to top-level
-            // windows only; child windows get WM_DPICHANGED_AFTERPARENT, which Gecko does not
-            // handle. Nothing can be posted to make up for it (WM_DPICHANGED carries a pointer).
-            // Remedies outside this class: the agent setting layout.css.devPixelsPerPx, or owned
-            // mode, where Gecko's window is top-level and gets the message itself.
+            // Gecko computes its scale from the DPI of the root window (WinUtils::LogToPhysFactor,
+            // which is Mosaic's window here) but only re-reads it on WM_DPICHANGED, and Windows
+            // sends that message to top-level windows only; child windows get
+            // WM_DPICHANGED_AFTERPARENT, which Gecko does not handle. Nothing can be posted to
+            // make up for it (WM_DPICHANGED carries a pointer). Remedies outside this class: the
+            // agent setting layout.css.devPixelsPerPx, or owned mode, where Gecko's window is
+            // top-level and gets the message itself.
             _dpiNoteTraced = true;
-            Warn($"DPI changed from {oldDpi.PixelsPerInchX:0} to {newDpi.PixelsPerInchX:0} while the Gecko " +
-                 "window is a child window; the page may keep rendering at its previous scale.");
+            Warn($"DPI changed to {newDpi} while the Gecko window is a child window; the page may keep rendering at its previous scale.");
         }
         SyncGecko();
     }
@@ -574,7 +634,7 @@ public sealed class GeckoWindowHost : HwndHost
         // Fill the container. SWP_FRAMECHANGED makes the style changes take effect (SetWindowPos
         // documentation); SWP_SHOWWINDOW because inside the container Gecko's window is always
         // "visible": whether the page actually shows is decided by the container's visibility,
-        // which WPF drives from this element's Visibility. A child of a hidden window is hidden.
+        // which Place drives. A child of a hidden window is hidden.
         //
         // The SetParent documentation also asks to synchronise the UISTATE of both windows.
         // That state only governs focus rectangles and accelerator underlines drawn by standard
@@ -699,7 +759,7 @@ public sealed class GeckoWindowHost : HwndHost
 
         if (hadFocus)
         {
-            ReturnFocusToWpf();
+            ReturnFocusToXaml();
         }
     }
 
@@ -717,7 +777,7 @@ public sealed class GeckoWindowHost : HwndHost
         {
             // The focus died with the window. Without this the keyboard is dead in Mosaic's
             // window until the user clicks something.
-            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(ReturnFocusToWpf));
+            _dispatcher.TryEnqueue(DispatcherQueuePriority.High, ReturnFocusToXaml);
         }
     }
 
@@ -911,11 +971,10 @@ public sealed class GeckoWindowHost : HwndHost
     //                             it deactivate at once on this message (the same order it
     //                             handles when a window is minimised).
     //
-    // WPF helps on the way back: giving keyboard focus to any WPF element makes its HwndSource
-    // take the Win32 focus (HwndKeyboardInputProvider.AcquireFocus), so clicking the address bar
-    // needs nothing from this class, and when Mosaic's window is reactivated WPF restores the
-    // focus to the hosted window that had it, which arrives here as WM_SETFOCUS on the container.
-    // (Read from the WPF source, like the Gecko behaviour above; none of it has been run.)
+    // WinUI helps on the way back: clicking a XAML control (the address bar) makes WinUI's
+    // content window take the Win32 focus, so that needs nothing from this class beyond telling
+    // Gecko (OnXamlGotFocus). When Mosaic's window is reactivated WinUI restores the focus to its
+    // own content, not to the page; OnTopLevelActivate hands it back to the page if it had it.
     //
     // One side effect to know about: Gecko closes its open pop-ups (menus, dropdowns) on any
     // WM_ACTIVATE. That is why activation is only posted when the page is not already active.
@@ -970,9 +1029,8 @@ public sealed class GeckoWindowHost : HwndHost
 
     private void OnContainerGotFocus()
     {
-        // The container itself never wants the focus. It gets it when WPF restores the focus to
-        // "the hosted window that had it" (on reactivating Mosaic's window), or through
-        // SetFocus/Tab handling by other code.
+        // The container itself never wants the focus. It gets it through SetFocus or Tab
+        // handling by other code, or when a click lands on it while Gecko is not there.
         if (_gecko != 0 && _attachedMode == GeckoHostMode.Child && IsWindowVisible(_container))
         {
             ActivatePage();
@@ -981,13 +1039,13 @@ public sealed class GeckoWindowHost : HwndHost
         {
             // Nothing here can use the keyboard; do not leave the focus stranded on an empty
             // window. Deferred: changing focus from inside WM_SETFOCUS is asking for trouble.
-            Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            _dispatcher.TryEnqueue(DispatcherQueuePriority.High, () =>
             {
                 if (_container != 0 && GetFocus() == _container)
                 {
-                    ReturnFocusToWpf();
+                    ReturnFocusToXaml();
                 }
-            }));
+            });
         }
     }
 
@@ -1027,32 +1085,35 @@ public sealed class GeckoWindowHost : HwndHost
         }
     }
 
-    private void OnWpfGotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+    /// <summary>
+    /// A XAML element took the keyboard (address bar clicked, Ctrl+L forwarded by the agent, a
+    /// menu opened). Called by <see cref="ContentArea"/> from <c>FocusManager.GotFocus</c>.
+    /// </summary>
+    public void OnXamlGotFocus()
     {
-        // A WPF element took the keyboard (address bar clicked, Ctrl+L forwarded by the agent,
-        // a menu opened). WPF has already moved the Win32 focus; tell Gecko it is inactive.
-        if (_pageActive && _gecko != 0 && !ReferenceEquals(e.NewFocus, this))
+        // WinUI has moved the Win32 focus to its content window by now; tell Gecko it is inactive.
+        // While Mosaic's window is being reactivated WinUI restores its own focus first; the page
+        // gets the keyboard back right after (OnTopLevelActivate), so that is not a hand-over.
+        if (_pageActive && _gecko != 0 && Environment.TickCount64 >= _restoringUntil && !HasFocusWithin)
         {
             DeactivatePage();
         }
     }
 
-    private void OnWpfMouseDown(object sender, MouseButtonEventArgs e) => DismissPagePopups();
+    /// <summary>A pointer went down on Mosaic's own UI: Gecko's open pop-ups go.</summary>
+    public void OnXamlPointerPressed() => DismissPagePopups();
 
     /// <summary>Gives the keyboard to Mosaic's own UI, if Mosaic's window is the active one.</summary>
-    private void ReturnFocusToWpf()
+    private void ReturnFocusToXaml()
     {
-        if (_source is not { IsDisposed: false } source || GetActiveWindow() != TopLevelWindow)
+        if (_topLevel == 0 || GetActiveWindow() != _topLevel)
         {
             return;
         }
-        // Keyboard.Focus rather than SetFocus: it makes WPF take the Win32 focus itself and
-        // forget its "restore focus to the hosted window" target, which would otherwise send
-        // the focus straight back to the container.
-        if (source.RootVisual is IInputElement root)
-        {
-            Keyboard.Focus(root);
-        }
+        // The top-level window hands a focus it receives to WinUI's content window, which then
+        // puts it on the XAML element that last had it.
+        SetFocus(_topLevel);
+        FocusXaml?.Invoke();
     }
 
     private void QueuePageActivated()
@@ -1062,98 +1123,45 @@ public sealed class GeckoWindowHost : HwndHost
             return;
         }
         _activationNotificationQueued = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        _dispatcher.TryEnqueue(DispatcherQueuePriority.High, () =>
         {
             _activationNotificationQueued = false;
             PageActivated?.Invoke(this, EventArgs.Empty);
-        }));
+        });
     }
 
     // =====================================================================================
     // Mosaic's own window
     // =====================================================================================
 
-    private nint TopLevelWindow =>
-        _source is { IsDisposed: false } source ? GetAncestor(source.Handle, GA_ROOT) : 0;
+    private nint TopLevelWindow => _topLevel;
 
-    private void OnSourceChanged(object sender, SourceChangedEventArgs e) =>
-        SetSource(e.NewSource as HwndSource);
-
-    /// <summary>Follows this element into (or out of) a WPF window.</summary>
-    private void SetSource(HwndSource? source)
+    /// <summary>Messages of Mosaic's top-level window (<see cref="WindowMessages"/>).</summary>
+    private void OnTopLevelMessage(int msg, nint wParam, nint lParam)
     {
-        if (ReferenceEquals(source, _source))
+        switch (msg)
         {
-            return;
+            case WM_WINDOWPOSCHANGED:
+                // Moved, resized, minimised, restored, shown, hidden. Child mode needs none of
+                // this (the container's own messages cover it); owned mode follows.
+                if (_attachedMode == GeckoHostMode.Owned)
+                {
+                    SyncGecko();
+                }
+                break;
+
+            case WM_ACTIVATE:
+                OnTopLevelActivate((int)(wParam & 0xFFFF));
+                break;
+
+            case WM_ENTERSIZEMOVE:
+                DismissPagePopups();
+                break;
+
+            case WM_DPICHANGED:
+                OnDpiChanged((int)(wParam & 0xFFFF));
+                break;
         }
-
-        if (_source is not null)
-        {
-            if (!_source.IsDisposed)
-            {
-                _source.RemoveHook(_sourceHook);
-            }
-            _sourceRoot?.RemoveHandler(Keyboard.GotKeyboardFocusEvent, _wpfGotKeyboardFocus);
-            _sourceRoot?.RemoveHandler(Mouse.PreviewMouseDownEvent, _wpfMouseDown);
-        }
-
-        _source = source;
-        _sourceRoot = source?.RootVisual as UIElement;
-
-        if (source is not null)
-        {
-            // The hook sees the messages WPF's own layers leave unhandled, which includes the
-            // ones needed here (WPF's Window class relies on the same path for them). It does
-            // not see WM_SETFOCUS, which WPF's input layer consumes; hence the routed event.
-            source.AddHook(_sourceHook);
-            _sourceRoot?.AddHandler(Keyboard.GotKeyboardFocusEvent, _wpfGotKeyboardFocus, handledEventsToo: true);
-            _sourceRoot?.AddHandler(Mouse.PreviewMouseDownEvent, _wpfMouseDown, handledEventsToo: true);
-        }
-
-        if (_gecko != 0 && _attachedMode == GeckoHostMode.Owned)
-        {
-            // New owner, or none while this element is outside any window (HwndHost parks the
-            // container under a hidden window then, and SyncOwned hides Gecko's window).
-            if (Answers(_gecko, ReleaseProbeTimeoutMs))
-            {
-                ApplyOwner(_gecko, TopLevelWindow);
-            }
-            _ownedTarget = null;
-        }
-        SyncGecko();
-    }
-
-    /// <summary>Messages of Mosaic's window (the HwndSource this element lives in).</summary>
-    private nint SourceHook(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
-    {
-        try
-        {
-            switch (msg)
-            {
-                case WM_WINDOWPOSCHANGED:
-                    // Moved, resized, minimised, restored, shown, hidden; a DPI change also ends
-                    // up here because WPF resizes the window for it. Child mode needs none of
-                    // this (the container's own messages cover it); owned mode follows.
-                    if (_attachedMode == GeckoHostMode.Owned)
-                    {
-                        SyncGecko();
-                    }
-                    break;
-
-                case WM_ACTIVATE:
-                    OnTopLevelActivate((int)(wParam & 0xFFFF));
-                    break;
-
-                case WM_ENTERSIZEMOVE:
-                    DismissPagePopups();
-                    break;
-            }
-        }
-        catch (Exception error)
-        {
-            Error($"Handling window message 0x{msg:X4} failed: {error}");
-        }
-        return 0; // never marks anything handled
     }
 
     private void OnTopLevelActivate(int activation)
@@ -1182,19 +1190,19 @@ public sealed class GeckoWindowHost : HwndHost
             // on the page arrives as WM_PARENTNOTIFY).
             return;
         }
-        // The page had the keyboard when Mosaic was deactivated, so it gets it back. WPF
-        // normally does this by itself (it refocuses the container, see OnContainerGotFocus).
-        // This runs after WPF's handling and only acts if that did not happen and WPF fell back
-        // to focusing nothing in particular.
-        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        // The page had the keyboard when Mosaic was deactivated, so it gets it back. WinUI puts
+        // the focus on its own content first (the XAML element that last had it); this runs
+        // after that and moves it to the page. XAML focus changes in the meantime are not a
+        // reason to deactivate the page (OnXamlGotFocus).
+        _restoringUntil = Environment.TickCount64 + 250;
+        _dispatcher.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
             if (_gecko != 0 && _attachedMode == GeckoHostMode.Child && !_pageActive
-                && _container != 0 && IsWindowVisible(_container) && GetActiveWindow() == TopLevelWindow
-                && (Keyboard.FocusedElement is null || ReferenceEquals(Keyboard.FocusedElement, _sourceRoot)))
+                && _container != 0 && IsWindowVisible(_container) && GetActiveWindow() == TopLevelWindow)
             {
                 ActivatePage();
             }
-        }));
+        });
     }
 
     // =====================================================================================
@@ -1280,6 +1288,14 @@ public sealed class GeckoWindowHost : HwndHost
     // Helpers
     // =====================================================================================
 
+    private void VerifyAccess()
+    {
+        if (!_dispatcher.HasThreadAccess)
+        {
+            throw new InvalidOperationException("GeckoWindowHost is used from a thread other than the UI thread.");
+        }
+    }
+
     private static GeckoHostMode ModeFromCommandLine() =>
         Environment.GetCommandLineArgs().Any(argument =>
             string.Equals(argument, "--gecko-host=owned", StringComparison.OrdinalIgnoreCase))
@@ -1287,20 +1303,20 @@ public sealed class GeckoWindowHost : HwndHost
             : GeckoHostMode.Child;
 
     /// <summary>
-    /// The container: a child window with the default window procedure and the system window
-    /// colour as background (what shows while Gecko is starting or absent). It has no window
-    /// procedure of ours; HwndHost subclasses it and forwards its messages to <see cref="WndProc"/>.
+    /// The container: a child window of Mosaic's top-level window with the system window colour
+    /// as background (what shows while Gecko is starting or absent), and
+    /// <see cref="ContainerProc"/> as its window procedure.
     /// </summary>
     private static unsafe nint CreateContainer(nint parent)
     {
         nint instance = GetModuleHandleW(null);
-        nint defaultProcedure = NativeLibrary.GetExport(NativeLibrary.Load("user32.dll"), "DefWindowProcW");
+        delegate* unmanaged[Stdcall]<nint, int, nint, nint, nint> procedure = &ContainerProc;
         fixed (char* className = ContainerClassName)
         {
             var windowClass = new WNDCLASSEXW
             {
                 cbSize = (uint)sizeof(WNDCLASSEXW),
-                lpfnWndProc = defaultProcedure,
+                lpfnWndProc = (nint)procedure,
                 hInstance = instance,
                 hCursor = LoadCursorW(0, IDC_ARROW),
                 hbrBackground = GetSysColorBrush(COLOR_WINDOW),
@@ -1316,14 +1332,27 @@ public sealed class GeckoWindowHost : HwndHost
             }
         }
 
-        // WS_CLIPCHILDREN: never paint the background over Gecko's window. Created hidden;
-        // HwndHost shows it when the element is visible.
-        nint container = CreateWindowExW(0, ContainerClassName, null,
+        // WS_CLIPCHILDREN: never paint the background over Gecko's window. WS_CLIPSIBLINGS: it
+        // shares its parent with WinUI's content window. Created hidden; Place shows it.
+        // Layered (opaque): WinUI creates its top-level window without a redirection surface
+        // (WS_EX_NOREDIRECTIONBITMAP; its content is drawn by DirectComposition), and a child
+        // window that presents with GDI, as Gecko does without a GPU, then shows nothing at all.
+        // A layered child window gets a redirection surface of its own, which Gecko's window,
+        // its child, draws into. Observed on the CI runners (x64 and ARM64): the page is blank
+        // in a plain container and shows in a layered one. MOSAIC_GECKO_CONTAINER=plain
+        // switches it off (for diagnosing GPU-rendered Gecko on a real PC).
+        bool layered = !string.Equals(Environment.GetEnvironmentVariable("MOSAIC_GECKO_CONTAINER"), "plain", StringComparison.OrdinalIgnoreCase);
+        nint container = CreateWindowExW(layered ? (uint)WS_EX_LAYERED : 0, ContainerClassName, null,
             (uint)(WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS), 0, 0, 0, 0, parent, 0, instance, 0);
         if (container == 0)
         {
             int error = Marshal.GetLastPInvokeError();
             throw new Win32Exception(error, $"Could not create the Gecko host window: {Describe(error)}");
+        }
+        if (layered)
+        {
+            bool opaque = SetLayeredWindowAttributes(container, 0, 255, LWA_ALPHA);
+            Info($"Container 0x{container:X} is a layered window (opaque: {opaque}).");
         }
         return container;
     }

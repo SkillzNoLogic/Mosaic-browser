@@ -5,8 +5,9 @@
 
 .DESCRIPTION
     Needs only the .NET 10 SDK (https://dotnet.microsoft.com/download). The published folder
-    contains Mosaic.exe with its own copy of the .NET runtime, so the PC that runs it does not
-    need .NET installed. It does need the two engines; see bootstrap.ps1.
+    contains Mosaic.exe (a WinUI 3 app, unpackaged) with its own copy of the .NET runtime and of
+    the Windows App SDK runtime, so the PC that runs it needs neither installed. It does need
+    the two engines; see bootstrap.ps1.
 
     The content blocker (uBlock Origin's engine and a snapshot of its filter lists, which
     bootstrap.ps1 builds into windows\vendor\ublock) is packaged when it has been built; without
@@ -119,9 +120,10 @@ foreach ($rid in $Runtime) {
         '--output', $output
     )
 
-    # What the app cannot start without: the executable, and the agent it loads into Gecko; and,
-    # once it has been built, what the content blocker needs and the licence it comes under.
-    $requiredFiles = @('Mosaic.exe', 'gecko\agent.sys.mjs')
+    # What the app cannot start without: the executable, the Windows App SDK it carries (WinUI
+    # and its runtime), and the agent it loads into Gecko; and, once it has been built, what the
+    # content blocker needs and the licence it comes under.
+    $requiredFiles = @('Mosaic.exe', 'Microsoft.UI.Xaml.dll', 'Microsoft.WindowsAppRuntime.dll', 'gecko\agent.sys.mjs')
     if ($blockerBuilt) {
         $requiredFiles += @('blocker\ublock-engine.js', 'blocker\LICENSE-uBlock-Origin.txt', 'blocker\lists\public_suffix_list.dat')
     }
@@ -130,7 +132,8 @@ foreach ($rid in $Runtime) {
             throw "The published app is incomplete: $required is missing from $output."
         }
     }
-    Write-Host "    $output"
+    $resources = @(Get-ChildItem -LiteralPath $output -Filter '*.pri' | ForEach-Object { $_.Name })
+    Write-Host "    $output ($(@(Get-ChildItem -LiteralPath $output -Recurse -File).Count) files; resources: $($resources -join ', '))"
 
     if ($Zip) {
         $archive = Join-Path $publishRoot "Mosaic-$version-$rid.zip"

@@ -146,6 +146,10 @@ public static class GeckoProfile
         // windows only (widget/windows/WinWindowOcclusionTracker.cpp enumerates them), so a
         // window embedded in Mosaic's would keep whatever verdict it had when it was embedded.
         user_pref("widget.windows.window_occlusion_tracking.enabled", false);
+        // Firefox's Link Preview opens a panel of Firefox's own chrome (hidden here) and watches
+        // every key press in the window for its key combination, holding on to keys it thinks
+        // belong to one (Firefox 160).
+        user_pref("browser.ml.linkPreview.enabled", false);
 
         // -- One window, tabs only: Mosaic mirrors Gecko's tab list.
         user_pref("browser.link.open_newwindow", 3);

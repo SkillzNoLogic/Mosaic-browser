@@ -15,7 +15,10 @@
       5. the content blocker is ready, and in each engine blocks the ad script a page served by
          this script asks for (a non-zero "blocked" count), lets it through once switched off
          for the site (zero after the reload), and blocks it again once switched back on;
-      6. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
+      6. the window (WinUI): Gecko's page window is shown in the page area and hidden while
+         Mosaic draws over the page (a page cover); the window maximises, restores, and fits a
+         1024x768 screen;
+      7. "quit" ends Mosaic and leaves no Mosaic or engine process behind.
 
     A screenshot is requested after each of steps 1-5. Screenshots, the state at each step,
     Mosaic's output and any crash reports from the Windows event log are collected in the
@@ -36,6 +39,14 @@
 
 .PARAMETER GeckoHostMode
     child (the default embedding) or owned (the fallback; passes --gecko-host=owned).
+
+.PARAMETER GeckoOnly
+    Only the Mozilla steps (1 and 1b), then quit: for trying Gecko hosting variants quickly.
+
+.PARAMETER Container
+    layered (default) or plain: the Gecko host's container window. Plain
+    (MOSAIC_GECKO_CONTAINER=plain) is for diagnosis: under WinUI, Gecko's page does not show in
+    a plain container when Gecko renders without a GPU.
 
 .PARAMETER TimeoutSeconds
     How long each wait (page load, engine switch, extension install) may take. Default 120.
@@ -58,6 +69,11 @@ param(
 
     [ValidateSet('child', 'owned')]
     [string]$GeckoHostMode = 'child',
+
+    [switch]$GeckoOnly,
+
+    [ValidateSet('layered', 'plain')]
+    [string]$Container = 'layered',
 
     [ValidateRange(10, 3600)]
     [int]$TimeoutSeconds = 120,
@@ -348,6 +364,12 @@ function Save-Screenshot {
             Start-Sleep -Milliseconds 250
         }
         Write-Host "    screenshot: $path"
+        # The same rectangle as the screen shows it: PrintWindow and the screen can disagree
+        # about native child windows. Evidence only; not a check.
+        try {
+            Send-MosaicCommand -Do 'screenCapture' -Value (Join-Path $OutputDirectory "$Name-screen.png") | Out-Null
+        }
+        catch { Write-Host "    (no screen capture: $($_.Exception.Message))" }
     }
     catch {
         $script:SoftFailures += "Screenshot '$Name' failed: $($_.Exception.Message)"
@@ -355,9 +377,70 @@ function Save-Screenshot {
     }
 }
 
+function Invoke-SoftCheck {
+    # Runs a check whose failure is reported at the end without stopping the run. An
+    # informational check only warns: for behaviour that is still being brought up.
+    param([Parameter(Mandatory = $true)] [string]$Name, [Parameter(Mandatory = $true)] [scriptblock]$Check, [switch]$Informational)
+    try { & $Check }
+    catch {
+        if ($Informational) {
+            Write-Host "::warning::$Name (informational) failed: $($_.Exception.Message)"
+            return
+        }
+        $script:SoftFailures += "$Name failed: $($_.Exception.Message)"
+        Write-Host "    $Name FAILED: $($_.Exception.Message)"
+    }
+}
+
+function Send-RealInput {
+    # Real (OS-level) input to Mosaic's window: brings it to the front, clicks at a point of its
+    # client area, then presses Ctrl plus a key. For checks of what only real key presses reach.
+    param([int]$X, [int]$Y, [byte]$Key)
+    if (-not ('MosaicSmoke.Input' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace MosaicSmoke {
+    public static class Input {
+        [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+        [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+        [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+        const uint KEYUP = 2, LEFTDOWN = 2, LEFTUP = 4;
+        public static void Front(IntPtr window) {
+            // Windows lets a process that just "pressed" Alt hand the foreground on.
+            keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, KEYUP, UIntPtr.Zero);
+            SetForegroundWindow(window);
+        }
+        public static void Click(int x, int y) {
+            SetCursorPos(x, y);
+            mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero); mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        }
+        public static void CtrlKey(byte key) {
+            keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(key, 0, 0, UIntPtr.Zero);
+            keybd_event(key, 0, KEYUP, UIntPtr.Zero); keybd_event(0x11, 0, KEYUP, UIntPtr.Zero);
+        }
+    }
+}
+'@
+    }
+    $process = Get-Process -Id $script:App.Id
+    $process.Refresh()
+    [MosaicSmoke.Input]::Front($process.MainWindowHandle)
+    Start-Sleep -Milliseconds 400
+    [MosaicSmoke.Input]::Click($X, $Y)
+    Start-Sleep -Milliseconds 400
+    [MosaicSmoke.Input]::CtrlKey($Key)
+}
+
+function Get-WindowState {
+    param($State)
+    Get-MosaicProperty $State 'winui'
+}
+
 function Save-WindowTree {
     # Every native window inside Mosaic's main window, with its class, owning process and
-    # place. The embedded Gecko window and WebView2 are native windows that WPF knows nothing
+    # place. The embedded Gecko window is a native window that WinUI knows nothing
     # about, so this is the way to see what is really drawn where, and by which process.
     param([Parameter(Mandatory = $true)] [string] $Name)
     try {
@@ -508,6 +591,7 @@ New-Item -ItemType Directory -Path $dataDirectory, $fixtures -Force | Out-Null
 $savedDataDir = $env:MOSAIC_DATA_DIR
 $savedGeckoExe = $env:MOSAIC_GECKO_EXE
 $savedTraceFile = $env:MOSAIC_TRACE_FILE
+$savedContainer = $env:MOSAIC_GECKO_CONTAINER
 $started = Get-Date
 $snapshot = @()
 $failure = $null
@@ -538,6 +622,7 @@ try {
     $env:MOSAIC_GECKO_EXE = $gecko
     # The Gecko window host's step-by-step diagnostics, the first thing to read on a failure.
     $env:MOSAIC_TRACE_FILE = Join-Path $OutputDirectory 'mosaic-trace.log'
+    $env:MOSAIC_GECKO_CONTAINER = if ($Container -eq 'plain') { 'plain' } else { $null }
     $arguments = @('--mosaic-automation')
     if ($GeckoHostMode -eq 'owned') { $arguments += '--gecko-host=owned' }
     $script:App = Start-Process -FilePath $appExe -ArgumentList $arguments -PassThru `
@@ -580,9 +665,50 @@ try {
         }
     }
     Write-Host "    loaded; Gecko process $(Get-MosaicProperty $state 'geckoProcessId'), window attached"
+    Invoke-SoftCheck 'Gecko page shown' {
+        $shown = Wait-MosaicState -Name '1-gecko-shown' -What "Gecko's page to be shown in the page area (winui.geckoShown)" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        }
+        $window = Get-WindowState $shown
+        $area = Get-MosaicProperty $window 'contentArea'
+        Write-Host ("    page area {0}x{1} at {2},{3} (scale {4}), Gecko hosted as a {5} window, material {6}" -f `
+            (Get-MosaicProperty $area 'width'), (Get-MosaicProperty $area 'height'), (Get-MosaicProperty $area 'x'), (Get-MosaicProperty $area 'y'),
+            (Get-MosaicProperty $window 'scale'), (Get-MosaicProperty $window 'geckoHostMode'), (Get-MosaicProperty $window 'effectiveMaterial'))
+    }
     Save-Screenshot '1-gecko'
     Save-WindowTree '1-gecko'
 
+    Write-Host '==> 1b. A page cover hides the Gecko page'
+    Invoke-SoftCheck 'Page cover' {
+        Invoke-Mosaic -Do 'coverPage' -Value 'on' | Out-Null
+        Wait-MosaicState -Name '1b-covered' -What "Gecko's page to be hidden under a page cover" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $false
+        } | Out-Null
+        Save-Screenshot '1b-gecko-covered'
+        Invoke-Mosaic -Do 'coverPage' -Value 'off' | Out-Null
+        Wait-MosaicState -Name '1b-uncovered' -What "Gecko's page to show again once the cover is gone" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        } | Out-Null
+        Write-Host '    hidden while covered, shown again after'
+    }
+
+    Write-Host '==> 1c. mosaic:// pages are shown by Mosaic, with Gecko hidden'
+    Invoke-SoftCheck 'Internal page' {
+        Invoke-Mosaic -Do 'newTab' -Value 'mosaic://smoke-test' | Out-Null
+        Wait-MosaicState -Name '1c-internal' -What 'mosaic://smoke-test to be shown as an internal page with Gecko hidden' -Condition {
+            param($s)
+            $w = Get-WindowState $s
+            (Get-MosaicProperty $w 'internalPage') -eq 'smoke-test' -and (Get-MosaicProperty $w 'geckoShown') -eq $false
+        } | Out-Null
+        Save-Screenshot '1c-internal-page'
+        Invoke-Mosaic -Do 'closeTab' | Out-Null
+        Wait-MosaicState -Name '1c-back' -What "the Gecko page to show again after closing the internal page's tab" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        } | Out-Null
+        Write-Host '    shown in place of the page, Gecko hidden; Gecko back after closing it'
+    }
+
+    if (-not $GeckoOnly) {
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {
         throw "Mosaic reports that Chromium is unavailable (chromiumAvailable is not true). Is the WebView2 runtime installed? See scripts\bootstrap.ps1."
@@ -597,6 +723,32 @@ try {
     Write-Host '    loaded'
     Save-Screenshot '2-chromium'
     Save-WindowTree '2-chromium'
+
+    Write-Host '==> 2b. A shortcut pressed in a Chromium page reaches Mosaic'
+    Invoke-SoftCheck 'Shortcut from a Chromium page' -Informational {
+        $before = @(Get-MosaicProperty $state 'tabs').Count
+        $window = Get-WindowState $state
+        $bounds = Get-MosaicProperty $window 'bounds'
+        $area = Get-MosaicProperty $window 'contentArea'
+        # The page's centre on the screen; the window's client area starts at its bounds here
+        # (the title bar is part of the client area).
+        $x = [int](Get-MosaicProperty $bounds 'x') + [int](Get-MosaicProperty $area 'x') + [int]((Get-MosaicProperty $area 'width') / 2)
+        $y = [int](Get-MosaicProperty $bounds 'y') + [int](Get-MosaicProperty $area 'y') + [int]((Get-MosaicProperty $area 'height') / 2)
+        Send-RealInput -X $x -Y $y -Key 0x54   # Ctrl+T
+        Start-Sleep -Milliseconds 300
+        try {
+            $more = Wait-MosaicState -Name '2b-shortcut' -What 'Ctrl+T pressed in the Chromium page to open a tab' -Condition {
+                param($s) @(Get-MosaicProperty $s 'tabs').Count -gt $before
+            }
+        }
+        finally {
+            $seen = Get-WindowState (Get-MosaicState)
+            Write-Host "    last key Mosaic saw: '$(Get-MosaicProperty $seen 'lastKey')'; focus on: '$(Get-MosaicProperty $seen 'focusedElement')'"
+        }
+        Write-Host "    Ctrl+T opened a tab ($before -> $(@(Get-MosaicProperty $more 'tabs').Count) tabs)"
+        Invoke-Mosaic -Do 'closeTab' | Out-Null
+        Invoke-Mosaic -Do 'selectTab' -Value '0' | Out-Null
+    }
 
     Write-Host "==> 3. Search engine: switch to $SearchEngineId and search"
     Invoke-Mosaic -Do 'searchEngine' -Value $SearchEngineId | Out-Null
@@ -672,7 +824,32 @@ try {
         }
     }
 
-    Write-Host '==> 6. Quit'
+    Write-Host '==> 6. Window'
+    Invoke-SoftCheck 'Window states' {
+        Invoke-Mosaic -Do 'window' -Value 'maximize' | Out-Null
+        Wait-MosaicState -Name '6-maximized' -What 'the window to be maximised' -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'state') -eq 'maximized'
+        } | Out-Null
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot '6-maximized'
+        Invoke-Mosaic -Do 'window' -Value '1024x700' | Out-Null
+        $small = Wait-MosaicState -Name '6-small' -What 'the window to be restored at 1024x700' -Condition {
+            param($s)
+            $w = Get-WindowState $s
+            $bounds = Get-MosaicProperty $w 'bounds'
+            (Get-MosaicProperty $w 'state') -eq 'restored' -and
+                [Math]::Abs([int](Get-MosaicProperty $bounds 'width') - [int](1024 * [double](Get-MosaicProperty $w 'scale'))) -le 2
+        }
+        Start-Sleep -Milliseconds 500
+        Save-Screenshot '6-1024x700'
+        Save-WindowTree '6-1024x700'
+        $area = Get-MosaicProperty (Get-WindowState $small) 'contentArea'
+        Write-Host "    maximised, then restored at 1024x700; page area $(Get-MosaicProperty $area 'width')x$(Get-MosaicProperty $area 'height')"
+    }
+
+    }
+
+    Write-Host '==> 7. Quit'
     $geckoProcessId = 0
     $reported = Get-MosaicProperty $state 'geckoProcessId'
     if ($reported) { $geckoProcessId = [int]$reported }
@@ -708,6 +885,7 @@ finally {
     $env:MOSAIC_DATA_DIR = $savedDataDir
     $env:MOSAIC_GECKO_EXE = $savedGeckoExe
     $env:MOSAIC_TRACE_FILE = $savedTraceFile
+    $env:MOSAIC_GECKO_CONTAINER = $savedContainer
     Stop-PageServer $script:PageServer
     try {
         if ($null -ne $script:App) {

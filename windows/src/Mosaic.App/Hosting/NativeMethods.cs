@@ -4,8 +4,8 @@ namespace Mosaic.App.Hosting;
 
 /// <summary>
 /// The Win32 surface used by the hosting code, and nothing else. Kept deliberately small:
-/// every function here is called from <see cref="GeckoWindowHost"/> or
-/// <see cref="ChildProcessJob"/>, and every call site checks the result.
+/// every function here is called from <see cref="GeckoWindowHost"/>, <see cref="WindowMessages"/>,
+/// <see cref="ContentArea"/> or <see cref="ChildProcessJob"/>, and every call site checks the result.
 /// </summary>
 /// <remarks>
 /// Mosaic ships for x64 and ARM64 only, so the pointer-sized <c>GetWindowLongPtrW</c> /
@@ -39,6 +39,8 @@ internal static unsafe partial class NativeMethods
     internal const long WS_EX_CLIENTEDGE = 0x00000200;
     internal const long WS_EX_STATICEDGE = 0x00020000;
     internal const long WS_EX_APPWINDOW = 0x00040000;
+    internal const long WS_EX_LAYERED = 0x00080000;
+    internal const uint LWA_ALPHA = 0x00000002;
 
     internal const int GWL_STYLE = -16;
     internal const int GWL_EXSTYLE = -20;
@@ -48,9 +50,15 @@ internal static unsafe partial class NativeMethods
 
     internal const int WM_NULL = 0x0000;
     internal const int WM_DESTROY = 0x0002;
+    internal const int WM_SIZE = 0x0005;
     internal const int WM_ACTIVATE = 0x0006;
     internal const int WM_SETFOCUS = 0x0007;
+    internal const int WM_QUERYENDSESSION = 0x0011;
+    internal const int WM_ENDSESSION = 0x0016;
     internal const int WM_ACTIVATEAPP = 0x001C;
+    internal const int WM_NCDESTROY = 0x0082;
+    internal const int WM_GETMINMAXINFO = 0x0024;
+    internal const int WM_WINDOWPOSCHANGING = 0x0046;
     internal const int WM_WINDOWPOSCHANGED = 0x0047;
     internal const int WM_LBUTTONDOWN = 0x0201;
     internal const int WM_RBUTTONDOWN = 0x0204;
@@ -59,6 +67,7 @@ internal static unsafe partial class NativeMethods
     internal const int WM_PARENTNOTIFY = 0x0210;
     internal const int WM_ENTERSIZEMOVE = 0x0231;
     internal const int WM_POINTERDOWN = 0x0246;
+    internal const int WM_DPICHANGED = 0x02E0;
 
     internal const int WA_INACTIVE = 0;
     internal const int WA_ACTIVE = 1;
@@ -72,14 +81,18 @@ internal static unsafe partial class NativeMethods
     internal const uint SWP_NOACTIVATE = 0x0010;
     internal const uint SWP_FRAMECHANGED = 0x0020;
     internal const uint SWP_SHOWWINDOW = 0x0040;
+    internal const uint SWP_HIDEWINDOW = 0x0080;
     internal const uint SWP_NOOWNERZORDER = 0x0200;
     internal const uint SWP_ASYNCWINDOWPOS = 0x4000;
+
+    internal const nint HWND_TOP = 0;
 
     internal const int SW_HIDE = 0;
     internal const int SW_SHOWNOACTIVATE = 4;
     internal const int SW_SHOWNA = 8;
 
     internal const uint GA_ROOT = 2;
+    internal const uint GW_HWNDPREV = 3;
     internal const uint GW_OWNER = 4;
 
     internal const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -124,6 +137,23 @@ internal static unsafe partial class NativeMethods
         public override readonly bool Equals(object? obj) => obj is RECT other && Equals(other);
         public override readonly int GetHashCode() => HashCode.Combine(Left, Top, Right, Bottom);
         public override readonly string ToString() => $"({Left},{Top}) {Width}x{Height}";
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MINMAXINFO
+    {
+        public POINT Reserved;
+        public POINT MaxSize;
+        public POINT MaxPosition;
+        public POINT MinTrackSize;
+        public POINT MaxTrackSize;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -295,6 +325,10 @@ internal static unsafe partial class NativeMethods
     [LibraryImport("user32.dll")]
     internal static partial nint GetSysColorBrush(int index);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetLayeredWindowAttributes(nint hWnd, uint colorKey, byte alpha, uint flags);
+
     [LibraryImport("user32.dll")]
     internal static partial nint LoadCursorW(nint instance, nint cursorName);
 
@@ -307,6 +341,47 @@ internal static unsafe partial class NativeMethods
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool UnhookWinEvent(nint hook);
+
+    // ---- user32: Mosaic's own windows --------------------------------------------------------
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial nint SetFocus(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ScreenToClient(nint hWnd, ref POINT point);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool ClientToScreen(nint hWnd, ref POINT point);
+
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial nint FindWindowExW(nint parent, nint childAfter, string? className, string? windowName);
+
+    [LibraryImport("user32.dll")]
+    internal static partial uint GetDpiForWindow(nint hWnd);
+
+    [LibraryImport("user32.dll")]
+    internal static partial nint DefWindowProcW(nint hWnd, int message, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool AllowSetForegroundWindow(uint processId);
+
+    internal const uint ASFW_ANY = unchecked((uint)-1);
+
+    // ---- comctl32: subclassing Mosaic's top-level window (app.manifest asks for v6) ----------
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetWindowSubclass(nint hWnd, nint subclassProc, nuint subclassId, nuint refData);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool RemoveWindowSubclass(nint hWnd, nint subclassProc, nuint subclassId);
+
+    [LibraryImport("comctl32.dll")]
+    internal static partial nint DefSubclassProc(nint hWnd, int message, nint wParam, nint lParam);
 
     // ---- kernel32 ------------------------------------------------------------------------
 

@@ -3,7 +3,9 @@ using System.IO.Pipes;
 using System.Text;
 using Mosaic.Core.Browser;
 
-namespace Mosaic.App;
+// Not "Mosaic.App.Automation": a namespace of that name would hide Mosaic.Core.Browser.Automation
+// from all code under Mosaic.App.
+namespace Mosaic.App.AutomationSupport;
 
 /// <summary>
 /// The transport of the automation protocol: the named pipe <c>\\.\pipe\mosaic-automation</c>.
