@@ -22,7 +22,7 @@ public static class Program
         if (!instance.IsFirst)
         {
             // A scripted launch must not pull a window to the front; a person's launch should.
-            instance.ForwardToRunningInstance(SingleInstance.AddressesIn(args), activate: !automated);
+            instance.ForwardToRunningInstance(Activation.Payload(args), activate: !automated);
             return 0;
         }
 

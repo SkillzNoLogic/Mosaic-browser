@@ -65,6 +65,7 @@ public sealed class WebView2Browser : IChromiumBrowser
     public event Action<string>? NewTabRequested;
     public event Action<int>? BlockedCountChanged;
     public event Action<string>? Failed;
+    public event Action<string, string>? NavigationFailed;
 
     /// <summary>Begins creating the browser. Call once, after <see cref="View"/> is in the window.</summary>
     public void Start() => _ = InitializeAsync();
@@ -95,7 +96,15 @@ public sealed class WebView2Browser : IChromiumBrowser
                 StartBlockedCountOver();
                 ReportLoadState(core, loading: true);
             };
-            core.NavigationCompleted += (_, _) => ReportLoadState(core, loading: false);
+            core.NavigationCompleted += (_, completed) =>
+            {
+                ReportLoadState(core, loading: false);
+                if (!completed.IsSuccess && completed.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
+                {
+                    var status = completed.WebErrorStatus.ToString();
+                    Raise(() => NavigationFailed?.Invoke(core.Source, status));
+                }
+            };
             core.HistoryChanged += (_, _) => ReportLoadState(core, isLoading);
             core.NewWindowRequested += (_, request) =>
             {
@@ -115,6 +124,8 @@ public sealed class WebView2Browser : IChromiumBrowser
 
             // Filters only apply to navigations that start after they are added.
             if (engine.RequestFilter is not null) WatchRequests(core, environment);
+
+            WebView2Engine.RaiseCoreCreated(core);
 
             // Mosaic's shortcuts, from inside the page (see WebView2Engine.ForwardedShortcuts).
             core.WebMessageReceived += (_, message) => OnWebMessage(message);

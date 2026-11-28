@@ -51,6 +51,13 @@ public interface IChromiumBrowser
     /// reason. The browser is unusable afterwards; the model closes it and shows the reason.
     /// </summary>
     event Action<string>? Failed;
+
+    /// <summary>
+    /// A top-level navigation failed (no connection, DNS, certificate, aborted…): the address
+    /// and the engine's reason (WebView2's <c>CoreWebView2WebErrorStatus</c> name). The browser
+    /// stays usable; Chromium shows its own error page. Not raised for a stop the user asked for.
+    /// </summary>
+    event Action<string, string>? NavigationFailed { add { } remove { } }
 }
 
 /// <summary>The Chromium engine as a whole: whether it can be used, and a factory for tab browsers.</summary>

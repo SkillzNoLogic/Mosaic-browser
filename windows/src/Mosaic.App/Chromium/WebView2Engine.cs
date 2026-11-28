@@ -75,6 +75,35 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
     public RequestFilter? RequestFilter { get; set; }
 
     /// <summary>
+    /// Adjusts the shared environment before it is created, once per run (first Chromium tab).
+    /// For the platform area's web-content languages:
+    /// <c>WebView2Engine.ConfigureEnvironment += options =&gt; { if (PlatformChromium.LanguageOptions() is { } l) { options.Language = l.Language; options.AdditionalBrowserArguments = $"{options.AdditionalBrowserArguments} {l.BrowserArgument}".Trim(); } };</c>
+    /// </summary>
+    public static event Action<CoreWebView2EnvironmentOptions>? ConfigureEnvironment;
+
+    /// <summary>
+    /// Raised for every Chromium tab's <see cref="CoreWebView2"/> once it exists, before its
+    /// first navigation (UI thread). For areas that attach to the core: downloads
+    /// (<c>WebView2Engine.CoreCreated += DownloadsMounts.AttachChromium;</c>), page scripts.
+    /// </summary>
+    public static event Action<CoreWebView2>? CoreCreated;
+
+    internal static void RaiseCoreCreated(CoreWebView2 core)
+    {
+        foreach (var handler in CoreCreated?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((Action<CoreWebView2>)handler)(core);
+            }
+            catch (Exception error)
+            {
+                System.Diagnostics.Trace.TraceError($"[WebView2Engine] A CoreCreated handler failed: {error}");
+            }
+        }
+    }
+
+    /// <summary>
     /// The key combinations that belong to Mosaic even while a Chromium page has focus, as
     /// (virtual key, modifiers). WinUI's WebView2 does not pass a page's key presses on to the
     /// window (observed on CI: a real Ctrl+T in a focused page raised no XAML key event), so
@@ -134,6 +163,14 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
         if (environment is null or { IsFaulted: true } or { IsCanceled: true })
         {
             var options = new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true };
+            try
+            {
+                ConfigureEnvironment?.Invoke(options);
+            }
+            catch (Exception error)
+            {
+                System.Diagnostics.Trace.TraceError($"[WebView2Engine] Configuring the environment failed: {error}");
+            }
             environment = CoreWebView2Environment.CreateWithOptionsAsync("", AppPaths.ChromiumData, options).AsTask();
         }
         return environment;

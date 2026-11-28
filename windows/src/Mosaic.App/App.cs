@@ -93,11 +93,11 @@ public sealed class App : Application, IXamlMetadataProvider
         // In automation mode Mosaic never takes keyboard focus on its own, starting here.
         shown.Show(activate: !automated);
 
-        // Addresses on the command line, and from later launches (SingleInstance).
-        foreach (var address in SingleInstance.AddressesIn(arguments)) model.NewTab(address);
-        instance.Listen((addresses, activate) =>
+        // What the command line asks for, and what later launches pass on (SingleInstance).
+        Activation.ApplyLaunch(arguments, model);
+        instance.Listen((payload, activate) =>
         {
-            foreach (var address in addresses) model.NewTab(address);
+            Activation.Apply(payload, model);
             if (activate) shown.BringToFront();
         });
 

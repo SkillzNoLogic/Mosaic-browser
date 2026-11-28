@@ -189,11 +189,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
-      - name: Check out the scripts
+      - name: Check out
+        # The scripts, and the tests the end-to-end step runs against the published app.
         uses: actions/checkout@v7
-        with:
-          sparse-checkout: |
-            windows/scripts
 
       - name: Download the package
         uses: actions/download-artifact@v8
@@ -252,6 +250,22 @@ jobs:
         if: always()
         continue-on-error: true
         run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\variant-owned -GeckoOnly -GeckoHostMode owned
+
+      - name: Set up .NET 10 (for the end-to-end tests)
+        if: always()
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: End-to-end tests against the published app
+        # Feature areas' *EndToEnd tests (in Mosaic.Core.Tests) drive the real app named by
+        # MOSAIC_APP_EXE; without it they skip. Information while the areas bring them up.
+        if: always()
+        continue-on-error: true
+        env:
+          MOSAIC_APP_EXE: ${{ github.workspace }}\windows\publish\${{ matrix.rid }}\Mosaic.exe
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: dotnet test windows/tests/Mosaic.Core.Tests --configuration Release --filter "FullyQualifiedName~EndToEnd" --logger "console;verbosity=normal"
 
       - name: Upload screenshots and logs
         if: always()

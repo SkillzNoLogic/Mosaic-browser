@@ -20,8 +20,8 @@ namespace Mosaic.App;
 /// <para>A second launch (a link opened from another app once Mosaic is the default browser, a
 /// click on the taskbar's pinned icon) connects to the first one's pipe, named after the same
 /// digest and open to the current user only, and writes one JSON line:
-/// <c>{"activate": true, "urls": ["https://…"]}</c>. The first instance opens each address in a
-/// new tab and comes to the front. The second launch grants it the right to take the
+/// <c>{"activate": true, "payload": "…"}</c>. The payload is opaque here (<see cref="Activation"/>
+/// makes and applies it); the first instance applies it and comes to the front. The second launch grants it the right to take the
 /// foreground first (<c>AllowSetForegroundWindow</c>), which Windows would otherwise refuse.</para>
 /// </remarks>
 internal sealed partial class SingleInstance : IDisposable
@@ -70,11 +70,11 @@ internal sealed partial class SingleInstance : IDisposable
     }
 
     /// <summary>
-    /// Second instance: passes <paramref name="addresses"/> to the running Mosaic and, if
+    /// Second instance: passes <paramref name="payload"/> to the running Mosaic and, if
     /// <paramref name="activate"/>, asks it to come to the front. Falls back to bringing its
     /// window forward directly when it does not answer.
     /// </summary>
-    public void ForwardToRunningInstance(IReadOnlyList<string> addresses, bool activate)
+    public void ForwardToRunningInstance(string payload, bool activate)
     {
         // Only a process that may set the foreground window itself can pass that on; a launch
         // by the user can.
@@ -86,7 +86,7 @@ internal sealed partial class SingleInstance : IDisposable
             var request = new JsonObject
             {
                 ["activate"] = activate,
-                ["urls"] = new JsonArray([.. addresses.Select(address => JsonValue.Create(address))]),
+                ["payload"] = payload,
             };
             var bytes = Encoding.UTF8.GetBytes(request.ToJsonString() + "\n");
             pipe.Write(bytes);
@@ -104,11 +104,11 @@ internal sealed partial class SingleInstance : IDisposable
 
     /// <summary>
     /// First instance: serves second launches until disposed. <paramref name="received"/> runs
-    /// on the calling (UI) thread with the addresses and whether to come to the front.
+    /// on the calling (UI) thread with the payload and whether to come to the front.
     /// </summary>
-    public void Listen(Action<IReadOnlyList<string>, bool> received) => _ = ListenAsync(received);
+    public void Listen(Action<string, bool> received) => _ = ListenAsync(received);
 
-    private async Task ListenAsync(Action<IReadOnlyList<string>, bool> received)
+    private async Task ListenAsync(Action<string, bool> received)
     {
         var stop = stopping.Token;
         while (!stop.IsCancellationRequested)
@@ -127,7 +127,7 @@ internal sealed partial class SingleInstance : IDisposable
                 {
                     await pipe.WriteAsync(Encoding.UTF8.GetBytes("ok\n"), patience.Token);
                     await pipe.FlushAsync(patience.Token);
-                    received(request.Addresses, request.Activate);
+                    received(request.Payload, request.Activate);
                 }
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -153,17 +153,14 @@ internal sealed partial class SingleInstance : IDisposable
         }
     }
 
-    private static (IReadOnlyList<string> Addresses, bool Activate)? Parse(string line)
+    private static (string Payload, bool Activate)? Parse(string line)
     {
         try
         {
             if (JsonNode.Parse(line) is not JsonObject request) return null;
             bool activate = request["activate"] is JsonValue value && value.TryGetValue(out bool flag) && flag;
-            var addresses = request["urls"] is JsonArray urls
-                ? urls.OfType<JsonValue>().Select(url => url.TryGetValue(out string? text) ? text : null).OfType<string>().ToList()
-                : [];
-            // Only what a command line could have asked for.
-            return (AddressesIn(addresses), activate);
+            var payload = request["payload"] is JsonValue text && text.TryGetValue(out string? s) ? s : "";
+            return (payload, activate);
         }
         catch (JsonException)
         {

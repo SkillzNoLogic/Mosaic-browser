@@ -29,6 +29,9 @@ public sealed class BrowserSettings
 
     public static string DefaultPath => Path.Combine(AppPaths.DataRoot, "settings.json");
 
+    /// <summary>The file these settings are read from and saved to.</summary>
+    public string FilePath => path;
+
     /// <summary>Reads the settings at <paramref name="path"/>; a missing or damaged file gives defaults.</summary>
     public BrowserSettings(string path)
     {
