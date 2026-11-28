@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -56,33 +57,25 @@ internal static class TabsMounts
     }
 
     /// <summary>
-    /// Ctrl+Shift+T, Ctrl+Shift+A, Ctrl+1…9 and the workspace keys while Mosaic's own controls
-    /// have focus. Keys pressed in a Gecko page come as agent events; Chromium pages need the
-    /// winui area to pass unhandled keys to <see cref="TabsShortcuts.Handle"/>.
+    /// Ctrl+Shift+T, Ctrl+Shift+A, Ctrl+1…9 and the workspace keys, seen before any control the
+    /// way the window sees its own shortcuts: from Mosaic's controls and from Chromium pages (whose
+    /// accelerator keys WebView2 passes on). Keys pressed in a Gecko page come as agent events.
     /// </summary>
     private static void AttachShortcuts(BrowserModel model, Window window)
     {
         if (window.Content is not UIElement root) return;
-        root.KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
-        void Add(VirtualKey key, VirtualKeyModifiers modifiers)
+        root.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler((_, e) =>
         {
-            var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
-            accelerator.Invoked += (_, e) =>
-            {
-                var mods = ShortcutModifiers.None;
-                if (modifiers.HasFlag(VirtualKeyModifiers.Control)) mods |= ShortcutModifiers.Control;
-                if (modifiers.HasFlag(VirtualKeyModifiers.Shift)) mods |= ShortcutModifiers.Shift;
-                if (modifiers.HasFlag(VirtualKeyModifiers.Menu)) mods |= ShortcutModifiers.Alt;
-                e.Handled = TabsShortcuts.Handle(model, (int)key, mods);
-            };
-            root.KeyboardAccelerators.Add(accelerator);
-        }
-        Add(VirtualKey.T, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift);
-        Add(VirtualKey.A, VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift);
-        for (var key = VirtualKey.Number1; key <= VirtualKey.Number9; key++) Add(key, VirtualKeyModifiers.Control);
-        Add(VirtualKey.Right, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu);
-        Add(VirtualKey.Left, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu);
-        Add(VirtualKey.N, VirtualKeyModifiers.Control | VirtualKeyModifiers.Menu);
+            if (e.Handled || e.KeyStatus.WasKeyDown) return;
+            static bool Down(VirtualKey key) =>
+                InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+            if (Down(VirtualKey.LeftWindows) || Down(VirtualKey.RightWindows)) return;
+            var modifiers = ShortcutModifiers.None;
+            if (Down(VirtualKey.Control)) modifiers |= ShortcutModifiers.Control;
+            if (Down(VirtualKey.Shift)) modifiers |= ShortcutModifiers.Shift;
+            if (Down(VirtualKey.Menu)) modifiers |= ShortcutModifiers.Alt;
+            if (TabsShortcuts.Handle(model, (int)e.Key, modifiers)) e.Handled = true;
+        }), handledEventsToo: true);
     }
 
     /// <summary>

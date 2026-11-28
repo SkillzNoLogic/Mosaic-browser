@@ -72,6 +72,17 @@ public sealed partial class BrowserModel
     /// </summary>
     public Func<BrowserTab, bool> IsPrivateTab { get; set; } = _ => false;
 
+    /// <summary>
+    /// Gives the audio controls of a Chromium browser that does not implement
+    /// <see cref="IChromiumAudio"/> itself (the app adapts its WebView2 browser here). Called once
+    /// per browser, when it is attached to a tab.
+    /// </summary>
+    public Func<IChromiumBrowser, IChromiumAudio?>? ChromiumAudioProvider { get; set; }
+
+    /// <summary>The audio controls of the tab's current Chromium browser, if it has any.</summary>
+    internal IChromiumAudio? ChromiumAudioOf(BrowserTab tab) =>
+        watchedTabs.TryGetValue(tab, out var watch) && tab.Chromium is not null ? watch.Audio : tab.Chromium as IChromiumAudio;
+
     public Guid SelectedWorkspaceId
     {
         get => Workspaces.Any(w => w.Id == selectedWorkspaceId) ? selectedWorkspaceId : Workspaces[0].Id;
@@ -380,7 +391,7 @@ public sealed partial class BrowserModel
     {
         if (!watchedTabs.TryGetValue(tab, out var watch)) return;
         if (watch.Audio is not null && watch.AudioHandler is not null) watch.Audio.PlayingAudioChanged -= watch.AudioHandler;
-        var audio = tab.Chromium as IChromiumAudio;
+        var audio = tab.Chromium as IChromiumAudio ?? (tab.Chromium is { } browser ? ChromiumAudioProvider?.Invoke(browser) : null);
         Action? audioHandler = null;
         if (audio is not null)
         {

@@ -269,7 +269,7 @@ public static class TabsAutomation
                 ["group"] = model.GroupOf(tab)?.Name ?? (tab.GroupId is null ? "" : "?"),
                 ["asleep"] = tab.IsAsleep,
                 ["playingAudio"] = tab.IsPlayingAudio,
-                ["chromiumAudio"] = tab.Chromium is IChromiumAudio,
+                ["chromiumAudio"] = model.ChromiumAudioOf(tab) is not null,
                 ["downloading"] = model.HasActiveDownload(tab),
                 ["inactiveSeconds"] = (int)Math.Max(0, (now - tab.LastActivated).TotalSeconds),
             })]),

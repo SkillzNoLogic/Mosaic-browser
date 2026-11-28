@@ -867,3 +867,39 @@ public class TabsShortcutsTests
         Assert.False(TabsShortcuts.Handle(m, 'Q', ShortcutModifiers.Control));
     });
 }
+
+public class ChromiumAudioProviderTests
+{
+    private sealed class Adapter : IChromiumAudio
+    {
+        public bool IsMuted { get; set; }
+        public bool IsPlayingAudio { get; set; }
+        public event Action? PlayingAudioChanged;
+        public void Raise() => PlayingAudioChanged?.Invoke();
+    }
+
+    [Fact]
+    public void TheAppCanAdaptABrowserThatDoesNotDoAudioItself() => TestLoop.Run(() =>
+    {
+        using var f = new TabsFixture();
+        var m = f.Model;
+        var adapters = new List<Adapter>();
+        m.ChromiumAudioProvider = _ =>
+        {
+            var adapter = new Adapter();
+            adapters.Add(adapter);
+            return adapter;
+        };
+        var tab = f.OpenChromium("https://video.example/");
+        var audio = Assert.Single(adapters);
+        audio.IsPlayingAudio = true;
+        audio.Raise();
+        Assert.True(tab.IsPlayingAudio);
+        m.SetMuted(true, tab);
+        Assert.True(audio.IsMuted);
+        // One adapter per browser, not per call.
+        m.SetMuted(false, tab);
+        Assert.Single(adapters);
+        Assert.False(audio.IsMuted);
+    });
+}

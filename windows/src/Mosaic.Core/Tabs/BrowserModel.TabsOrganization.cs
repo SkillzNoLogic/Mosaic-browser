@@ -39,7 +39,7 @@ public sealed partial class BrowserModel
         if (tab.IsMuted == muted) return;
         tab.IsMuted = muted;
         if (tab is { Engine: EngineKind.Gecko, GeckoId: { } id }) Gecko.Send("setMuted", id, muted);
-        if (tab.Chromium is IChromiumAudio audio) audio.IsMuted = muted;
+        if (ChromiumAudioOf(tab) is { } audio) audio.IsMuted = muted;
         ScheduleSessionSave();
     }
 
