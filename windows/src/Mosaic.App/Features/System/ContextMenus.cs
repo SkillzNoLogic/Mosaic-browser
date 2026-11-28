@@ -61,6 +61,9 @@ public static class ContextMenus
         if (position is { } point) options.Position = point;
         else options.Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft;
         flyout.ShowAt(target, options);
+        // Opening may be raised later; the menu counts as open (and the page as covered) from here.
+        open = flyout;
+        if (coverPage) FeatureMounts.CoverPage(CoverId, true);
         return flyout;
     }
 
