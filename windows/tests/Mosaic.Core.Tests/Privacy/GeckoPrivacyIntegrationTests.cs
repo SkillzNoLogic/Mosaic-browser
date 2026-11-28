@@ -63,7 +63,7 @@ public sealed class GeckoPrivacyIntegrationTests : IDisposable
     {
         using var server = new PrivacyTestServer();
         var engine = NewEngine();
-        var lists = profile.File("Blocker/Lists");
+        var lists = profile.File(Path.Combine("Blocker", "Lists"));
         Directory.CreateDirectory(lists);
         new FilterListStore(lists, []).SaveUserFilters("##.mosaic-generic-ad\n127.0.0.1##.mosaic-site-ad");
         var blocker = new ContentBlocker(engine, new BrowserSettings(profile.File("settings.json")), new ContentBlockerOptions

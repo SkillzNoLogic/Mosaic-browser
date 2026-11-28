@@ -142,7 +142,8 @@ public sealed class FilterListStore(string directory, IReadOnlyList<FilterList>?
     private IReadOnlyList<FilterList> lists = lists ?? BlockerOptions.Load(BlockerOptions.PathFor(directory)).EnabledLists;
     private FilterListUpdate? lastUpdate;
 
-    public string Directory { get; } = directory;
+    /// <summary>The folder, as a full path in the platform's own form (Gecko's file APIs refuse mixed separators on Windows).</summary>
+    public string Directory { get; } = Path.GetFullPath(directory);
 
     /// <summary>The lists in use. Replaced as a whole (<see cref="UseLists"/>), so readers on other threads see one set or the other.</summary>
     public IReadOnlyList<FilterList> Lists => Volatile.Read(ref lists);
