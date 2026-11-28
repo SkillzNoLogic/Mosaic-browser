@@ -80,6 +80,28 @@ public sealed class ChromiumPrivacy : IChromiumPrivacy
         return Mosaic.Core.Privacy.BrowserArguments.Merge(arguments, settings.DnsOverHttps.WebView2Feature is { } feature ? [feature] : []);
     }
 
+    /// <summary>
+    /// <paramref name="arguments"/> with the privacy area's switches for the settings in effect
+    /// (those of the running privacy controller, or else as saved).
+    /// </summary>
+    public static string BrowserArguments(string? arguments)
+    {
+        PrivacySettings settings;
+        if (current is not null) settings = current.privacy().Settings;
+        else
+        {
+            try
+            {
+                settings = File.Exists(PrivacyController.DefaultPath) ? PrivacySettings.FromJson(File.ReadAllText(PrivacyController.DefaultPath)) : new();
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                settings = new();
+            }
+        }
+        return BrowserArguments(arguments, settings);
+    }
+
     /// <summary>The shared environment, for data operations when no tab is open.</summary>
     public static void EnvironmentCreated(Task<CoreWebView2Environment> created) => environment = created;
 
