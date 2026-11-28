@@ -1,0 +1,38 @@
+{
+  "about": "Performance budgets checked by windows/scripts/perf/check-budgets.ps1 after every windows-perf.yml run. Each key is a metric of results.json; 'statistic' is median (default), p90, min, max or mean; the check fails when the statistic is above 'max'. 'baseline' is what CI measured when the budget was set (run id in 'measuredIn'). A metric a run does not produce is reported as not measured and fails only with \"required\": true. How to change a budget: windows/docs/performance.md, section Budgets.",
+  "measuredIn": "provisional: set before the WinUI app could load pages; replace from CI baselines",
+  "architectures": {
+    "x64": {
+      "startup.warm.windowShownMs": { "statistic": "median", "max": 2500, "required": true },
+      "startup.warm.windowShownMs#p90": { "statistic": "p90", "max": 4000 },
+      "startup.cold.windowShownMs": { "statistic": "median", "max": 5000 },
+      "startup.firstRun.windowShownMs": { "statistic": "median", "max": 5000 },
+      "startup.warm.firstPageMs": { "statistic": "median", "max": 8000 },
+      "startup.warmChromium.firstPageMs": { "statistic": "median", "max": 8000 },
+      "memory.gecko.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 900 },
+      "memory.chromium.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 900 },
+      "memory.gecko.tabs10.total.privateWorkingSetMB": { "statistic": "median", "max": 2500 },
+      "memory.chromium.tabs10.total.privateWorkingSetMB": { "statistic": "median", "max": 2500 },
+      "memory.noAutomation.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 400 },
+      "cpu.gecko.idle.percentOfOneCore": { "statistic": "median", "max": 10 },
+      "cpu.chromium.idle.percentOfOneCore": { "statistic": "median", "max": 10 },
+      "cpu.noAutomation.idle.percentOfOneCore": { "statistic": "median", "max": 5 }
+    },
+    "arm64": {
+      "startup.warm.windowShownMs": { "statistic": "median", "max": 3000, "required": true },
+      "startup.warm.windowShownMs#p90": { "statistic": "p90", "max": 5000 },
+      "startup.cold.windowShownMs": { "statistic": "median", "max": 6000 },
+      "startup.firstRun.windowShownMs": { "statistic": "median", "max": 6000 },
+      "startup.warm.firstPageMs": { "statistic": "median", "max": 10000 },
+      "startup.warmChromium.firstPageMs": { "statistic": "median", "max": 10000 },
+      "memory.gecko.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 900 },
+      "memory.chromium.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 900 },
+      "memory.gecko.tabs10.total.privateWorkingSetMB": { "statistic": "median", "max": 2500 },
+      "memory.chromium.tabs10.total.privateWorkingSetMB": { "statistic": "median", "max": 2500 },
+      "memory.noAutomation.oneTab.total.privateWorkingSetMB": { "statistic": "median", "max": 400 },
+      "cpu.gecko.idle.percentOfOneCore": { "statistic": "median", "max": 10 },
+      "cpu.chromium.idle.percentOfOneCore": { "statistic": "median", "max": 10 },
+      "cpu.noAutomation.idle.percentOfOneCore": { "statistic": "median", "max": 5 }
+    }
+  }
+}

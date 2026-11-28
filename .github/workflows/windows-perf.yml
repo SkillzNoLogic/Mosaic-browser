@@ -1,0 +1,200 @@
+# Mosaic for Windows: performance, measured on both architectures Mosaic ships for.
+#
+# For each of x64 (windows-latest) and ARM64 (windows-11-arm): publish the app self-contained
+# for that architecture, install both engines, run windows/scripts/perf/run-perf.ps1 (start-up,
+# time to first page, memory of the whole process tree, idle CPU, 10 tabs per engine, sleeping
+# tabs), upload the results and fail when windows/perf-budgets.json is exceeded.
+# The "publish settings" job compares ReadyToRun, composite ReadyToRun, TieredPGO,
+# InvariantGlobalization and trimming; it runs on the perf branch and on request.
+# Method, numbers and how to change a budget: windows/docs/performance.md.
+name: Windows performance
+
+on:
+  push:
+    branches: [win-next, win2/perf]
+    paths:
+      - 'windows/**'
+      - 'Resources/gecko/**'
+      - '.github/workflows/windows-perf.yml'
+  workflow_dispatch:
+    inputs:
+      publish_settings:
+        description: 'Also compare publish settings (ReadyToRun, PGO, trimming, ...)'
+        type: boolean
+        default: false
+      warm_iterations:
+        description: 'Warm launches per scenario'
+        type: string
+        default: '7'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # Windows PowerShell 5.1, as the scripts promise to run on a stock Windows installation.
+    shell: powershell
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  measure:
+    name: Measure (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            rid: win-x64
+          - arch: arm64
+            runner: windows-11-arm
+            rid: win-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Check the perf scripts parse
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem windows\scripts\perf -Include *.ps1, *.psm1 -Recurse) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { Write-Host "::error file=$($file.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js (for esbuild, which bundles the content blocker)
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-perf-${{ matrix.arch }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-perf-${{ matrix.arch }}-
+
+      - name: Build the content blocker
+        run: .\windows\scripts\bootstrap.ps1 -BlockerOnly
+
+      - name: Publish ${{ matrix.rid }}
+        run: .\windows\scripts\build.ps1 -Runtime ${{ matrix.rid }} -SkipTests
+
+      - name: Install the Gecko engine (Firefox ESR for ${{ matrix.arch }})
+        continue-on-error: true
+        run: .\windows\scripts\bootstrap.ps1 -SkipBlocker
+
+      - name: Make sure the WebView2 runtime is installed
+        run: .\windows\scripts\perf\ensure-webview2.ps1
+
+      - name: Measure
+        run: |
+          $warm = '${{ github.event.inputs.warm_iterations }}'
+          if (-not $warm) { $warm = '7' }
+          .\windows\scripts\perf\run-perf.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe `
+            -OutputDirectory windows\artifacts\perf -Label '${{ github.ref_name }}' `
+            -FirstRunIterations 3 -ColdIterations 5 -WarmIterations ([int]$warm) -MemoryIterations 2
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-${{ matrix.arch }}
+          path: windows/artifacts/perf
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Check the budgets
+        run: .\windows\scripts\perf\check-budgets.ps1 -Results windows\artifacts\perf\results.json
+
+  publish-settings:
+    name: Publish settings (${{ matrix.arch }})
+    if: github.ref == 'refs/heads/win2/perf' || github.event.inputs.publish_settings == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            rid: win-x64
+          - arch: arm64
+            runner: windows-11-arm
+            rid: win-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-perf-${{ matrix.arch }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-perf-${{ matrix.arch }}-
+
+      - name: Build the content blocker
+        run: .\windows\scripts\bootstrap.ps1 -BlockerOnly
+
+      - name: Install the Gecko engine
+        continue-on-error: true
+        run: .\windows\scripts\bootstrap.ps1 -SkipBlocker
+
+      - name: Make sure the WebView2 runtime is installed
+        run: .\windows\scripts\perf\ensure-webview2.ps1
+
+      - name: Publish the variants
+        run: .\windows\scripts\perf\publish-variants.ps1 -Runtime ${{ matrix.rid }}
+
+      - name: Measure each variant's start-up
+        run: |
+          $results = @()
+          foreach ($variant in Get-ChildItem windows\publish\variants -Directory) {
+            $exe = Join-Path $variant.FullName 'Mosaic.exe'
+            if (-not (Test-Path -LiteralPath $exe)) { Write-Host "skipping $($variant.Name): it did not publish"; continue }
+            $out = "windows\artifacts\variants\$($variant.Name)"
+            .\windows\scripts\perf\run-perf.ps1 -AppPath $exe -OutputDirectory $out -Label $variant.Name -Scenario startup `
+              -FirstRunIterations 2 -ColdIterations 3 -WarmIterations 7
+            Copy-Item (Join-Path $variant.FullName 'variant.json') $out
+            $results += (Join-Path $out 'results.json')
+          }
+          .\windows\scripts\perf\compare-runs.ps1 -Results $results -Baseline jit -OutputPath windows\artifacts\variants\comparison.md
+
+      - name: Upload the comparison
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: publish-settings-${{ matrix.arch }}
+          path: |
+            windows/artifacts/variants
+            windows/publish/variants/*.log
+            windows/publish/variants/*/variant.json
+          if-no-files-found: warn
+          retention-days: 30
