@@ -87,19 +87,36 @@ public static class UserNotifications
         get { lock (gate) return created ? presenter?.Status ?? "unsupported" : "not started"; }
     }
 
-    public static NotificationResult Post(NotificationRequest request)
+    /// <summary>
+    /// Creates the presenter now (registering with Windows) without posting: used when Mosaic was
+    /// started by a click on a notification, so the click can be delivered. Returns the status.
+    /// </summary>
+    public static string Start()
     {
-        INotificationPresenter? current;
+        EnsurePresenter();
+        return Status;
+    }
+
+    private static INotificationPresenter? EnsurePresenter()
+    {
+        Func<INotificationPresenter?>? create;
         lock (gate)
         {
-            if (!created)
-            {
-                created = true;
-                try { presenter = factory?.Invoke(); }
-                catch (Exception) { presenter = null; }
-            }
-            current = presenter;
+            if (created) return presenter;
+            created = true;
+            create = factory;
         }
+        // Outside the lock: the presenter may deliver a launch activation while it is created.
+        INotificationPresenter? made = null;
+        try { made = create?.Invoke(); }
+        catch (Exception) { made = null; }
+        lock (gate) presenter = made;
+        return made;
+    }
+
+    public static NotificationResult Post(NotificationRequest request)
+    {
+        var current = EnsurePresenter();
 
         NotificationResult result;
         try
