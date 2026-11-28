@@ -253,6 +253,13 @@ jobs:
         continue-on-error: true
         run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\variant-owned -GeckoOnly -GeckoHostMode owned
 
+      - name: Shell check (Mosaics, Settings, gallery)
+        # The shell area's scenario (windows/scripts/shell-check.ps1); its screenshots and the
+        # shell gallery land in the uploaded folder under shell/.
+        if: always()
+        continue-on-error: true
+        run: .\windows\scripts\shell-check.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\shell
+
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7
