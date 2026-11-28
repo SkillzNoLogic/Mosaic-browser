@@ -446,7 +446,19 @@ public sealed class ShellRoot : Grid
             SetRow(middle, 1);
             grid.Children.Add(middle);
         }
-        var tabs = new VerticalTabList(this);
+        // The tabs area may draw the list itself (pinned grid, groups): Components["verticalTabList"].
+        FrameworkElement tabs = new VerticalTabList(this);
+        if (FeatureMounts.Components.TryGetValue("verticalTabList", out var list))
+        {
+            try
+            {
+                if (list(Model) is FrameworkElement view) tabs = view;
+            }
+            catch
+            {
+                // The shell's own list stays.
+            }
+        }
         SetRow(tabs, 2);
         grid.Children.Add(tabs);
         if (plan.SidebarBottomItems.Count > 0)
