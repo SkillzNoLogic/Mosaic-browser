@@ -43,7 +43,7 @@ internal sealed class DownloadRowView : Grid
 
         var iconSize = compact ? 22 : 28;
         icon = Icons.Make("doc", iconSize);
-        handedOffBadge = Icons.Make("arrow.up.forward.app", iconSize * 0.45);
+        handedOffBadge = Icons.Make("arrow.up.forward.app.fill", iconSize * 0.45);
         handedOffBadge.HorizontalAlignment = HorizontalAlignment.Right;
         handedOffBadge.VerticalAlignment = VerticalAlignment.Bottom;
         var iconBox = new Grid { Width = iconSize + 6, Height = iconSize + 6, VerticalAlignment = VerticalAlignment.Top };
