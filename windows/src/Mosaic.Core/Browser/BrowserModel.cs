@@ -46,6 +46,8 @@ public enum ContentKind
     GeckoStarting,
     /// <summary>Gecko is running but has not created this tab yet.</summary>
     GeckoOpening,
+    /// <summary>One of Mosaic's own pages (<c>mosaic://&lt;host&gt;</c>, <see cref="BrowserModel.InternalPage"/>); no engine.</summary>
+    InternalPage,
 }
 
 /// <summary>How the content blocker's toolbar button looks.</summary>
@@ -112,6 +114,7 @@ public sealed partial class BrowserModel : ObservableObject
     private bool canReload;
     private ContentKind content;
     private ContentMessage? message;
+    private string? internalPage;
     private string? webStoreExtensionId;
     private string addExtensionLabel = "";
 
@@ -334,6 +337,27 @@ public sealed partial class BrowserModel : ObservableObject
     /// </summary>
     public bool ShowsGeckoPage => content == ContentKind.GeckoPage;
 
+    /// <summary>The scheme of Mosaic's own pages: <c>mosaic://bookmarks</c>.</summary>
+    public const string InternalScheme = "mosaic";
+
+    /// <summary>
+    /// The host of a <c>mosaic://</c> address (lower-case: <c>mosaic://Bookmarks/x</c> →
+    /// "bookmarks"), or null for any other address. The app shows the page the feature area
+    /// registered for that host (<c>FeatureMounts.InternalPages</c>).
+    /// </summary>
+    public static string? InternalPageHost(string? url)
+    {
+        const string prefix = InternalScheme + "://";
+        if (url is null || !url.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var rest = url[prefix.Length..];
+        var end = rest.IndexOfAny(['/', '?', '#']);
+        var host = (end < 0 ? rest : rest[..end]).ToLowerInvariant();
+        return host.Length > 0 ? host : null;
+    }
+
+    /// <summary>The host of the internal page the selected tab shows; null unless <see cref="Content"/> is <see cref="ContentKind.InternalPage"/>.</summary>
+    public string? InternalPage { get => internalPage; private set => Set(ref internalPage, value); }
+
     /// <summary>What to say in the content area when neither a page nor the start page is there.</summary>
     public ContentMessage? Message
     {
@@ -438,7 +462,8 @@ public sealed partial class BrowserModel : ObservableObject
     /// <summary>Handles whatever was submitted in the address bar or the start page.</summary>
     public void Navigate(string input)
     {
-        if (rules.ResolveAddress(input, searchEngine) is not { } url) return;
+        var trimmed = input.Trim();
+        if ((InternalPageHost(trimmed) is not null ? trimmed : rules.ResolveAddress(input, searchEngine)) is not { } url) return;
         var tab = selectedTab ?? NewTab();
         IsEditingAddress = false;
         Load(url, tab);
@@ -452,6 +477,20 @@ public sealed partial class BrowserModel : ObservableObject
         tab.Failure = null;
         tab.IsLoading = true;
         tab.LastLoadRequest = time.GetUtcNow();
+
+        if (InternalPageHost(url) is { } host)
+        {
+            // Mosaic's own page: no engine is involved, and whatever the tab had in one goes.
+            DetachFromEngine(tab);
+            tab.IsLoading = false;
+            tab.CanGoBack = false;
+            tab.CanGoForward = false;
+            tab.BlockedCount = 0;
+            tab.Title = InternalPageTitle(host);
+            TabChanged(tab);
+            UpdatePresentation();
+            return;
+        }
         TabChanged(tab);
 
         switch (tab.Engine)
@@ -940,6 +979,7 @@ public sealed partial class BrowserModel : ObservableObject
 
         var kind = ContentFor(tab);
         Message = MessageFor(kind, tab);
+        InternalPage = kind == ContentKind.InternalPage ? InternalPageHost(tab!.Url) : null;
         Content = kind;
 
         foreach (var other in Tabs)
@@ -980,9 +1020,15 @@ public sealed partial class BrowserModel : ObservableObject
             : countText;
     }
 
+    /// <summary>"reading-list" → "Reading List": the tab's title until the page sets its own.</summary>
+    private static string InternalPageTitle(string host) =>
+        string.Join(' ', host.Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(word => char.ToUpperInvariant(word[0]) + word[1..]));
+
     private ContentKind ContentFor(BrowserTab? tab)
     {
         if (tab is null || tab.IsStartPage) return ContentKind.StartPage;
+        if (InternalPageHost(tab.Url) is not null) return ContentKind.InternalPage;
         if (tab.Failure is not null) return ContentKind.Failure;
         if (tab.Engine == EngineKind.Chromium)
         {

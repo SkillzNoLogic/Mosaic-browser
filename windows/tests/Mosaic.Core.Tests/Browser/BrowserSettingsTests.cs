@@ -112,4 +112,45 @@ public sealed class BrowserSettingsTests : IDisposable
         Assert.Equal("Mozilla", EngineKind.Gecko.DisplayName());
         Assert.Equal("Blink", EngineKind.Chromium.EngineName());
     }
+
+    [Fact]
+    public void WindowPlacementSurvivesARoundTrip()
+    {
+        new BrowserSettings(SettingsPath) { WindowPlacement = new WindowPlacement(-1200, 40, 1366, 740, Maximized: true) }.Save();
+
+        var reread = new BrowserSettings(SettingsPath);
+
+        Assert.Equal(new WindowPlacement(-1200, 40, 1366, 740, true), reread.WindowPlacement);
+        var json = JsonNode.Parse(File.ReadAllText(SettingsPath))!["windowPlacement"]!.AsObject();
+        Assert.Equal(1366, (int)json["width"]!);
+        Assert.True((bool)json["maximized"]!);
+    }
+
+    [Theory]
+    [InlineData("""{"windowPlacement": {"x": 0, "y": 0, "width": 0, "height": 600}}""")]
+    [InlineData("""{"windowPlacement": {"x": 0, "y": 0, "width": 800}}""")]
+    [InlineData("""{"windowPlacement": "800x600"}""")]
+    public void ADamagedWindowPlacementIsIgnored(string file)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, file);
+
+        Assert.Null(new BrowserSettings(SettingsPath).WindowPlacement);
+    }
+
+    [Fact]
+    public void KeysThisVersionDoesNotKnowAreKept()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+        File.WriteAllText(SettingsPath, """{"engine": "gecko", "someArea": {"setting": 3}, "searchEngine": "bing"}""");
+
+        var settings = new BrowserSettings(SettingsPath) { SearchEngineId = null, Engine = EngineKind.Chromium };
+        settings.Save();
+
+        var json = JsonNode.Parse(File.ReadAllText(SettingsPath))!.AsObject();
+        Assert.Equal(3, (int)json["someArea"]!["setting"]!);
+        Assert.Equal("chromium", (string?)json["engine"]);
+        // A known key that was cleared goes, rather than surviving from the old file.
+        Assert.False(json.ContainsKey("searchEngine"));
+    }
 }

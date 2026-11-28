@@ -1,0 +1,127 @@
+{
+  "addressBar" : "omnibox",
+  "appearance" : {
+    "accent" : "#FA1E4E",
+    "background" : {
+      "color" : "#121019",
+      "gradient" : {
+        "angle" : 160,
+        "centerX" : 0.5,
+        "centerY" : 0.5,
+        "kind" : "linear",
+        "noise" : 0,
+        "opacity" : 1,
+        "raw" : false,
+        "sharpness" : 2.2,
+        "sources" : [
+
+        ],
+        "stops" : [
+          {
+            "color" : "#1B1024",
+            "location" : 0
+          },
+          {
+            "color" : "#0F0E15",
+            "location" : 0.6
+          },
+          {
+            "color" : "#24101A",
+            "location" : 1
+          }
+        ]
+      },
+      "kind" : "gradient"
+    },
+    "colorScheme" : "dark",
+    "contentCornerRadius" : 8,
+    "contentInset" : 6,
+    "cornerRadius" : 8,
+    "density" : "regular",
+    "glow" : true,
+    "material" : "liquidGlass",
+    "newTabBackground" : {
+      "custom" : {
+        "color" : "#F2F2F7",
+        "gradient" : {
+          "angle" : 135,
+          "centerX" : 0.5,
+          "centerY" : 0.5,
+          "kind" : "mesh",
+          "noise" : 0,
+          "opacity" : 1,
+          "raw" : false,
+          "sharpness" : 2.2,
+          "sources" : [
+            {
+              "color" : "#FF7E5F",
+              "id" : "sunset-0",
+              "spread" : 1,
+              "x" : 0.05,
+              "y" : 0.1
+            },
+            {
+              "color" : "#FEB47B",
+              "id" : "sunset-1",
+              "spread" : 1,
+              "x" : 0.95,
+              "y" : 0.15
+            },
+            {
+              "color" : "#6A3093",
+              "id" : "sunset-2",
+              "spread" : 1,
+              "x" : 0.5,
+              "y" : 0.95
+            }
+          ],
+          "stops" : [
+
+          ]
+        },
+        "kind" : "gradient"
+      },
+      "mode" : "plain"
+    },
+    "toolbarSurface" : false,
+    "workspaceBackgrounds" : {
+
+    }
+  },
+  "bookmarksBar" : false,
+  "name" : "Opera",
+  "preset" : "opera",
+  "regions" : {
+    "rail" : [
+      "home",
+      "bookmarksPage",
+      "historyPage",
+      "readingListPage",
+      "downloadsPage",
+      "flexibleSpace",
+      "settings"
+    ],
+    "titleBar" : [
+      "tabStrip",
+      "newTab",
+      "flexibleSpace"
+    ],
+    "toolbar" : [
+      "back",
+      "forward",
+      "reload",
+      "addressField",
+      "bookmarkStar",
+      "engineSwitch",
+      "blocker",
+      "extensions",
+      "downloads",
+      "menu"
+    ]
+  },
+  "schemaVersion" : 1,
+  "sidebar" : "collapsible",
+  "sidebarWidth" : 260,
+  "tabPlacement" : "top",
+  "tabStyle" : "opera"
+}

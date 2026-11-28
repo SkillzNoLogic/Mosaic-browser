@@ -1,0 +1,116 @@
+{
+  "addressBar" : "omnibox",
+  "appearance" : {
+    "accent" : "system",
+    "background" : {
+      "color" : "#F2F2F7",
+      "gradient" : {
+        "angle" : 135,
+        "centerX" : 0.5,
+        "centerY" : 0.5,
+        "kind" : "linear",
+        "noise" : 0,
+        "opacity" : 1,
+        "raw" : false,
+        "sharpness" : 6,
+        "sources" : [
+          {
+            "color" : "#00FF00",
+            "id" : "s",
+            "spread" : 1,
+            "x" : 1,
+            "y" : 0.5
+          },
+          {
+            "color" : "#0000FF",
+            "id" : "54E79967-8570-470B-9045-BEF1F3087A05",
+            "spread" : 1,
+            "x" : 0.5,
+            "y" : 0.5
+          }
+        ],
+        "stops" : [
+          {
+            "color" : "#FF0000",
+            "location" : 1
+          }
+        ]
+      },
+      "kind" : "gradient"
+    },
+    "colorScheme" : "system",
+    "contentCornerRadius" : 0,
+    "contentInset" : 0,
+    "cornerRadius" : 20,
+    "density" : "regular",
+    "glow" : false,
+    "material" : "liquidGlass",
+    "newTabBackground" : {
+      "custom" : {
+        "color" : "#F2F2F7",
+        "gradient" : {
+          "angle" : 135,
+          "centerX" : 0.5,
+          "centerY" : 0.5,
+          "kind" : "mesh",
+          "noise" : 0,
+          "opacity" : 1,
+          "raw" : false,
+          "sharpness" : 2.2,
+          "sources" : [
+            {
+              "color" : "#FF7E5F",
+              "id" : "sunset-0",
+              "spread" : 1,
+              "x" : 0.05,
+              "y" : 0.1
+            },
+            {
+              "color" : "#FEB47B",
+              "id" : "sunset-1",
+              "spread" : 1,
+              "x" : 0.95,
+              "y" : 0.15
+            },
+            {
+              "color" : "#6A3093",
+              "id" : "sunset-2",
+              "spread" : 1,
+              "x" : 0.5,
+              "y" : 0.95
+            }
+          ],
+          "stops" : [
+
+          ]
+        },
+        "kind" : "gradient"
+      },
+      "mode" : "plain"
+    },
+    "toolbarSurface" : false,
+    "workspaceBackgrounds" : {
+
+    }
+  },
+  "bookmarksBar" : false,
+  "name" : "Opera",
+  "preset" : "opera",
+  "regions" : {
+    "rail" : [
+      "home"
+    ],
+    "titleBar" : [
+      "tabStrip"
+    ],
+    "toolbar" : [
+      "back",
+      "addressField"
+    ]
+  },
+  "schemaVersion" : 1,
+  "sidebar" : "collapsible",
+  "sidebarWidth" : 180,
+  "tabPlacement" : "top",
+  "tabStyle" : "opera"
+}
