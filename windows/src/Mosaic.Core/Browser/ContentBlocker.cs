@@ -63,7 +63,7 @@ public sealed class ContentBlockerOptions
 /// to that thread.
 /// </para>
 /// </remarks>
-public sealed class ContentBlocker : ObservableObject
+public sealed partial class ContentBlocker : ObservableObject // privacy: ContentBlocker.Privacy.cs (cosmetic filtering, lists, My filters, dashboard)
 {
     /// <summary>Lists older than this are refreshed in the background.</summary>
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromDays(2);

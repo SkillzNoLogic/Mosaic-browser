@@ -2358,8 +2358,9 @@ const PrivacyAgent = {
   },
 };
 
-// ⇧⌘N opens a private tab in Mosaic (Gecko's own private window is swallowed above).
-if (IS_MAC) {
+// ⇧⌘N (Ctrl+Shift+N on Windows) opens a private tab in Mosaic (Gecko's own
+// private window is swallowed above).
+if (IS_MAC || Services.appinfo.OS === "WINNT") {
   FORWARDED_WITH_SHIFT.n = "newPrivateTab";
 }
 

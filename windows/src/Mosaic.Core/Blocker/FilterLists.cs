@@ -138,7 +138,8 @@ public sealed class FilterListStore(string directory, IReadOnlyList<FilterList>?
     /// <summary>Smallest download accepted as a list; anything shorter is an error message or a truncation.</summary>
     private const int MinimumListSize = 1024;
 
-    private IReadOnlyList<FilterList> lists = lists ?? FilterListCatalog.Defaults;
+    // Without an explicit set, the lists the user chose (BlockerOptions, kept beside the lists folder).
+    private IReadOnlyList<FilterList> lists = lists ?? BlockerOptions.Load(BlockerOptions.PathFor(directory)).EnabledLists;
     private FilterListUpdate? lastUpdate;
 
     public string Directory { get; } = directory;

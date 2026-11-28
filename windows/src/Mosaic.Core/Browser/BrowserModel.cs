@@ -464,7 +464,7 @@ public sealed partial class BrowserModel : ObservableObject
                 browser.Load(url);
                 break;
             case EngineKind.Chromium:
-                AttachChromium(tab, chromium.CreateBrowser(url));
+                AttachChromium(tab, CreateChromiumBrowser(tab, url)); // privacy: a private tab gets an InPrivate browser
                 break;
             default:
                 tab.GeckoWork = LoadInGeckoAsync(url, tab, tab.GeckoWork, tab.GeckoGeneration);
@@ -659,6 +659,7 @@ public sealed partial class BrowserModel : ObservableObject
             Notice = ChromiumUnavailableReason;
             return;
         }
+        if (RefusesEngineSwitch(kind)) return; // privacy: private tabs stay on Chromium
         SetEnginePreference(kind, remember: true);
         if (selectedTab is not { } tab || tab.Engine == kind) return;
 
@@ -895,6 +896,9 @@ public sealed partial class BrowserModel : ObservableObject
                 break;
             case "toggleBlocker":
                 ToggleBlocker();
+                break;
+            default:
+                HandlePrivacyEvent(eventType); // privacy: Ctrl+Shift+N inside Gecko opens a private tab
                 break;
         }
     }

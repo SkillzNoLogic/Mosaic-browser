@@ -17,7 +17,11 @@ public sealed record BlockerOptions
     /// <summary>IDs of the filter lists in use (see <see cref="FilterListCatalog.All"/>); uBO's defaults unless changed.</summary>
     public IReadOnlySet<string> EnabledListIds { get; init; } = FilterListCatalog.Defaults.Select(list => list.Id).ToHashSet(StringComparer.Ordinal);
 
-    public static string DefaultPath => Path.Combine(AppPaths.DataRoot, "Blocker", "options.json");
+    public static string DefaultPath => PathFor(AppPaths.BlockerLists);
+
+    /// <summary>Where the options for the lists in <paramref name="listsDirectory"/> are kept: beside that folder.</summary>
+    public static string PathFor(string listsDirectory) =>
+        Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(listsDirectory))) ?? listsDirectory, "options.json");
 
     /// <summary>The lists in use, in catalogue order.</summary>
     public IReadOnlyList<FilterList> EnabledLists => FilterListCatalog.ListsEnabled(EnabledListIds);
