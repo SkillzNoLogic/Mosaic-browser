@@ -11,17 +11,9 @@ using Windows.UI;
 
 namespace Mosaic.App.Features.Tabs;
 
-// Icons the tabs area asks the system area to add to Icons.cs (until then a text fallback is
-// drawn): pin, pin.fill, speaker.slash.fill, speaker.wave.2.fill, moon.zzz, folder,
-// arrow.uturn.backward, square.stack, square.on.square, trash, exclamationmark.arrow.circlepath,
-// and the workspace symbols person, briefcase, house, book, graduationcap, hammer, paintbrush,
-// gamecontroller, cart, heart, globe, square.grid.2x2.
-
 /// <summary>Colours, cards and rows shared by the tabs area's views (Windows 11 settings look).</summary>
 internal static class TabsStyle
 {
-    private static readonly string Unknown = Icons.Glyph("\u0001tabs-unknown");
-
     /// <summary>A theme brush from <c>XamlControlsResources</c>, or <paramref name="fallback"/> when it is missing.</summary>
     public static Brush Resource(string key, Color fallback) =>
         Application.Current?.Resources.TryGetValue(key, out var value) == true && value is Brush brush
@@ -47,9 +39,9 @@ internal static class TabsStyle
     public static SolidColorBrush EngineBrush(EngineKind engine) =>
         new(engine == EngineKind.Gecko ? Color.FromArgb(0xFF, 0xFF, 0x73, 0x1A) : Color.FromArgb(0xFF, 0x33, 0x85, 0xF5));
 
-    public static bool HasIcon(string name) => Icons.Glyph(name) != Unknown;
+    public static bool HasIcon(string name) => Icons.Has(name);
 
-    /// <summary>The icon, or a short text in its place when the icon table does not have it yet.</summary>
+    /// <summary>The icon, or a short text in its place for a name the icon table lacks.</summary>
     public static FrameworkElement Icon(string name, string fallbackText, double size = 14) =>
         HasIcon(name)
             ? Icons.Make(name, size)
