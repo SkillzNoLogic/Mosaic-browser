@@ -96,8 +96,9 @@ public class BrowserLibraryTests
         var (_, browser) = fixture.OpenChromiumTab("https://secret.test/");
         browser.RaiseTitle("Secret");
         browser.RaiseLoadState(loading: false);
-        var (_, page) = fixture.OpenChromiumTab("mosaic://history");
-        page.RaiseLoadState(loading: false);
+        // Mosaic's own pages are shown by the app, with no engine behind them (winui M1).
+        var internalPage = model.NewTab("mosaic://history", EngineKind.Chromium);
+        Assert.Null(internalPage.Chromium);
         await SettleAsync(fixture);
         Assert.Empty(await VisitsAsync(model));
     });
