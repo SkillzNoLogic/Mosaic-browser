@@ -19,17 +19,18 @@ function Invoke-AccessibilityScan {
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
     $report = Write-UiaReport -Scan $scan -BasePath (Join-Path $directory (ConvertTo-SafeName $Surface)) -Title "Accessibility: $Surface"
     Add-Evidence $report
-    Write-Step "$Surface`: $($scan.Elements.Count) elements, $($scan.Unnamed) unnamed, $($scan.NotFocusable) not focusable, $($scan.NotReached) not reached by Tab"
+    Write-Step "$Surface`: $($scan.Elements.Count) elements, $($scan.Unnamed) unnamed, $($scan.NotFocusable) not focusable, $($scan.NotReached) not reached by Tab, $($scan.UnnamedTabStops) unnamed Tab stops"
+    if ($scan.TabWalkProblem) { Write-Step "Tab walk: $($scan.TabWalkProblem)" }
     foreach ($issue in @($scan.Issues | Select-Object -First 15)) { Write-Step "  $($issue.Kind): $($issue.Type) $($issue.AutomationId) at $($issue.Rect) [$($issue.Path)]" }
     $scan
 }
 
 function Assert-ScanClean {
     param([Parameter(Mandatory = $true)] $Scan, [Parameter(Mandatory = $true)] [string]$Surface)
-    $total = $Scan.Unnamed + $Scan.NotFocusable + $Scan.NotReached
+    $total = $Scan.Unnamed + $Scan.NotFocusable + $Scan.NotReached + $Scan.UnnamedTabStops
     Assert-True ($Scan.Elements.Count -gt 1) "$Surface exposes a UI Automation tree"
     if ($total -gt 0) {
-        throw "${Surface}: $($Scan.Unnamed) control(s) without a UI Automation name, $($Scan.NotFocusable) not keyboard-focusable, $($Scan.NotReached) not reached by Tab (see accessibility\$(ConvertTo-SafeName $Surface).md)"
+        throw "${Surface}: $($Scan.Unnamed) control(s) without a UI Automation name, $($Scan.NotFocusable) not keyboard-focusable, $($Scan.NotReached) not reached by Tab, $($Scan.UnnamedTabStops) unnamed Tab stop(s) (see accessibility\$(ConvertTo-SafeName $Surface).md)"
     }
 }
 

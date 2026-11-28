@@ -28,6 +28,8 @@ $script:ArrowNavigated = @('ListItem', 'TabItem', 'TreeItem', 'MenuItem', 'DataI
 # Not expected to have a Name of their own or to be focusable.
 $script:NameOptional = @('ScrollBar', 'Document', 'MenuBar')
 $script:PageFrameworks = @('Chrome', 'Gecko')
+# Window caption buttons are reached with Alt+Space, not Tab, on every Windows app.
+$script:CaptionButtons = @('Minimize', 'Maximize', 'Restore', 'Close')
 
 function Get-ControlTypeName {
     param($ControlType)
@@ -103,7 +105,8 @@ function Get-UiaScan {
             if ([string]::IsNullOrWhiteSpace($name)) {
                 [void]$issues.Add([pscustomobject]@{ Kind = 'unnamed'; Type = $type; AutomationId = $record.AutomationId; ClassName = $record.ClassName; Rect = $record.Rect; Path = $path })
             }
-            if ($record.Enabled -and -not $record.Offscreen -and -not $record.Focusable) {
+            $isCaption = $script:CaptionButtons -contains $record.AutomationId -and $path -like '*Title Bar*'
+            if ($record.Enabled -and -not $record.Offscreen -and -not $record.Focusable -and -not $isCaption) {
                 [void]$issues.Add([pscustomobject]@{ Kind = 'notFocusable'; Type = $type; AutomationId = $record.AutomationId; ClassName = $record.ClassName; Rect = $record.Rect; Path = $path })
             }
         }
@@ -127,6 +130,8 @@ function Get-UiaScan {
         Unnamed     = @($issues | Where-Object { $_.Kind -eq 'unnamed' }).Count
         NotFocusable = @($issues | Where-Object { $_.Kind -eq 'notFocusable' }).Count
         NotReached  = 0
+        UnnamedTabStops = 0
+        TabWalkProblem = ''
         TabStops    = @()
     }
 }
@@ -138,7 +143,7 @@ function Invoke-TabWalk {
         has keyboard focus after each press. Returns the focused elements in order. Takes the
         keyboard focus: only for CI runners or when asked.
     #>
-    param([Parameter(Mandatory = $true)] [long]$WindowHandle, [int]$ProcessId, [int]$Presses = 120)
+    param([Parameter(Mandatory = $true)] [long]$WindowHandle, [Parameter(Mandatory = $true)] [int]$ProcessId, [int]$Presses = 120)
     Add-Type -AssemblyName System.Windows.Forms
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$WindowHandle)
     try { $root.SetFocus() } catch { }
@@ -157,8 +162,15 @@ function Invoke-TabWalk {
             Press = $i + 1; Type = (Get-ControlTypeName $current.ControlType); Name = [string]$current.Name
             AutomationId = [string]$current.AutomationId; Framework = [string]$current.FrameworkId
             Page = (Test-PageContent $current); ProcessId = [int]$current.ProcessId; RuntimeId = $key
+            InMosaic = ($null -ne $current.ProcessId -and [int]$current.ProcessId -eq $ProcessId)
         }
         [void]$stops.Add($stop)
+        if ($i -eq 0 -and -not $stop.InMosaic -and -not $stop.Page) {
+            # Focus is in another application (on some runners a Windows set-up window): the
+            # walk says nothing about Mosaic.
+            [void]$stops.Add($stop)
+            break
+        }
         if ($null -eq $first -and -not $stop.Page) { $first = $key }
         elseif ($key -and $key -eq $first -and $i -gt 2) { break }   # wrapped around
     }
@@ -170,6 +182,19 @@ function Add-TabWalkFindings {
     param([Parameter(Mandatory = $true)] $Scan, [Parameter(Mandatory = $true)] $Stops)
     $reached = @{}
     foreach ($stop in $Stops) { if ($stop.RuntimeId) { $reached[$stop.RuntimeId] = $true } }
+    $Scan.TabStops = $Stops
+    $inMosaic = @($Stops | Where-Object { $_.InMosaic })
+    if ($inMosaic.Count -eq 0) {
+        $Scan.TabWalkProblem = "the Tab walk could not put the keyboard focus in Mosaic (focus was in process $(@($Stops | Select-Object -First 1 | ForEach-Object { $_.ProcessId })) '$(@($Stops | Select-Object -First 1 | ForEach-Object { $_.Name }))')"
+        return
+    }
+    # A Tab stop that a screen reader announces as nothing.
+    foreach ($stop in $inMosaic) {
+        if (-not $stop.Page -and [string]::IsNullOrWhiteSpace($stop.Name)) {
+            [void]$Scan.Issues.Add([pscustomobject]@{ Kind = 'unnamedTabStop'; Type = $stop.Type; AutomationId = $stop.AutomationId; ClassName = ''; Rect = ''; Path = "Tab stop $($stop.Press)" })
+            $Scan.UnnamedTabStops++
+        }
+    }
     $count = 0
     foreach ($element in $Scan.Elements) {
         if ($script:Interactive -notcontains $element.Type -or $script:ArrowNavigated -contains $element.Type -or $script:NameOptional -contains $element.Type) { continue }
@@ -180,7 +205,6 @@ function Add-TabWalkFindings {
         $count++
     }
     $Scan.NotReached = $count
-    $Scan.TabStops = $Stops
 }
 
 function Write-UiaReport {
@@ -189,12 +213,14 @@ function Write-UiaReport {
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $json = [ordered]@{
         title = $Title; unnamed = $Scan.Unnamed; notFocusable = $Scan.NotFocusable; notReached = $Scan.NotReached
+        unnamedTabStops = $Scan.UnnamedTabStops; tabWalkProblem = $Scan.TabWalkProblem
         truncated = $Scan.Truncated; elementCount = $Scan.Elements.Count
         issues = @($Scan.Issues); tabStops = @($Scan.TabStops); pageRegions = @($Scan.PageRegions | ForEach-Object { $_.Path })
         elements = @($Scan.Elements)
     }
     [System.IO.File]::WriteAllText($BasePath + '.json', ($json | ConvertTo-Json -Depth 6), $utf8)
-    $lines = @("# $Title", '', "$($Scan.Elements.Count) elements; $($Scan.Unnamed) unnamed, $($Scan.NotFocusable) not focusable, $($Scan.NotReached) not reached by Tab.", '')
+    $lines = @("# $Title", '', "$($Scan.Elements.Count) elements; $($Scan.Unnamed) unnamed, $($Scan.NotFocusable) not focusable, $($Scan.NotReached) not reached by Tab, $($Scan.UnnamedTabStops) unnamed Tab stops.", '')
+    if ($Scan.TabWalkProblem) { $lines += "Tab walk: $($Scan.TabWalkProblem)."; $lines += '' }
     if ($Scan.Issues.Count -gt 0) {
         $lines += '| Issue | Control | AutomationId | Class | Where | Path |'
         $lines += '| --- | --- | --- | --- | --- | --- |'
@@ -208,7 +234,7 @@ function Write-UiaReport {
         $lines += ''
         foreach ($stop in $Scan.TabStops) {
             $where = 'Mosaic'
-            if ($stop.Page) { $where = 'page' }
+            if ($stop.Page) { $where = 'page' } elseif (-not $stop.InMosaic) { $where = "another process ($($stop.ProcessId))" }
             $lines += ('{0}. {1} "{2}" {3} ({4})' -f $stop.Press, $stop.Type, $stop.Name, $stop.AutomationId, $where)
         }
     }

@@ -242,7 +242,23 @@ namespace MosaicE2E
             }
         }
 
-        public static bool Activate(long handle) { return SetForegroundWindow(new IntPtr(handle)); }
+        [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr window);
+
+        /// <summary>
+        /// Brings a window to the front. Windows only lets the foreground process do that, so an
+        /// Alt press first makes this process count as having had input (the usual work-around).
+        /// </summary>
+        public static bool Activate(long handle)
+        {
+            var window = new IntPtr(handle);
+            if (IsIconic(window)) ShowWindow(window, 9 /* SW_RESTORE */);
+            keybd_event(0x12 /* VK_MENU */, 0, 0, UIntPtr.Zero);
+            keybd_event(0x12, 0, 2 /* KEYEVENTF_KEYUP */, UIntPtr.Zero);
+            bool done = SetForegroundWindow(window);
+            return done && GetForegroundWindow() == window;
+        }
         public static int ScreenWidth() { return GetSystemMetrics(0); }
         public static int ScreenHeight() { return GetSystemMetrics(1); }
         public static long Foreground() { return GetForegroundWindow().ToInt64(); }

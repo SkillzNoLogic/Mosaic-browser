@@ -65,7 +65,7 @@ Register-Scenario -Area selftest -Name 'accessibility scan finds the unnamed but
     Assert-True ($scan.Elements.Count -ge 4) 'the scan walks the window'
     Assert-True (@($scan.Issues | Where-Object { $_.Kind -eq 'unnamed' -and $_.Type -eq 'Button' }).Count -eq 1) 'exactly the one unnamed button is reported'
     if ($env:CI) {
-        $stops = Invoke-TabWalk -WindowHandle $window.Handle -Presses 12
+        $stops = Invoke-TabWalk -WindowHandle $window.Handle -ProcessId (Get-MosaicSession).Process.Id -Presses 12
         Write-Step "Tab walk: $(($stops | ForEach-Object { $_.Type + ':' + $_.Name }) -join ', ')"
         Assert-True (@($stops).Count -ge 2) 'the Tab walk moves the focus'
     }
