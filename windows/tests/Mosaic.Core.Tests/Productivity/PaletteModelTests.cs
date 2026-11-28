@@ -209,7 +209,7 @@ public class PaletteIntegrationTests
         using var fixture = Create();
         var model = fixture.Model;
         await model.Productivity.StartAsync();
-        Shell.SettingsCategory? opened = null;
+        Mosaic.Core.Shell.SettingsCategory? opened = null;
         ProductivityIntegration.OpenSettings = (_, category) => opened = category;
         try
         {
@@ -218,7 +218,7 @@ public class PaletteIntegrationTests
             palette.Query = "shortcuts settings";
             Assert.Equal("settings.shortcuts", palette.Results[0].Id);
             palette.PerformSelection();
-            Assert.Equal(Shell.SettingsCategory.Shortcuts, opened);
+            Assert.Equal(Mosaic.Core.Shell.SettingsCategory.Shortcuts, opened);
             palette.Present();
             palette.Query = "customise keyboard";
             Assert.Equal("shortcuts.customise", palette.Results[0].Id);
