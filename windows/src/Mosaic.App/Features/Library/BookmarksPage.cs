@@ -247,8 +247,8 @@ internal sealed class BookmarksPage : Grid
         _ = ShowListAsync();
     }
 
-    private IReadOnlyList<Bookmark> CurrentBookmarks() =>
-        [.. list.Items.OfType<FrameworkElement>().Select(row => row.Tag as string).OfType<string>().Select(library.BookmarkById).OfType<Bookmark>()];
+    private List<Bookmark> CurrentBookmarks() =>
+        list.Items.OfType<FrameworkElement>().Select(row => row.Tag as string).OfType<string>().Select(library.BookmarkById).OfType<Bookmark>().ToList();
 
     private async Task ShowListAsync()
     {
