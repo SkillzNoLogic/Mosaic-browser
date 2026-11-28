@@ -82,25 +82,38 @@ internal static class PasswordsMounts
         root.KeyboardAccelerators.Add(shortcut);
     }
 
-    private static async void ShowSettingsDialog(BrowserModel model)
+    private static Popup? settingsPopup;
+
+    /// <summary>
+    /// Until the shell's Settings view is wired to <see cref="OpenSettings"/>, the page opens in
+    /// a popup over the whole window (so its own dialogs, which need the window, still work).
+    /// </summary>
+    private static void ShowSettingsDialog(BrowserModel model)
     {
-        if (window?.Content?.XamlRoot is not { } root) return;
-        FeatureMounts.CoverPage("passwords.settings", true);
-        try
+        if (settingsPopup is { IsOpen: true } || window?.Content?.XamlRoot is not { } root) return;
+        var done = new Button { Content = "Done", Style = PasswordsUi.Style("AccentButtonStyle"), HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(16) };
+        var layout = new Grid
         {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = root,
-                Title = "Passwords & Autofill",
-                Content = new PasswordsSettingsPage(model) { MaxHeight = 640, MinWidth = 560 },
-                CloseButtonText = "Done",
-            };
-            await dialog.ShowAsync();
-        }
-        finally
+            Width = root.Size.Width,
+            Height = root.Size.Height,
+            Background = PasswordsUi.Brush("SolidBackgroundFillColorBaseBrush"),
+        };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.Children.Add(done);
+        var page = new PasswordsSettingsPage(model);
+        Grid.SetRow(page, 1);
+        layout.Children.Add(page);
+        var popup = new Popup { Child = layout, XamlRoot = root };
+        done.Click += (_, _) => popup.IsOpen = false;
+        popup.Closed += (_, _) =>
         {
             FeatureMounts.CoverPage("passwords.settings", false);
-        }
+            settingsPopup = null;
+        };
+        settingsPopup = popup;
+        FeatureMounts.CoverPage("passwords.settings", true);
+        popup.IsOpen = true;
     }
 
     /// <summary>

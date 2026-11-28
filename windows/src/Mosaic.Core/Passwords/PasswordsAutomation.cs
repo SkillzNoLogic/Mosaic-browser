@@ -194,7 +194,8 @@ public static class PasswordsAutomation
                 {
                     var text = await File.ReadAllTextAsync(value);
                     var parsed = PasswordCsv.ParseExport(text);
-                    var summary = await Task.Run(() => passwords.Vault.ImportEntries(parsed));
+                    var vault = passwords.Vault; // read here, on the UI thread, not on the worker
+                    var summary = await Task.Run(() => vault.ImportEntries(parsed));
                     await Write(summary.ToString());
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException or PasswordCsv.ImportException or PasswordStoreException)
