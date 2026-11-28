@@ -24,6 +24,7 @@ internal sealed class BlockerButton : UserControl
     private readonly TextBlock badge = new() { FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button button;
     private readonly List<IDisposable> watches = [];
+    private bool syncing;
 
     public BlockerButton(BrowserModel model)
     {
@@ -43,19 +44,33 @@ internal sealed class BlockerButton : UserControl
         flyout.Opening += (_, _) =>
         {
             FeatureMounts.CoverPage(Cover, true);
+            syncing = true;
             model.ShowBlocker = true;
+            syncing = false;
             flyout.Content = new BlockerPanel(model, () => flyout.Hide());
         };
         flyout.Closed += (_, _) =>
         {
             FeatureMounts.CoverPage(Cover, false);
+            syncing = true;
             model.ShowBlocker = false;
+            syncing = false;
             flyout.Content = null;
         };
         button.Flyout = flyout;
         Content = button;
-        Loaded += (_, _) => watches.Add(Watch(model, Update,
-            nameof(BrowserModel.BlockerShield), nameof(BrowserModel.BlockerBadge), nameof(BrowserModel.BlockerHelp)));
+        Loaded += (_, _) =>
+        {
+            watches.Add(Watch(model, Update,
+                nameof(BrowserModel.BlockerShield), nameof(BrowserModel.BlockerBadge), nameof(BrowserModel.BlockerHelp)));
+            // The model's ShowBlocker (automation's showBlocker, Ctrl+Shift+B menus) opens and closes the flyout too.
+            watches.Add(Watch(model, () =>
+            {
+                if (syncing) return;
+                if (model.ShowBlocker && !flyout.IsOpen && XamlRoot is not null) flyout.ShowAt(button);
+                else if (!model.ShowBlocker && flyout.IsOpen) flyout.Hide();
+            }, nameof(BrowserModel.ShowBlocker)));
+        };
         Unloaded += (_, _) =>
         {
             foreach (var watch in watches) watch.Dispose();
