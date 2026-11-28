@@ -82,12 +82,16 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
         }, $"a {type} event");
 
     private static async Task WaitForTitleAsync(GeckoEngine engine, int tab, string title) =>
+        await TitleAsync(engine, tab, candidate => candidate == title, $"the page titled {title}");
+
+    private static async Task<string> TitleAsync(GeckoEngine engine, int tab, Func<string, bool> wanted, string what) =>
         await Eventually(async () =>
         {
-            var state = JsonNode.Parse((await engine.CallAsync("state"))?.ToJsonString() ?? "{}");
-            return state?["tabs"] is JsonArray tabs && tabs.Any(t => t!["id"]!.GetValue<int>() == tab && t["title"]!.GetValue<string>() == title && !t["loading"]!.GetValue<bool>())
-                ? "loaded" : null;
-        }, $"the page titled {title}");
+            var state = await engine.CallAsync("state");
+            var entry = (state?["tabs"] as JsonArray)?.FirstOrDefault(t => t!["id"]!.GetValue<int>() == tab);
+            var title = entry?["title"]?.GetValue<string>();
+            return title is not null && wanted(title) && entry?["loading"]?.GetValue<bool>() == false ? title : null;
+        }, what);
 
     [GeckoFact]
     public async Task FindZoomPdfScreenshotsAndMuteWorkThroughTheAgent()
@@ -162,8 +166,14 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
             ["permission"] = "location",
             ["decision"] = "allow",
         }));
+        lock (events) events.Clear();
         await engine.CallAsync("navigate", tab, server.Url + "location?again");
-        await WaitForTitleAsync(engine, tab, "allowed");
+        // Allowed: the page gets a position, or (on a machine where even the fixed test location
+        // is unavailable) any error but "permission denied". Either way Mosaic was not asked.
+        var outcome = await TitleAsync(engine, tab, title => title == "allowed" || title.StartsWith("unavailable", StringComparison.Ordinal),
+            "an answer to the remembered location request");
+        lock (events) Assert.DoesNotContain("permissionRequest", events);
+        Console.WriteLine($"Remembered location request answered: {outcome}");
 
         // A pop-up without a click: blocked, and reported with its address.
         await engine.CallAsync("navigate", tab, server.Url + "popup");
@@ -194,7 +204,8 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
             "/popup" => "<!doctype html><title>Pop-up</title><script>window.open('/text', '_blank');</script>",
             _ when path.StartsWith("/location", StringComparison.Ordinal) =>
                 "<!doctype html><title>asking</title><script>navigator.geolocation.getCurrentPosition("
-                + "() => { document.title = 'allowed'; }, () => { document.title = 'denied'; });</script>",
+                + "() => { document.title = 'allowed'; }, "
+                + "error => { document.title = error.code === 1 ? 'denied' : 'unavailable ' + error.code; }, { timeout: 10000 });</script>",
             _ => "<!doctype html><title>Nothing</title>",
         };
 
