@@ -715,7 +715,9 @@ function Get-DumpFiles {
     # reports of the app or its engines.
     $files = @()
     foreach ($root in Get-DumpRoots) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -Include '*.dmp', '*.mdmp', '*.hdmp', 'Report.wer' -ErrorAction SilentlyContinue)) {
+        # (-Include is ignored together with -LiteralPath in Windows PowerShell 5.1: filter here.)
+        $all = @(Get-ChildItem -LiteralPath $root -Recurse -Force -File -ErrorAction SilentlyContinue)
+        foreach ($file in @($all | Where-Object { $_.Name -eq 'Report.wer' -or @('.dmp', '.mdmp', '.hdmp') -contains $_.Extension.ToLowerInvariant() })) {
             if ($file.Name -eq 'Report.wer' -or $file.FullName -like '*\WER\*') {
                 # Only reports about Mosaic or its engines (WER folders are named after the exe).
                 if ($file.Directory.Name -notmatch '(?i)mosaic|msedgewebview2|firefox|powershell') { continue }
