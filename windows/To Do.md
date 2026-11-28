@@ -94,10 +94,10 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [ ] Named configurations; export/import/validate; files move between macOS and Windows
 
 ## system — Windows integration
-- [ ] Fluent icons everywhere (Segoe Fluent Icons; Segoe MDL2 Assets on Windows 10)
-- [ ] Set as default browser (registration, URL and file activation)
-- [ ] Notifications (app notifications), jump list, taskbar integration
-- [ ] Native context menus; drag and drop of links, text and files; virtual desktops behave
+- [~] Fluent icons everywhere (Segoe Fluent Icons; Segoe MDL2 Assets on Windows 10): `Icons` / `IconGlyphs` map all 160 SF Symbol names the macOS code uses plus ~110 semantic names; code points checked against Microsoft's tables; MDL2 substitutes for the 7 Fluent-only glyphs; font detection + `MOSAIC_ICON_FONT=mdl2`. Unit (incl. a scan of `Sources/`). *Missing:* CI cmap check against the runner's installed fonts (`WindowsOnlyTests`) and the `iconGallery` screenshot. CI's build step fails before tests on the skeleton's csproj (winui fixes it in M1)
+- [~] Set as default browser (registration, URL and file activation): HKCU StartMenuInternet/Capabilities, RegisteredApplications, MosaicHTML/MosaicURL (`--single-argument %1`), OpenWithProgids, exact unregister, status, Settings deep link, `DefaultBrowserCard`; `ActivationRequest` parser + forwarding payload. Unit (in-memory registry). *Missing:* real-HKCU round trip on CI, winui wiring `ActivationRequest` into SingleInstance
+- [~] Notifications (app notifications), jump list, taskbar integration: `UserNotifications` hub + Windows App SDK presenter (in-window fallback), `TaskbarProgress` + ITaskbarList3, jump list (New tab / New private tab). Unit for the hubs; app side compiled only
+- [~] Native context menus; drag and drop of links, text and files; virtual desktops behave: `ContextMenus` (Fluent MenuFlyout, windowed, CoverPage), `DragDropSupport`, `VirtualDesktops` check on activation, `SystemAppearanceMonitor` (theme/accent/high contrast). Unit for the models; app side compiled only
 
 ## perf — performance (measured, not assumed)
 - [ ] Startup time and memory measured on CI, x64 and ARM64, with budgets that fail the build when exceeded
