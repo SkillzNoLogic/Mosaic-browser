@@ -87,6 +87,22 @@ public sealed class GeckoPrivacyIntegrationTests : IDisposable
 
             // Preferences: what configurePrivacy set, as Gecko reports them.
             var status = (await engine.CallAsync("privacyStatus"))!;
+            if (status["blocker"]?["engine"]?.GetValue<bool>() != true)
+            {
+                // ContentBlocker swallows the agent's error; ask again to see it.
+                string reason;
+                try
+                {
+                    var paths = new JsonArray([.. blocker.Store.AvailableListPaths().Select(path => (JsonNode)JsonValue.Create(path))]);
+                    reason = (await engine.CallAsync("configureBlocker", Path.Combine(UBlockBundle.Directory!, "ublock-engine.js"),
+                        blocker.Store.SuffixListPath, paths, true, new JsonArray()))?.ToJsonString() ?? "null";
+                }
+                catch (Exception error)
+                {
+                    reason = error.Message;
+                }
+                Assert.Fail($"The blocker did not load into Gecko. Lists: {string.Join(", ", blocker.Store.AvailableListPaths().Select(Path.GetFileName))}. Again: {reason}");
+            }
             var prefs = status["prefs"]!;
             Assert.True(prefs["dom.security.https_only_mode"]!.GetValue<bool>());
             Assert.True(prefs["privacy.query_stripping.enabled"]!.GetValue<bool>());
