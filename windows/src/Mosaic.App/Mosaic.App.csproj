@@ -20,7 +20,10 @@
     <!-- Program.cs is the entry point (no App.xaml). -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform(Windows))">
+  <!-- Self-contained (the Windows App SDK runtime ships inside the app) whenever a runtime is
+       chosen, which publishing always does (scripts\build.ps1 -Runtime win-x64 / win-arm64).
+       A plain `dotnet build` of the solution has no runtime and only compiles. -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform(Windows)) and '$(RuntimeIdentifier)' != ''">
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
   <!-- Compile-only on macOS/Linux: these steps run Windows executables (makepri, mt). -->
