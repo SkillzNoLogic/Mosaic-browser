@@ -21,5 +21,8 @@
          same schema as macOS). Its SQLitePCLRaw.bundle_e_sqlite3 dependency ships the native
          e_sqlite3 for win-x64 and win-arm64 (and osx-arm64/linux, where the tests run). -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
+    <!-- platform: Ed25519 verification of Mosaic's signed release zips (same key as macOS).
+         Fully managed (no native code), so identical on win-x64, win-arm64 and the test hosts. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
   </ItemGroup>
 </Project>
