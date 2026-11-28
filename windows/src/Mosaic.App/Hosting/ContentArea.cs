@@ -19,7 +19,9 @@ namespace Mosaic.App.Hosting;
 /// </summary>
 /// <remarks>
 /// <para>Layers, bottom to top: every Chromium tab's WebView2 (the model keeps all but the
-/// selected one hidden), the start page, the engine message, and <see cref="OverlayPage"/>.
+/// selected one hidden), the start page, the engine message, the selected tab's internal page
+/// (<c>mosaic://&lt;host&gt;</c>: <see cref="FeatureMounts.InternalPages"/>), and
+/// <see cref="OverlayPage"/>.
 /// Gecko's page is not a XAML element: it is a Win32 child window that
 /// <see cref="GeckoWindowHost"/> keeps glued to this element's bounds, in physical pixels, on
 /// every layout pass, DPI change, move and resize.</para>
@@ -40,6 +42,8 @@ public sealed class ContentArea : Grid
     private readonly GeckoWindowHost gecko;
     private readonly nint topLevel;
     private readonly Grid overlayLayer = new();
+    private readonly Grid internalLayer = new();
+    private string? shownInternalPage;
     private readonly StartPage startPage;
     private readonly EngineMessageView messageView;
     private UIElement? overlayPage;
@@ -67,6 +71,7 @@ public sealed class ContentArea : Grid
         messageView = new EngineMessageView(model);
         Children.Add(startPage);
         Children.Add(messageView);
+        Children.Add(internalLayer);
         Children.Add(overlayLayer);
 
         gecko.FocusXaml = FocusXaml;
@@ -176,6 +181,7 @@ public sealed class ContentArea : Grid
             case nameof(BrowserModel.ShowsStartPage):
             case nameof(BrowserModel.ShowsMessage):
             case nameof(BrowserModel.Content):
+            case nameof(BrowserModel.InternalPage):
             case null:
             case "":
                 UpdateViews();
@@ -198,8 +204,46 @@ public sealed class ContentArea : Grid
         // rendering underneath.
         ChromiumLayer.Visibility = Ui.Visible(!own);
         overlayLayer.Visibility = Ui.Visible(overlayPage is not null);
+        UpdateInternalPage();
+        internalLayer.Visibility = Ui.Visible(!own && shownInternalPage is not null);
         UpdatePlacement();
     }
+
+    /// <summary>
+    /// Shows the page registered for the selected tab's <c>mosaic://</c> host, created afresh
+    /// when the host changes (a hidden page holds no memory), or a note when no area has
+    /// registered one.
+    /// </summary>
+    private void UpdateInternalPage()
+    {
+        var host = model.InternalPage;
+        if (host == shownInternalPage) return;
+        shownInternalPage = host;
+        internalLayer.Children.Clear();
+        if (host is null) return;
+        UIElement page;
+        try
+        {
+            page = FeatureMounts.InternalPages.TryGetValue(host, out var create)
+                ? create(model)
+                : new TextBlock
+                {
+                    Text = $"mosaic://{host} is not available in this version of Mosaic.",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = Ui.Brush("TextFillColorSecondaryBrush"),
+                };
+        }
+        catch (Exception error)
+        {
+            Trace.TraceError($"[ContentArea] The page for mosaic://{host} could not be created: {error}");
+            page = new TextBlock { Text = $"mosaic://{host} could not be shown: {error.Message}", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        }
+        internalLayer.Children.Add(page);
+    }
+
+    /// <summary>The <c>mosaic://</c> host whose page is showing, or null.</summary>
+    public string? InternalPageHost => shownInternalPage;
 
     /// <summary>Whether Gecko's page should be on screen right now.</summary>
     private bool ShouldShowGecko =>

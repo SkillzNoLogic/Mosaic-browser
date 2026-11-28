@@ -248,11 +248,13 @@ public class AutomationTests
         Assert.True((bool)reply["ok"]!);
         var state = reply["state"]!.AsObject();
 
-        // The key sets are the contract scripts are written against.
-        Assert.Equal(
-            ["addressText", "blocker", "chromiumAvailable", "engine", "extensionError", "extensions", "extensionsBusy",
-             "geckoAttached", "geckoProcessId", "geckoStatus", "notice", "searchEngine", "tabs"],
-            state.Select(pair => pair.Key).Order());
+        // The key sets are the contract scripts are written against. Feature areas add keys of
+        // their own (AutomationRegistry.RegisterState, process-wide), so the contract's keys
+        // must all be there; others may be too.
+        Assert.Subset(
+            state.Select(pair => pair.Key).ToHashSet(),
+            new HashSet<string>(["addressText", "blocker", "chromiumAvailable", "engine", "extensionError", "extensions", "extensionsBusy",
+             "geckoAttached", "geckoProcessId", "geckoStatus", "notice", "searchEngine", "tabs"]));
 
         var tabs = state["tabs"]!.AsArray();
         Assert.Equal(3, tabs.Count);

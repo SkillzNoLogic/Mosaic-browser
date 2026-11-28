@@ -44,8 +44,9 @@
     Only the Mozilla steps (1 and 1b), then quit: for trying Gecko hosting variants quickly.
 
 .PARAMETER Container
-    standard (default) or layered: the Gecko host's container window as a layered window
-    (MOSAIC_GECKO_CONTAINER=layered), an experiment for how a child window renders under WinUI.
+    layered (default) or plain: the Gecko host's container window. Plain
+    (MOSAIC_GECKO_CONTAINER=plain) is for diagnosis: under WinUI, Gecko's page does not show in
+    a plain container when Gecko renders without a GPU.
 
 .PARAMETER TimeoutSeconds
     How long each wait (page load, engine switch, extension install) may take. Default 120.
@@ -71,8 +72,8 @@ param(
 
     [switch]$GeckoOnly,
 
-    [ValidateSet('standard', 'layered')]
-    [string]$Container = 'standard',
+    [ValidateSet('layered', 'plain')]
+    [string]$Container = 'layered',
 
     [ValidateRange(10, 3600)]
     [int]$TimeoutSeconds = 120,
@@ -386,6 +387,47 @@ function Invoke-SoftCheck {
     }
 }
 
+function Send-RealInput {
+    # Real (OS-level) input to Mosaic's window: brings it to the front, clicks at a point of its
+    # client area, then presses Ctrl plus a key. For checks of what only real key presses reach.
+    param([int]$X, [int]$Y, [byte]$Key)
+    if (-not ('MosaicSmoke.Input' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace MosaicSmoke {
+    public static class Input {
+        [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+        [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+        [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+        [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+        const uint KEYUP = 2, LEFTDOWN = 2, LEFTUP = 4;
+        public static void Front(IntPtr window) {
+            // Windows lets a process that just "pressed" Alt hand the foreground on.
+            keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, KEYUP, UIntPtr.Zero);
+            SetForegroundWindow(window);
+        }
+        public static void Click(int x, int y) {
+            SetCursorPos(x, y);
+            mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero); mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        }
+        public static void CtrlKey(byte key) {
+            keybd_event(0x11, 0, 0, UIntPtr.Zero); keybd_event(key, 0, 0, UIntPtr.Zero);
+            keybd_event(key, 0, KEYUP, UIntPtr.Zero); keybd_event(0x11, 0, KEYUP, UIntPtr.Zero);
+        }
+    }
+}
+'@
+    }
+    $process = Get-Process -Id $script:App.Id
+    $process.Refresh()
+    [MosaicSmoke.Input]::Front($process.MainWindowHandle)
+    Start-Sleep -Milliseconds 400
+    [MosaicSmoke.Input]::Click($X, $Y)
+    Start-Sleep -Milliseconds 400
+    [MosaicSmoke.Input]::CtrlKey($Key)
+}
+
 function Get-WindowState {
     param($State)
     Get-MosaicProperty $State 'winui'
@@ -575,7 +617,7 @@ try {
     $env:MOSAIC_GECKO_EXE = $gecko
     # The Gecko window host's step-by-step diagnostics, the first thing to read on a failure.
     $env:MOSAIC_TRACE_FILE = Join-Path $OutputDirectory 'mosaic-trace.log'
-    $env:MOSAIC_GECKO_CONTAINER = if ($Container -eq 'layered') { 'layered' } else { $null }
+    $env:MOSAIC_GECKO_CONTAINER = if ($Container -eq 'plain') { 'plain' } else { $null }
     $arguments = @('--mosaic-automation')
     if ($GeckoHostMode -eq 'owned') { $arguments += '--gecko-host=owned' }
     $script:App = Start-Process -FilePath $appExe -ArgumentList $arguments -PassThru `
@@ -645,6 +687,22 @@ try {
         Write-Host '    hidden while covered, shown again after'
     }
 
+    Write-Host '==> 1c. mosaic:// pages are shown by Mosaic, with Gecko hidden'
+    Invoke-SoftCheck 'Internal page' {
+        Invoke-Mosaic -Do 'newTab' -Value 'mosaic://smoke-test' | Out-Null
+        Wait-MosaicState -Name '1c-internal' -What 'mosaic://smoke-test to be shown as an internal page with Gecko hidden' -Condition {
+            param($s)
+            $w = Get-WindowState $s
+            (Get-MosaicProperty $w 'internalPage') -eq 'smoke-test' -and (Get-MosaicProperty $w 'geckoShown') -eq $false
+        } | Out-Null
+        Save-Screenshot '1c-internal-page'
+        Invoke-Mosaic -Do 'closeTab' | Out-Null
+        Wait-MosaicState -Name '1c-back' -What "the Gecko page to show again after closing the internal page's tab" -Condition {
+            param($s) (Get-MosaicProperty (Get-WindowState $s) 'geckoShown') -eq $true
+        } | Out-Null
+        Write-Host '    shown in place of the page, Gecko hidden; Gecko back after closing it'
+    }
+
     if (-not $GeckoOnly) {
     Write-Host '==> 2. Chromium engine: switch the tab'
     if ((Get-MosaicProperty $state 'chromiumAvailable') -ne $true) {
@@ -660,6 +718,25 @@ try {
     Write-Host '    loaded'
     Save-Screenshot '2-chromium'
     Save-WindowTree '2-chromium'
+
+    Write-Host '==> 2b. A shortcut pressed in a Chromium page reaches Mosaic'
+    Invoke-SoftCheck 'Shortcut from a Chromium page' {
+        $before = @(Get-MosaicProperty $state 'tabs').Count
+        $window = Get-WindowState $state
+        $bounds = Get-MosaicProperty $window 'bounds'
+        $area = Get-MosaicProperty $window 'contentArea'
+        # The page's centre on the screen; the window's client area starts at its bounds here
+        # (the title bar is part of the client area).
+        $x = [int](Get-MosaicProperty $bounds 'x') + [int](Get-MosaicProperty $area 'x') + [int]((Get-MosaicProperty $area 'width') / 2)
+        $y = [int](Get-MosaicProperty $bounds 'y') + [int](Get-MosaicProperty $area 'y') + [int]((Get-MosaicProperty $area 'height') / 2)
+        Send-RealInput -X $x -Y $y -Key 0x54   # Ctrl+T
+        $more = Wait-MosaicState -Name '2b-shortcut' -What 'Ctrl+T pressed in the Chromium page to open a tab' -Condition {
+            param($s) @(Get-MosaicProperty $s 'tabs').Count -gt $before
+        }
+        Write-Host "    Ctrl+T opened a tab ($before -> $(@(Get-MosaicProperty $more 'tabs').Count) tabs)"
+        Invoke-Mosaic -Do 'closeTab' | Out-Null
+        Invoke-Mosaic -Do 'selectTab' -Value '0' | Out-Null
+    }
 
     Write-Host "==> 3. Search engine: switch to $SearchEngineId and search"
     Invoke-Mosaic -Do 'searchEngine' -Value $SearchEngineId | Out-Null

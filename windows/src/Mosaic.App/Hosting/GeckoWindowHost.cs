@@ -1334,10 +1334,14 @@ public sealed class GeckoWindowHost : IDisposable
 
         // WS_CLIPCHILDREN: never paint the background over Gecko's window. WS_CLIPSIBLINGS: it
         // shares its parent with WinUI's content window. Created hidden; Place shows it.
-        // Experiment (MOSAIC_GECKO_CONTAINER=layered): a layered container has a redirection
-        // surface of its own, which WinUI's top-level window (WS_EX_NOREDIRECTIONBITMAP) lacks;
-        // GDI-presented content of a child window needs one to be seen.
-        bool layered = string.Equals(Environment.GetEnvironmentVariable("MOSAIC_GECKO_CONTAINER"), "layered", StringComparison.OrdinalIgnoreCase);
+        // Layered (opaque): WinUI creates its top-level window without a redirection surface
+        // (WS_EX_NOREDIRECTIONBITMAP; its content is drawn by DirectComposition), and a child
+        // window that presents with GDI, as Gecko does without a GPU, then shows nothing at all.
+        // A layered child window gets a redirection surface of its own, which Gecko's window,
+        // its child, draws into. Observed on the CI runners (x64 and ARM64): the page is blank
+        // in a plain container and shows in a layered one. MOSAIC_GECKO_CONTAINER=plain
+        // switches it off (for diagnosing GPU-rendered Gecko on a real PC).
+        bool layered = !string.Equals(Environment.GetEnvironmentVariable("MOSAIC_GECKO_CONTAINER"), "plain", StringComparison.OrdinalIgnoreCase);
         nint container = CreateWindowExW(layered ? (uint)WS_EX_LAYERED : 0, ContainerClassName, null,
             (uint)(WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS), 0, 0, 0, 0, parent, 0, instance, 0);
         if (container == 0)

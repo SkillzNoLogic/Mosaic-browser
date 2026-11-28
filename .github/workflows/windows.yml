@@ -247,13 +247,11 @@ jobs:
       - name: Smoke test
         run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke
 
-      - name: Gecko hosting variants (owned window; layered container)
-        # Evidence for how Gecko's window renders under WinUI; not checks of their own.
+      - name: Gecko in an owned window (the fallback hosting mode)
+        # Evidence that the fallback works; not a check of its own.
         if: always()
         continue-on-error: true
-        run: |
-          .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\variant-owned -GeckoOnly -GeckoHostMode owned
-          .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\variant-layered -GeckoOnly -Container layered
+        run: .\windows\scripts\smoke.ps1 -AppPath windows\publish\${{ matrix.rid }}\Mosaic.exe -OutputDirectory windows\artifacts\smoke\variant-owned -GeckoOnly -GeckoHostMode owned
 
       - name: Upload screenshots and logs
         if: always()

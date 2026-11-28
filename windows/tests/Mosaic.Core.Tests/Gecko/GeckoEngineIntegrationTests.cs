@@ -302,7 +302,8 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
                 privateWindow: press("P", { shortcut: true, shift: true }),
                 plainL: press("l"),
                 altL: press("l", { shortcut: true, alt: true }),
-                otherShortcut: press("8", { shortcut: true }),
+                // Not Ctrl+1-9: the shared agent forwards those (tab selection).
+                otherShortcut: press("u", { shortcut: true }),
               };
               // Who could have stopped a key press: every keydown listener on the way (for the
               // failure message).

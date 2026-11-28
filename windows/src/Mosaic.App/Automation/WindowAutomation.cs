@@ -12,7 +12,7 @@ namespace Mosaic.App.AutomationSupport;
 /// </summary>
 /// <remarks>
 /// <code>
-/// {"do": "window", "value": "maximize" | "minimize" | "restore" | "fullscreen" | "windowed" | "1024x768"}
+/// {"do": "window", "value": "maximize" | "minimize" | "restore" | "fullscreen" | "windowed" | "activate" | "1024x768"}
 /// {"do": "material", "value": "mica" | "micaAlt" | "acrylic" | "solid"}
 /// {"do": "coverPage", "value": "on" | "off"}     // as an overlay would: Gecko's page must hide
 /// {"do": "screenCapture", "value": "C:\\out.png"} // the window as the screen shows it
@@ -47,6 +47,9 @@ internal static class WindowAutomation
                     case "restore": w.SetState(OverlappedPresenterState.Restored); break;
                     case "fullscreen": w.SetPageFullScreen(true); break;
                     case "windowed": w.SetPageFullScreen(false); break;
+                    // Brings Mosaic to the front with the keyboard: for checks that need real
+                    // input (a scripted run never does this by itself).
+                    case "activate": w.BringToFront(); break;
                     default:
                         var size = value.Split('x');
                         if (size.Length != 2 || !double.TryParse(size[0], out var width) || !double.TryParse(size[1], out var height))
@@ -105,6 +108,7 @@ internal static class WindowAutomation
             ["geckoHostMode"] = area.Gecko.IsAttached ? area.Gecko.AttachedMode.ToString().ToLowerInvariant() : "",
             ["pageCovers"] = covers,
             ["shell"] = FeatureMounts.Shell is null ? "basic" : "feature",
+            ["internalPage"] = area.InternalPageHost ?? "",
             // Diagnostics: how the windows Gecko's page depends on are made (WS_EX_* bits).
             ["topLevelExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(w.Handle, Hosting.NativeMethods.GWL_EXSTYLE):X}",
             ["containerExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(area.Gecko.ContainerWindow, Hosting.NativeMethods.GWL_EXSTYLE):X}",

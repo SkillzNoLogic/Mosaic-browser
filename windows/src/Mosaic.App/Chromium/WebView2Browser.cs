@@ -25,7 +25,7 @@ namespace Mosaic.App.Chromium;
 /// filter's settings check and, for web pages, one call into the engine.
 /// </para>
 /// </remarks>
-internal sealed class WebView2Browser : IChromiumBrowser
+public sealed class WebView2Browser : IChromiumBrowser
 {
     /// <summary>Status of the response a blocked request gets in place of the real one.</summary>
     private const int BlockedStatus = 403;
@@ -42,7 +42,7 @@ internal sealed class WebView2Browser : IChromiumBrowser
     private string? navigationKey;
     private int blockedCount;
 
-    public WebView2Browser(WebView2Engine engine, string url)
+    internal WebView2Browser(WebView2Engine engine, string url)
     {
         this.engine = engine;
         pendingUrl = url;

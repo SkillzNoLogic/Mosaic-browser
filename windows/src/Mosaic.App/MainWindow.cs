@@ -117,6 +117,21 @@ public sealed class MainWindow : Window
     /// <summary>The page area (both engines). The shell places it in its layout.</summary>
     public ContentArea ContentArea { get; }
 
+    /// <summary>
+    /// The window's content, which never changes after start-up (the shell is its child). The
+    /// place for window-wide <c>KeyboardAccelerators</c> and input handlers (start-up hooks).
+    /// </summary>
+    public Grid Root => root;
+
+    /// <summary>
+    /// The window's one entry for keyboard shortcuts (productivity's shortcut manager): called
+    /// for every key press, from Mosaic's own controls and, forwarded by WebView2, from Chromium
+    /// pages, before any control acts on it. Return true to consume the key. While it is set the
+    /// built-in v0.1 table (<see cref="Shortcuts"/>) is not consulted. Called on the UI thread
+    /// from inside the key event: do slow or re-entrant work later (WebView2 waits meanwhile).
+    /// </summary>
+    public Func<VirtualKey, ShortcutModifiers, bool>? KeyHandler { get; set; }
+
     /// <summary>The window's messages, for areas that need one WinUI does not surface.</summary>
     public WindowMessages Messages => messages;
 
@@ -421,6 +436,11 @@ public sealed class MainWindow : Window
         if (Down(VirtualKey.Shift)) modifiers |= ShortcutModifiers.Shift;
         if (Down(VirtualKey.Menu)) modifiers |= ShortcutModifiers.Alt;
 
+        if (KeyHandler is { } handler)
+        {
+            if (handler(e.Key, modifiers)) e.Handled = true;
+            return;
+        }
         if (Shortcuts.Match((int)e.Key, modifiers) is not { } command) return;
         // Handled: neither a text box nor Chromium acts on the key as well.
         e.Handled = true;
