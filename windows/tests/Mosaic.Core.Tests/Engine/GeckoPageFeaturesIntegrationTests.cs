@@ -172,11 +172,20 @@ public sealed class GeckoPageFeaturesIntegrationTests : IDisposable
         // decision is Mosaic's to apply (PageFeatures answers from its store without a prompt).
         lock (events) events.Clear();
         await engine.CallAsync("navigate", tab, server.Url + "location?again");
-        var again = (await PageEventsAsync(engine, "permissionRequest")).First(entry => entry!["type"]!.GetValue<string>() == "permissionRequest")!;
-        var againId = JsonNode.Parse(again["detail"]!.GetValue<string>())!["id"]!.GetValue<int>();
-        Assert.True((await engine.CallAsync("answerPermission", againId, true))!.GetValue<bool>());
-        var outcome = await TitleAsync(engine, tab, title => title == "allowed" || title.StartsWith("unavailable", StringComparison.Ordinal),
-            "an answer to the allowed location request");
+        // Every request that arrives is allowed (the first page may have asked twice, and its
+        // second request may come in after the first was answered).
+        var outcome = await Eventually(async () =>
+        {
+            foreach (var entry in await engine.CallAsync("takePageEvents") as JsonArray ?? [])
+            {
+                if (entry!["type"]!.GetValue<string>() != "permissionRequest") continue;
+                var id = JsonNode.Parse(entry["detail"]!.GetValue<string>())!["id"]!.GetValue<int>();
+                await engine.CallAsync("answerPermission", id, true);
+            }
+            var state = await engine.CallAsync("state");
+            var title = (state?["tabs"] as JsonArray)?.FirstOrDefault(t => t!["id"]!.GetValue<int>() == tab)?["title"]?.GetValue<string>();
+            return title == "allowed" || title?.StartsWith("unavailable", StringComparison.Ordinal) == true ? title : null;
+        }, "an answer to the allowed location request");
         Console.WriteLine($"Allowed location request: {outcome}");
 
         // Mosaic's decisions mirrored into Gecko's permission manager (what Notification.permission reads).
