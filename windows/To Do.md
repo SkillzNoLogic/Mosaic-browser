@@ -36,11 +36,11 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [ ] Keyboard access everywhere; UI Automation names on every control; high contrast
 
 ## tabs — tabs, workspaces, sessions
-- [ ] Pin, duplicate, mute; recently closed (Ctrl+Shift+T); tab search (Ctrl+Shift+A)
-- [ ] Tab groups; workspaces (create, switch, delete, restore, move tabs)
-- [ ] Drag-and-drop reordering; duplicate-tab detection
-- [ ] Session save and restore; crash recovery; private tabs never saved
-- [ ] Sleeping tabs with exceptions and memory pressure; Tabs & Workspaces and Performance settings
+- [~] Pin, duplicate, mute; recently closed (Ctrl+Shift+T); tab search (Ctrl+Shift+A) — model done and unit-tested (pin ordering and Ctrl+W protection, duplicate, mute to Gecko via agent `setMuted` and to Chromium via `IChromiumAudio`/`WebView2Audio`, tabs/groups/workspaces reopened in place, private tabs never recorded, tab search ranking across workspaces, `tabs.*` events from Gecko, `TabsShortcuts`); WinUI search overlay and menus compile; not yet seen on CI (waits for winui M1 + shell). Lock not done (not done on macOS either)
+- [~] Tab groups; workspaces (create, switch, delete, restore, move tabs) — model unit-tested (each workspace keeps its selection; Gecko docking follows because switching selects the tab); workspace switcher component and context menus compile; not yet seen on CI
+- [~] Drag-and-drop reordering; duplicate-tab detection — `MoveTab`/`MoveTabBefore`/`MoveGroupBefore` and `TabStrip()` for the shell, `TabDragDrop` helpers, duplicate offer with Switch to Tab (unit-tested); needs the shell's strips and a human for real drags
+- [~] Session save and restore; crash recovery; private tabs never saved — same JSON as macOS (a macOS-written file decodes in a unit test), written off the UI thread, restored after the first frame with unselected tabs asleep; quit/relaunch, crash marker, start-page setting and unreadable-file cases unit-tested; not yet run in the app
+- [~] Sleeping tabs with exceptions and memory pressure; Tabs & Workspaces and Performance settings — policy, Chromium unload, Gecko `discardTab` (with close fallback), audio/download/pinned exemptions and Windows memory pressure (`CreateMemoryResourceNotification`/`GlobalMemoryStatusEx`) unit-tested; settings pages registered in `FeatureMounts.SettingsPages`; not yet seen on CI
 
 ## library — bookmarks, history, search
 - [ ] Bookmarks (folders, tags, bar, manager, search); import/export Netscape HTML and Chrome JSON
