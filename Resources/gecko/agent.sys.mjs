@@ -542,6 +542,14 @@ function chordOf(event) {
       key = match[1] ?? match[2];
     }
   }
+  if (Services.appinfo.OS === "WINNT" && key.length === 1 && !/^[\x20-\x7e]$/.test(key)) {
+    // Windows: with a non-Latin layout (Cyrillic, Greek…) a shortcut follows the key's Latin
+    // letter, as Windows' own virtual keys (and so Mosaic's accelerators) do.
+    const match = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code);
+    if (match) {
+      key = match[1] ?? match[2];
+    }
+  }
   if (key.length === 1) {
     key = key.toLowerCase();
   }

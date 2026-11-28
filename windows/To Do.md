@@ -77,10 +77,10 @@ App-side items are compiled and wired through `FeatureMounts`, but cannot run un
 - [ ] Generator; CSV import/export; Passwords & Autofill settings
 
 ## productivity
-- [ ] Command palette (Ctrl+K)
-- [ ] Customisable shortcuts, applied live, forwarded from Gecko pages
-- [ ] Reader view (both engines) with its controls
-- [ ] Speed Dial / new-tab page
+- [~] Command palette (Ctrl+K): Core done and unit-tested (actions, other tabs, settings categories, library search providers, address/search fallbacks, recents, `PaletteRegistry` for other areas, catalogue commands of other areas offered automatically; automation `palette`/`paletteQuery`/`palettePerform`). WinUI overlay (window-sized popup on Acrylic, CoverPage while open) compiles. *Missing:* observed on a Windows runner — blocked until the winui build/M1 lands (CI 46135939810 fails in `Mosaic.App.csproj`'s self-contained setup, like every `win2/*` branch); bookmarks/history and settings appear once library and shell set `PaletteRegistry.RegisterSearch` / `ProductivityIntegration.OpenSettings`
+- [~] Customisable shortcuts, applied live, forwarded from Gecko pages: catalogue with Windows defaults (Ctrl+T/W/L, F5 + Ctrl+R, Alt+Left/Right, Ctrl+Tab + Ctrl+Page Down, Ctrl+1…9, F9 reader, F11 full screen, Ctrl+K), conflicts, Windows-reserved and text-editing combos, AltGr rule, persisted in the macOS JSON shape; live `KeyboardAccelerator`s on the window root; Gecko forwarding table pushed on every Gecko start and change (unit-tested, plus a Gecko integration test that runs on the Windows runner once the build passes); agent change for non-Latin layouts (WINNT-guarded). Shortcuts & Gestures settings page compiles. *Missing:* CI observation; winui's own key handler (`Shortcuts.Match`) must give way to these accelerators; real key presses in a WebView2 page need a human check
+- [~] Reader view (both engines) with its controls: Gecko through the agent's reader actor with `reader.*` prefs kept in step both ways; Chromium through Readability 0.6.0 (`Resources/reader` shipped as Content in `reader\`) via `IPageScriptHost` on WebView2; availability probing, toolbar component "reader" with font/size/width/spacing/background controls; automation `reader`/`readerSettings` (unit-tested with fakes; scripts checked in V8; Gecko reader integration test written). *Missing:* CI observation
+- [~] Speed Dial / new-tab page: pinned sites (add/edit/remove/reorder by drag or menu), top sites hidden/restored, privacy-preserving favicons (site itself, no cookies or referrer, re-encoded as PNG with Windows imaging), `mosaic://newtab` and component "speedDial", same `speed-dial.json` as macOS; automation `speedDial` (unit-tested). *Missing:* CI observation; top sites need the library's `ProductivityIntegration.TopSites`
 
 ## platform — engines, extensions, updates
 - [ ] Engine settings: Chromium (WebView2) and Gecko cards, versions, status
