@@ -84,6 +84,8 @@ public sealed partial class PageFeatures : ObservableObject
     {
         public double Zoom = 1;
         public bool Muted;
+        /// <summary>The mute was set through <see cref="ApplyMute"/>, so Mosaic keeps Gecko to it.</summary>
+        public bool MuteManaged;
         public bool PlayingAudio;
         public string? LastSite;
         public DateTimeOffset ZoomAppliedAt = DateTimeOffset.MinValue;
@@ -229,7 +231,7 @@ public sealed partial class PageFeatures : ObservableObject
     private void EngineAttached(BrowserTab tab)
     {
         var state = StateOf(tab);
-        if (state.Muted) ApplyMuteToEngine(tab, true);
+        if (state.MuteManaged && state.Muted) ApplyMuteToEngine(tab, true);
         ApplyZoom(ZoomStore.Factor(tab.Url), tab);
     }
 
@@ -499,7 +501,9 @@ public sealed partial class PageFeatures : ObservableObject
     /// </summary>
     public void ApplyMute(BrowserTab tab, bool muted)
     {
-        StateOf(tab).Muted = muted;
+        var state = StateOf(tab);
+        state.Muted = muted;
+        state.MuteManaged = true;
         ApplyMuteToEngine(tab, muted);
     }
 

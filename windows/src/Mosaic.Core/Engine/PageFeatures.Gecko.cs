@@ -198,7 +198,7 @@ public sealed partial class PageFeatures
         {
             if (node is not JsonObject entry || TabForGeckoId(Int(entry["id"])) is not { } tab) continue;
             var state = StateOf(tab);
-            if (entry["muted"] is JsonValue mutedValue && mutedValue.TryGetValue(out bool muted) && muted != state.Muted)
+            if (state.MuteManaged && entry["muted"] is JsonValue mutedValue && mutedValue.TryGetValue(out bool muted) && muted != state.Muted)
             {
                 // Mosaic decides; put Gecko back in line if something else changed it.
                 ApplyMuteToEngine(tab, state.Muted);

@@ -236,6 +236,16 @@ public sealed class PageFeaturesTests : IDisposable
     }
 
     [Fact]
+    public void AMuteMosaicDidNotSetIsLeftAlone()
+    {
+        var tab = fixture.OpenGeckoTab("https://example.com/");
+        _ = Pages;
+        fixture.Gecko.Calls.Clear();
+        Pages.ApplyGeckoActivity(JsonNode.Parse($$"""[{"id": {{tab.GeckoId}}, "zoom": 1, "muted": true}]""")!.AsArray());
+        Assert.Empty(fixture.Gecko.CallsTo("setMuted"));
+    }
+
+    [Fact]
     public void ChromiumAudioIsReported()
     {
         var (tab, _) = fixture.OpenChromiumTab("https://example.com/");
