@@ -21,6 +21,7 @@ public sealed class GeckoDownloadIntegrationTests : IDisposable
 
     public void Dispose()
     {
+        // Normally stopped on the UI thread already (end of the test); this covers a failure.
         engine?.StopAndWait(TimeSpan.FromSeconds(5));
         server.Dispose();
         directory.Dispose();
@@ -73,7 +74,7 @@ public sealed class GeckoDownloadIntegrationTests : IDisposable
     /// </summary>
     private static async Task OnUiThread(Func<Task> body)
     {
-        using var ui = new SingleThreadContext();
+        using var ui = new TolerantUiThread();
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         ui.Post(async _ =>
         {
@@ -140,5 +141,38 @@ public sealed class GeckoDownloadIntegrationTests : IDisposable
         manager.Flush();
         var history = DownloadHistoryStore.Read(manager.HistoryPath);
         Assert.Equal(3, history.Count);
+        engine.StopAndWait(TimeSpan.FromSeconds(5));
     });
+}
+
+/// <summary>
+/// A single thread standing in for the UI thread whose posts after disposal are dropped (the
+/// engine may still report its stop from the thread pool once the test has finished).
+/// </summary>
+internal sealed class TolerantUiThread : SynchronizationContext, IDisposable
+{
+    private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback Callback, object? State)> queue = [];
+
+    public TolerantUiThread()
+    {
+        new Thread(() =>
+        {
+            SetSynchronizationContext(this);
+            foreach (var (callback, state) in queue.GetConsumingEnumerable())
+            {
+                try { callback(state); }
+                catch (Exception) { }
+            }
+        }) { IsBackground = true, Name = "mosaic.test.downloads-ui" }.Start();
+    }
+
+    public override void Post(SendOrPostCallback callback, object? state)
+    {
+        try { queue.Add((callback, state)); }
+        catch (InvalidOperationException) { }
+    }
+
+    public override SynchronizationContext CreateCopy() => this;
+
+    public void Dispose() => queue.CompleteAdding();
 }
