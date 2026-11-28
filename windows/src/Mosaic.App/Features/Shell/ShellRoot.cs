@@ -79,13 +79,17 @@ public sealed class ShellRoot : Grid
 
     public int TitleBarPassthroughCount => titleBar.PassthroughCount;
 
-    public string BackdropKind => backdropKind ?? "none";
+    public string BackdropKind => window.EffectiveMaterial ?? backdropKind ?? "Solid";
+
+    private readonly WindowApi window;
 
     public ShellRoot(BrowserModel model, Window window)
     {
         Model = model;
         Window = window;
         titleBar = new TitleBarBridge(window);
+        this.window = new WindowApi(window);
+        this.window.OnMaterialChanged(ScheduleRebuild);
         components = new ShellComponents(this);
         ShellUi.RegisterGlyphs();
         AutomationProperties.SetName(this, "Mosaic");
@@ -319,7 +323,16 @@ public sealed class ShellRoot : Grid
 
     private void ApplyBackdrop(ShellPlan plan)
     {
-        string kind = !Theme.Translucent ? "none" : plan.TitleItems.Any(i => i.Component == ShellComponent.TabStrip) ? "micaAlt" : "mica";
+        var kind = !Theme.Translucent ? "Solid" : plan.TitleItems.Any(i => i.Component == ShellComponent.TabStrip) ? "MicaAlt" : "Mica";
+        if (window.HasMaterial)
+        {
+            // The window owns the backdrop and its fallbacks (Windows 10, transparency effects off).
+            if (kind != backdropKind) window.SetMaterial(kind);
+            backdropKind = kind;
+            var transparent = window.IsBackdropTransparent ?? Theme.Translucent;
+            Background = transparent ? Theme.Transparent : Theme.WindowSolid;
+            return;
+        }
         Background = Theme.Translucent ? Theme.Transparent : Theme.WindowSolid;
         if (kind == backdropKind) return;
         backdropKind = kind;
@@ -327,14 +340,14 @@ public sealed class ShellRoot : Grid
         {
             Window.SystemBackdrop = kind switch
             {
-                "mica" => new MicaBackdrop { Kind = MicaKind.Base },
-                "micaAlt" => new MicaBackdrop { Kind = MicaKind.BaseAlt },
+                "Mica" => new MicaBackdrop { Kind = MicaKind.Base },
+                "MicaAlt" => new MicaBackdrop { Kind = MicaKind.BaseAlt },
                 _ => null,
             };
         }
         catch
         {
-            backdropKind = "none";
+            backdropKind = "Solid";
             Background = Theme.WindowSolid;
         }
     }
@@ -582,6 +595,11 @@ public sealed class ShellRoot : Grid
                 break;
             case nameof(BrowserModel.Notice):
                 UpdateNotice();
+                break;
+            case nameof(BrowserModel.ShowExtensions) when Model.ShowExtensions:
+                // The extensions window is gone: Settings › Extensions replaces it (as on macOS).
+                Model.ShowExtensions = false;
+                Model.ShowSettings(SettingsCategory.Extensions);
                 break;
         }
     }

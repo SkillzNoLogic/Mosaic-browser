@@ -14,38 +14,13 @@ internal static class ShellUi
     /// <summary>Glyphs the shell needs beyond the system area's starter table (Segoe Fluent Icons).</summary>
     internal static void RegisterGlyphs()
     {
+        // Names the system area's table may not have; never replaces its glyphs.
         void Add(string name, string glyph)
         {
-            if (Icons.Glyph(name) == Icons.Glyph("\u0000missing")) Icons.Add(name, glyph);
+            if (!Icons.Has(name)) Icons.Add(name, glyph);
         }
-        Add("sidebar.right", "\uE89F");
-        Add("sidebar.squares.left", "\uE8A9");
-        Add("square.stack", "\uE7C4");
-        Add("shield.lefthalf.filled", "\uEA18");
-        Add("puzzlepiece.extension", "\uEA86");
-        Add("circle.lefthalf.filled", "\uE793");
-        Add("text.magnifyingglass", "\uF6FA");
-        Add("book", "\uE728");
-        Add("clock", "\uE81C");
-        Add("eyeglasses", "\uE7BC");
-        Add("arrow.down.doc", "\uE896");
-        Add("globe", "\uE774");
-        Add("square.grid.2x2", "\uF0E2");
-        Add("square.on.square", "\uE8A9");
-        Add("hand.raised", "\uE72E");
-        Add("key", "\uE8D7");
-        Add("command", "\uE765");
-        Add("accessibility", "\uE776");
-        Add("gauge", "\uEC4A");
-        Add("info.circle", "\uE946");
-        Add("engine", "\uE950");
-        Add("eye", "\uE7B3");
-        Add("checkmark", "\uE73E");
-        Add("paintbrush", "\uE790");
         Add("window", "\uE737");
-        Add("person", "\uE77B");
-        Add("textformat.size", "\uE8E9");
-        Add("arrow.counterclockwise", "\uE777");
+        Add("tabs.vertical", "\uE8A9");
     }
 
     public static T Named<T>(this T element, string name, string? help = null) where T : FrameworkElement

@@ -22,16 +22,22 @@ namespace Mosaic.App.Features.Shell;
 internal sealed class TitleBarBridge
 {
     private readonly Window window;
+    private readonly WindowApi api;
     private FrameworkElement? row;
     private bool scheduled;
 
-    public TitleBarBridge(Window window) => this.window = window;
+    public TitleBarBridge(Window window)
+    {
+        this.window = window;
+        api = new WindowApi(window);
+    }
 
     /// <summary>Space the caption buttons take at the right, in DIPs.</summary>
     public double CaptionInset
     {
         get
         {
+            if (api.CaptionButtonsWidth is > 0 and var width) return width;
             try
             {
                 var scale = window.Content?.XamlRoot?.RasterizationScale ?? 1;
@@ -101,7 +107,21 @@ internal sealed class TitleBarBridge
         if (row?.XamlRoot is not { } root) return;
         var scale = root.RasterizationScale;
         var rects = new List<RectInt32>();
-        Collect(row, rects, scale);
+        var controls = new List<FrameworkElement>();
+        Collect(row, rects, controls, scale);
+        try
+        {
+            // The window keeps the regions up to date itself when it can.
+            if (api.SetInteractiveTitleBarElements([.. controls]))
+            {
+                PassthroughCount = controls.Count;
+                return;
+            }
+        }
+        catch
+        {
+            // Fall back to setting the regions here.
+        }
         try
         {
             var source = InputNonClientPointerSource.GetForWindowId(window.AppWindow.Id);
@@ -115,7 +135,7 @@ internal sealed class TitleBarBridge
     }
 
     /// <summary>Every visible control in the row (not descending into controls) stays clickable.</summary>
-    private static void Collect(DependencyObject element, List<RectInt32> rects, double scale)
+    private static void Collect(DependencyObject element, List<RectInt32> rects, List<FrameworkElement> controls, double scale)
     {
         var count = VisualTreeHelper.GetChildrenCount(element);
         for (var i = 0; i < count; i++)
@@ -124,6 +144,7 @@ internal sealed class TitleBarBridge
             if (child.Visibility != Visibility.Visible || child.ActualWidth <= 0 || child.ActualHeight <= 0) continue;
             if (child is Control { IsHitTestVisible: true })
             {
+                controls.Add(child);
                 try
                 {
                     var bounds = child.TransformToVisual(null).TransformBounds(new Windows.Foundation.Rect(0, 0, child.ActualWidth, child.ActualHeight));
@@ -137,7 +158,7 @@ internal sealed class TitleBarBridge
                 }
                 continue;
             }
-            Collect(child, rects, scale);
+            Collect(child, rects, controls, scale);
         }
     }
 }

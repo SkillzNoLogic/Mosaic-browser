@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -306,7 +307,7 @@ internal sealed class HorizontalTabStrip : Grid
 }
 
 /// <summary>The sidebar's tab list (port of macOS's <c>VerticalTabList</c>): a New Tab row, then one row per tab.</summary>
-internal sealed class VerticalTabList : ScrollViewer
+internal sealed class VerticalTabList : Grid
 {
     private readonly ShellRoot shell;
     private readonly StackPanel rows = new() { Spacing = 2, Padding = new Thickness(8, 4, 8, 8) };
@@ -318,9 +319,7 @@ internal sealed class VerticalTabList : ScrollViewer
         this.shell = shell;
         var theme = shell.Theme;
         var m = theme.Metrics;
-        Content = rows;
-        VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        HorizontalScrollMode = ScrollMode.Disabled;
+        Children.Add(new ScrollViewer { Content = rows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollMode = ScrollMode.Disabled });
         AutomationProperties.SetName(this, "Tabs");
         AutomationProperties.SetLandmarkType(this, AutomationLandmarkType.Navigation);
         var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };

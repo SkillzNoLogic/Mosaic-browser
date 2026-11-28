@@ -72,7 +72,7 @@ internal sealed class ShellComponents(ShellRoot shell)
                 var vertical = Theme.Layout.TabPlacement.IsVertical();
                 var toggle = new ToggleButton
                 {
-                    Content = ShellUi.Icon("sidebar.squares.left", m.Icon),
+                    Content = ShellUi.Icon("tabs.vertical", m.Icon),
                     Width = m.Button,
                     Height = m.Button,
                     IsChecked = vertical,

@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -257,7 +258,7 @@ internal sealed class SettingsView : Grid
         SettingsCategory.Shortcuts => "command",
         SettingsCategory.Languages => "globe",
         SettingsCategory.Accessibility => "accessibility",
-        SettingsCategory.Performance => "gauge",
+        SettingsCategory.Performance => "gauge.with.dots.needle.67percent",
         _ => "info.circle",
     };
 }

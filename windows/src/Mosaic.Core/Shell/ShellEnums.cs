@@ -243,7 +243,7 @@ public static class ShellEnumInfo
         ShellComponent.HistoryPage => "clock",
         ShellComponent.ReadingListPage => "eyeglasses",
         ShellComponent.DownloadsPage => "arrow.down.doc",
-        ShellComponent.VerticalTabs => "sidebar.squares.left",
+        ShellComponent.VerticalTabs => "tabs.vertical",
         _ => "questionmark",
     };
 
