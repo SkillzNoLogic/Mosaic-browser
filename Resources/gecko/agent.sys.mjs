@@ -1441,11 +1441,8 @@ export const Agent = {
       Services.prefs.setStringPref("geo.provider.network.url",
         'data:application/json,{"location":{"lat":51.5007,"lng":-0.1246},"accuracy":20}');
       if (IS_WINDOWS) {
-        // The fixed location above, not Windows' location service, and no Wi-Fi scan first
-        // (a CI machine has no wireless service to answer it).
+        // The fixed location above, not Windows' location service.
         Services.prefs.setBoolPref("geo.provider.ms-windows-location", false);
-        Services.prefs.setBoolPref("geo.provider.testing", true);
-        Services.prefs.setBoolPref("geo.provider.network.scan", false);
       }
     }
     return "true";
