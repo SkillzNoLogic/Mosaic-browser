@@ -1,0 +1,189 @@
+{
+  "exported" : "2026-09-21T14:13:20Z",
+  "format" : "dev.mosaic.layout",
+  "layout" : {
+    "addressBar" : "omnibox",
+    "appearance" : {
+      "accent" : "#FA1E4E",
+      "background" : {
+        "color" : "#121019",
+        "gradient" : {
+          "angle" : 135,
+          "centerX" : 0.5,
+          "centerY" : 0.5,
+          "kind" : "mesh",
+          "noise" : 0.35,
+          "opacity" : 0.8,
+          "raw" : true,
+          "sharpness" : 3.1,
+          "sources" : [
+            {
+              "color" : "#00C9A7",
+              "id" : "aurora-0",
+              "spread" : 1,
+              "x" : 0.1,
+              "y" : 0.9
+            },
+            {
+              "color" : "#845EC2",
+              "id" : "aurora-1",
+              "spread" : 1,
+              "x" : 0.9,
+              "y" : 0.1
+            },
+            {
+              "color" : "#2C73D2",
+              "id" : "aurora-2",
+              "spread" : 1,
+              "x" : 0.35,
+              "y" : 0.3
+            },
+            {
+              "color" : "#0081CF",
+              "id" : "aurora-3",
+              "spread" : 1,
+              "x" : 0.75,
+              "y" : 0.75
+            }
+          ],
+          "stops" : [
+
+          ]
+        },
+        "kind" : "gradient"
+      },
+      "colorScheme" : "dark",
+      "contentCornerRadius" : 8,
+      "contentInset" : 6,
+      "cornerRadius" : 8,
+      "density" : "regular",
+      "glow" : true,
+      "material" : "liquidGlass",
+      "newTabBackground" : {
+        "custom" : {
+          "color" : "#F2F2F7",
+          "gradient" : {
+            "angle" : 30,
+            "centerX" : 0.3,
+            "centerY" : 0.7,
+            "kind" : "radial",
+            "noise" : 0,
+            "opacity" : 1,
+            "raw" : false,
+            "sharpness" : 2.2,
+            "sources" : [
+
+            ],
+            "stops" : [
+              {
+                "color" : "#112233",
+                "location" : 0
+              },
+              {
+                "color" : "#AABBCC",
+                "location" : 1
+              }
+            ]
+          },
+          "kind" : "gradient"
+        },
+        "mode" : "custom"
+      },
+      "toolbarSurface" : false,
+      "workspaceBackgrounds" : {
+        "6F1C2B0E-8B7A-4C61-9A43-1D2E3F405162" : {
+          "color" : "#F2F2F7",
+          "gradient" : {
+            "angle" : 135,
+            "centerX" : 0.5,
+            "centerY" : 0.5,
+            "kind" : "mesh",
+            "noise" : 0,
+            "opacity" : 1,
+            "raw" : false,
+            "sharpness" : 1.6,
+            "sources" : [
+              {
+                "color" : "#2E3192",
+                "id" : "ocean-0",
+                "spread" : 1,
+                "x" : 0.5,
+                "y" : 0
+              },
+              {
+                "color" : "#1BFFFF",
+                "id" : "ocean-1",
+                "spread" : 1,
+                "x" : 0.5,
+                "y" : 1
+              }
+            ],
+            "stops" : [
+
+            ]
+          },
+          "kind" : "gradient"
+        },
+        "A0B1C2D3-0000-4000-8000-000000000001" : {
+          "color" : "#336699",
+          "gradient" : {
+            "angle" : 135,
+            "centerX" : 0.5,
+            "centerY" : 0.5,
+            "kind" : "linear",
+            "noise" : 0,
+            "opacity" : 1,
+            "raw" : false,
+            "sharpness" : 2.2,
+            "sources" : [
+
+            ],
+            "stops" : [
+
+            ]
+          },
+          "kind" : "solid"
+        }
+      }
+    },
+    "bookmarksBar" : false,
+    "name" : "GX Aurora",
+    "preset" : "opera",
+    "regions" : {
+      "rail" : [
+        "home",
+        "bookmarksPage",
+        "historyPage",
+        "readingListPage",
+        "downloadsPage",
+        "flexibleSpace"
+      ],
+      "titleBar" : [
+        "tabStrip",
+        "newTab",
+        "flexibleSpace"
+      ],
+      "toolbar" : [
+        "back",
+        "forward",
+        "reload",
+        "flexibleSpace",
+        "addressField",
+        "bookmarkStar",
+        "engineSwitch",
+        "blocker",
+        "extensions",
+        "downloads",
+        "menu",
+        "settings"
+      ]
+    },
+    "schemaVersion" : 1,
+    "sidebar" : "collapsible",
+    "sidebarWidth" : 260,
+    "tabPlacement" : "top",
+    "tabStyle" : "opera"
+  },
+  "name" : "GX Aurora",
+  "version" : 1
+}
