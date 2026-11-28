@@ -116,6 +116,11 @@ public sealed class WebView2Browser : IChromiumBrowser
             // Filters only apply to navigations that start after they are added.
             if (engine.RequestFilter is not null) WatchRequests(core, environment);
 
+            // Mosaic's shortcuts, from inside the page (see WebView2Engine.ForwardedShortcuts).
+            core.WebMessageReceived += (_, message) => OnWebMessage(message);
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(engine.ShortcutScript());
+            if (isClosed) return;
+
             // Extensions have to be in the profile before the page loads to apply to it.
             await engine.BrowserReadyAsync(this);
             if (isClosed) return;
@@ -183,6 +188,29 @@ public sealed class WebView2Browser : IChromiumBrowser
             ReportLoadState(core, loading: false);
         }
     });
+
+    // ---- Shortcuts pressed in the page ----
+
+    private void OnWebMessage(CoreWebView2WebMessageReceivedEventArgs message)
+    {
+        if (isClosed) return;
+        try
+        {
+            var json = System.Text.Json.Nodes.JsonNode.Parse(message.WebMessageAsJson);
+            if (json is not System.Text.Json.Nodes.JsonObject data
+                || (string?)data["mosaicShortcut"] != engine.ShortcutToken
+                || data["key"] is not { } keyNode) return;
+            var modifiers = ShortcutModifiers.None;
+            if (data["ctrl"]?.GetValue<bool>() == true) modifiers |= ShortcutModifiers.Control;
+            if (data["shift"]?.GetValue<bool>() == true) modifiers |= ShortcutModifiers.Shift;
+            if (data["alt"]?.GetValue<bool>() == true) modifiers |= ShortcutModifiers.Alt;
+            engine.RaiseShortcut(keyNode.GetValue<int>(), modifiers);
+        }
+        catch (Exception error) when (error is System.Text.Json.JsonException or InvalidOperationException or FormatException or COMException)
+        {
+            // Not one of Mosaic's messages (other areas' scripts post too).
+        }
+    }
 
     // ---- Content blocking ----
 

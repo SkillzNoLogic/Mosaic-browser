@@ -57,6 +57,7 @@ public sealed class MainWindow : Window
 
     private readonly BrowserModel model;
     private readonly BrowserSettings settings;
+    private readonly WebView2Engine chromium;
     private readonly Grid root = new();
     private readonly WindowMessages messages;
     private readonly UISettings uiSettings = new();
@@ -92,6 +93,11 @@ public sealed class MainWindow : Window
 
         overlapped = AppWindow.Presenter as OverlappedPresenter ?? OverlappedPresenter.Create();
         PlaceInitially();
+
+        // Shortcuts pressed in a Chromium page come back through the engine.
+        this.chromium = chromium;
+        chromium.ForwardedShortcuts = BuiltInShortcuts();
+        chromium.ShortcutPressed += (key, modifiers) => DispatchShortcut((VirtualKey)key, modifiers);
 
         var gecko = new GeckoWindowHost(Handle, messages, DispatcherQueue);
         if (geckoHostMode is { } mode) gecko.Mode = mode;
@@ -133,6 +139,43 @@ public sealed class MainWindow : Window
     /// from inside the key event: do slow or re-entrant work later (WebView2 waits meanwhile).
     /// </summary>
     public Func<VirtualKey, ShortcutModifiers, bool>? KeyHandler { get; set; }
+
+    /// <summary>
+    /// The key combinations <see cref="KeyHandler"/> wants from inside Chromium pages, where
+    /// they are otherwise the page's (WebView2 does not pass them to the window). Defaults to the
+    /// built-in table; whoever sets <see cref="KeyHandler"/> sets this too. Applies to pages
+    /// loaded afterwards.
+    /// </summary>
+    public IReadOnlyCollection<(VirtualKey Key, ShortcutModifiers Modifiers)> PageShortcuts
+    {
+        get => [.. chromium.ForwardedShortcuts.Select(pair => ((VirtualKey)pair.Key, pair.Modifiers))];
+        set => chromium.ForwardedShortcuts = [.. value.Select(pair => ((int)pair.Key, pair.Modifiers))];
+    }
+
+    private static (int, ShortcutModifiers)[] BuiltInShortcuts()
+    {
+        var all = new List<(int, ShortcutModifiers)>();
+        for (int key = 1; key < 255; key++)
+        {
+            for (int modifiers = 0; modifiers < 8; modifiers++)
+            {
+                if (Shortcuts.Match(key, (ShortcutModifiers)modifiers) is not null) all.Add((key, (ShortcutModifiers)modifiers));
+            }
+        }
+        return [.. all];
+    }
+
+    /// <summary>Runs a shortcut that came from inside a Chromium page.</summary>
+    private void DispatchShortcut(VirtualKey key, ShortcutModifiers modifiers)
+    {
+        LastKey = $"{key} via page script";
+        if (KeyHandler is { } handler)
+        {
+            handler(key, modifiers);
+            return;
+        }
+        if (Shortcuts.Match((int)key, modifiers) is { } command) DispatcherQueue.TryEnqueue(() => model.Execute(command));
+    }
 
     /// <summary>The window's messages, for areas that need one WinUI does not surface.</summary>
     public WindowMessages Messages => messages;

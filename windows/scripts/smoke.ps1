@@ -847,6 +847,21 @@ try {
         Write-Host "    maximised, then restored at 1024x700; page area $(Get-MosaicProperty $area 'width')x$(Get-MosaicProperty $area 'height')"
     }
 
+
+    Write-Host '==> 6b. A second launch hands its address to the running Mosaic'
+    Invoke-SoftCheck 'Single instance' {
+        $before = @(Get-MosaicProperty (Get-MosaicState) 'tabs').Count
+        # Same data folder (MOSAIC_DATA_DIR is still set), so this is the second instance.
+        $second = Start-Process -FilePath $appExe -ArgumentList @('--mosaic-automation', $pageUrl) -PassThru
+        if (-not $second.WaitForExit(30000)) { throw 'the second launch was still running after 30 s' }
+        $after = Wait-MosaicState -Name '6b-second-launch' -What "the running Mosaic to open the second launch's address in a new tab" -Condition {
+            param($s)
+            $tab = Get-SelectedTab $s
+            @(Get-MosaicProperty $s 'tabs').Count -gt $before -and (Get-MosaicProperty $tab 'url') -eq $pageUrl
+        }
+        Write-Host "    the second launch exited ($($second.ExitCode)); the address opened in a new tab"
+        Invoke-Mosaic -Do 'closeTab' | Out-Null
+    }
     }
 
     Write-Host '==> 7. Quit'

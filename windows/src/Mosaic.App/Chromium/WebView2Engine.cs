@@ -74,6 +74,52 @@ internal sealed class WebView2Engine : IChromiumEngine, IChromiumExtensionHost
     /// </summary>
     public RequestFilter? RequestFilter { get; set; }
 
+    /// <summary>
+    /// The key combinations that belong to Mosaic even while a Chromium page has focus, as
+    /// (virtual key, modifiers). WinUI's WebView2 does not pass a page's key presses on to the
+    /// window (observed on CI: a real Ctrl+T in a focused page raised no XAML key event), so
+    /// each page gets a document-start script that stops these combinations in the page and
+    /// reports them (<see cref="ShortcutPressed"/>). Pages loaded afterwards pick up changes.
+    /// </summary>
+    public IReadOnlyCollection<(int Key, ShortcutModifiers Modifiers)> ForwardedShortcuts { get; set; } = [];
+
+    /// <summary>A forwarded combination was pressed in a Chromium page (UI thread).</summary>
+    public event Action<int, ShortcutModifiers>? ShortcutPressed;
+
+    /// <summary>
+    /// Proves that a web message comes from Mosaic's own script: a page can post messages too,
+    /// but cannot read the token, which only that script's closure holds.
+    /// </summary>
+    internal string ShortcutToken { get; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+
+    internal void RaiseShortcut(int key, ShortcutModifiers modifiers) => ShortcutPressed?.Invoke(key, modifiers);
+
+    /// <summary>The document-start script for the current <see cref="ForwardedShortcuts"/>.</summary>
+    internal string ShortcutScript()
+    {
+        static string Chord(int key, ShortcutModifiers modifiers) =>
+            $"{(modifiers.HasFlag(ShortcutModifiers.Control) ? "c" : "")}{(modifiers.HasFlag(ShortcutModifiers.Shift) ? "s" : "")}" +
+            $"{(modifiers.HasFlag(ShortcutModifiers.Alt) ? "a" : "")}:{key}";
+        var chords = System.Text.Json.JsonSerializer.Serialize(ForwardedShortcuts.Select(pair => Chord(pair.Key, pair.Modifiers)).ToArray());
+        return $$"""
+            (() => {
+              const token = "{{ShortcutToken}}";
+              const chords = new Set({{chords}});
+              const view = window.chrome && window.chrome.webview;
+              if (!view || chords.size === 0) return;
+              const post = view.postMessage.bind(view);
+              window.addEventListener("keydown", event => {
+                if (!event.isTrusted || event.repeat || event.metaKey) return;
+                const chord = (event.ctrlKey ? "c" : "") + (event.shiftKey ? "s" : "") + (event.altKey ? "a" : "") + ":" + event.keyCode;
+                if (!chords.has(chord)) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                post({ mosaicShortcut: token, key: event.keyCode, ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey });
+              }, true);
+            })();
+            """;
+    }
+
     public IChromiumBrowser CreateBrowser(string url)
     {
         var browser = new WebView2Browser(this, url);
