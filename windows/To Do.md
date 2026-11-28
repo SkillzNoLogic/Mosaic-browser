@@ -49,10 +49,10 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [ ] Custom search engines with keywords; search suggestions (off by default); Search settings
 
 ## engine — page features
-- [ ] Find in page; per-site zoom; print and save as PDF; developer tools (both engines)
-- [ ] Screenshots (visible and full page); mute; Picture in Picture; page full screen
-- [ ] Mosaic's own permission prompts (camera, microphone, location, notifications, clipboard), remembered per site
-- [ ] Pop-up blocking with a notice; JavaScript dialogs; context menus; file pickers
+- [~] Find in page; per-site zoom; print and save as PDF; developer tools (both engines) — Core (`PageFeatures`, `SiteZoomStore`, same `SiteZoom.json` as macOS) unit-tested; **Gecko side on CI** (run 46137815031, x64: agent `find` counts/moves/case, `setZoom`/`pageActivity`, `saveAsPDF` writes a PDF, headless Firefox); Chromium side (in-page find script, CSS zoom, `ShowPrintUI`/`PrintToPdfAsync`, `OpenDevToolsWindow`) compiled only — waits for winui M1 to run on CI (`page.find`, `page.zoomIn`, `page.pdf`, `page.devtools`; dump `page`)
+- [~] Screenshots (visible and full page); mute; Picture in Picture; page full screen — Core unit-tested (Pictures\Screenshots by default, clipboard, picker); **Gecko screenshots (visible + full page PNG) and mute on CI** (run 46137815031); Chromium (DevTools `Page.captureScreenshot`, `IsMuted`, PiP script, `ContainsFullScreenElementChanged` → AppWindow full-screen presenter) compiled only; Gecko page full screen confined to its window (`full-screen-api.ignore-widgets`) never run
+- [~] Mosaic's own permission prompts (camera, microphone, location, notifications, clipboard), remembered per site — `SitePermissionStore` (macOS `SitePermissions.json` format, shared with privacy) and prompts, merging, auto-answers, Windows privacy switches explained (registry ConsentStore, `ms-settings:` links) unit-tested; **Gecko: location request reaches Mosaic with its details, deny and allow answers taken, on CI** (run 46137815031); WebView2 `PermissionRequested` (deferred, `SavesInProfile=false`, profile mirroring) compiled only; overlay UI never run
+- [~] Pop-up blocking with a notice; JavaScript dialogs; context menus; file pickers — Core unit-tested (notice, "always allow", model hook so a blocked Chromium pop-up never becomes a tab, dialogs, context-menu builder); **Gecko blocked pop-up reported with its address on CI** (run 46137815031); WebView2 `NewWindowRequested`/`ScriptDialogOpening`/`ContextMenuRequested` → MenuFlyout compiled only; Gecko draws its own dialogs and menu; file pickers: WebView2 default, Gecko's owner window not verified (needs a person at a PC)
 
 ## downloads
 - [ ] Download manager for both engines: progress, pause/resume/cancel/retry, history, search
