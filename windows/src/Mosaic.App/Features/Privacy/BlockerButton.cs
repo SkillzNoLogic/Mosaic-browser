@@ -20,7 +20,7 @@ internal sealed class BlockerButton : UserControl
     private const string Cover = "privacy.blocker";
 
     private readonly BrowserModel model;
-    private readonly FontIcon shield = Icon("", 16);
+    private readonly FontIcon shield = Icon("shield.lefthalf.filled", 16);
     private readonly TextBlock badge = new() { FontSize = 10, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button button;
     private readonly List<IDisposable> watches = [];
@@ -83,8 +83,8 @@ internal sealed class BlockerButton : UserControl
         badge.Text = model.BlockerBadge;
         badge.Visibility = model.BlockerBadge.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         shield.Opacity = model.BlockerShield == BlockerShield.Filtering ? 1 : 0.55;
-        // Shield (EA18) when on, a struck shield's stand-in (the outline, dimmed) when off.
-        shield.Glyph = model.BlockerShield == BlockerShield.Off ? "" : "";
+        var off = model.BlockerShield == BlockerShield.Off;
+        shield.Glyph = Mosaic.App.Features.System.Icons.Glyph(off ? "shield.lefthalf.filled.slash" : "shield.lefthalf.filled");
         ToolTipService.SetToolTip(button, model.BlockerHelp);
         AutomationProperties.SetHelpText(button, model.BlockerHelp);
     }

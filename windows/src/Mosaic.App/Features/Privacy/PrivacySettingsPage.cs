@@ -223,7 +223,7 @@ internal sealed class PrivacySettingsPage : UserControl
             foreach (var check in shown)
             {
                 var isError = check.Kind == FilterCheckKind.Error;
-                var icon = Icon(isError ? "" : "", 14);
+                var icon = Icon(isError ? "xmark.octagon.fill" : "exclamationmark.triangle.fill", 14);
                 icon.Foreground = isError ? Critical : Caution;
                 var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
                 line.Children.Add(icon);

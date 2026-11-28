@@ -130,9 +130,8 @@ internal static class PrivacyUi
         }
     }
 
-    /// <summary>A glyph from the Fluent icon font (Segoe Fluent Icons; Segoe MDL2 Assets on Windows 10).</summary>
-    public static FontIcon Icon(string glyph, double size = 16) =>
-        new() { Glyph = glyph, FontSize = size, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets") };
+    /// <summary>An icon by Mosaic's (macOS symbol) name, from the system area's Fluent table.</summary>
+    public static FontIcon Icon(string name, double size = 16) => Mosaic.App.Features.System.Icons.Make(name, size);
 
     /// <summary>
     /// The mark of a private tab: shell views draw it on private tabs' chips and the address field
@@ -147,18 +146,19 @@ internal static class PrivacyUi
             Height = size,
             CornerRadius = new CornerRadius(size / 2.0),
             Background = new SolidColorBrush(PrivateTint),
-            // "Hide" (an eye with a stroke): Segoe Fluent Icons E9A9 / MDL2 ED1A.
-            Child = new FontIcon
-            {
-                Glyph = "",
-                FontSize = compact ? 9 : 13,
-                Foreground = new SolidColorBrush(Colors.White),
-                FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
-            },
+            // macOS draws "eyeglasses".
+            Child = WhiteIcon("eyeglasses", compact ? 9 : 13),
         };
         AutomationProperties.SetName(badge, "Private tab");
         ToolTipService.SetToolTip(badge, "Private tab: nothing is saved after it closes");
         return badge;
+    }
+
+    private static FontIcon WhiteIcon(string name, double size)
+    {
+        var icon = Icon(name, size);
+        icon.Foreground = new SolidColorBrush(Colors.White);
+        return icon;
     }
 
     private static class Colors

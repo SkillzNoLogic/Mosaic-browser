@@ -14,7 +14,7 @@ namespace Mosaic.App.Features.Privacy;
 internal static class SitePermissionsSection
 {
     /// <summary>One remembered decision.</summary>
-    internal sealed record Entry(string Site, string Permission, string Title, string Glyph, bool Allowed);
+    internal sealed record Entry(string Site, string Permission, string Title, string IconName, bool Allowed);
 
     /// <summary>The engine area's store, seen through what this page needs.</summary>
     internal interface IStore
@@ -54,7 +54,7 @@ internal static class SitePermissionsSection
                 decision.SelectionChanged += (_, _) => store.Set(model, entry, decision.SelectedIndex == 0);
                 var forget = Button("Forget", () => store.Set(model, entry, null), $"Forget {entry.Title} decision for {entry.Site}");
                 ToolTipService.SetToolTip(forget, "Forget (the site will ask again)");
-                var icon = Icon(entry.Glyph);
+                var icon = Icon(entry.IconName);
                 var leading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
                 leading.Children.Add(icon);
                 leading.Children.Add(text);
