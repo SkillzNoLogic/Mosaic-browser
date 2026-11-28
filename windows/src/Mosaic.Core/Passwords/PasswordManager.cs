@@ -99,6 +99,19 @@ public sealed class PasswordManager
     /// <summary>True once the vault has been read.</summary>
     public bool IsVaultLoaded => vault is not null;
 
+    /// <summary>
+    /// Reads the vault on a worker thread (decrypting it takes a few milliseconds), so the first
+    /// page or view that needs it does not wait on the UI thread. Call from the UI thread.
+    /// </summary>
+    public async Task LoadVaultAsync()
+    {
+        if (vault is not null) return;
+        var loaded = await Task.Run(makeVault);
+        if (vault is not null) return;
+        vault = loaded;
+        Bump();
+    }
+
     public PasswordUnlock Unlock { get; }
 
     /// <summary>"dpapi" or "memory", for <c>dump</c>.</summary>
@@ -243,15 +256,16 @@ public sealed class PasswordManager
 
     /// <summary>
     /// A message from a Chromium page. The bridge sets <see cref="PasswordPageMessage.Origin"/> and
-    /// <see cref="PasswordPageMessage.Frame"/> from WebView2's report of the sender.
+    /// <see cref="PasswordPageMessage.Frame"/> from WebView2's report of the sender;
+    /// <paramref name="isPrivate"/> is true when the WebView2's profile is InPrivate.
     /// </summary>
-    public void HandleChromium(BrowserTab tab, PasswordPageMessage message)
+    public void HandleChromium(BrowserTab tab, PasswordPageMessage message, bool isPrivate = false)
     {
         // A Chromium page can post anything to the bridge, so it could fake the shortcut and get
         // a fill without the user asking. Ctrl+\ reaches Mosaic's own key handling in Chromium tabs.
         if (message.Kind == PasswordPageMessage.MessageKind.FillShortcut) return;
         message.Tab = null;
-        message.IsPrivate = null;
+        message.IsPrivate = isPrivate;
         if (!model.Tabs.Contains(tab) || tab.Engine != EngineKind.Chromium) return;
         Handle(message, tab);
     }

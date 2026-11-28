@@ -270,6 +270,26 @@ public sealed class PasswordManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task InPrivateChromiumPagesAreNeverOfferedButCanBeFilled()
+    {
+        var (tab, _) = fixture.OpenChromiumTab(Shop + "/login");
+        var submit = PasswordPageMessage.Decode("""{"kind":"submit","doc":"d","username":"alice","password":"pw","confirmed":true}""")!;
+        submit.Origin = P.Origin(Shop);
+        submit.Frame = PasswordPageMessage.FrameKind.Main;
+        passwords.HandleChromium(tab, submit, isPrivate: true);
+        Assert.Null(passwords.PromptFor(tab));
+        var generate = PasswordPageMessage.Decode("""{"kind":"generate","doc":"d"}""")!;
+        generate.Origin = P.Origin(Shop);
+        generate.Frame = PasswordPageMessage.FrameKind.Main;
+        passwords.HandleChromium(tab, generate, isPrivate: true);
+        Assert.Null(passwords.PromptFor(tab));
+
+        passwords.Vault.Save(new CredentialID(P.Origin(Shop), "alice"), "pw");
+        await passwords.FillAsync(tab);
+        Assert.Single(chromium.Fills);
+    }
+
+    [Fact]
     public void ClosedTabsAreForgotten()
     {
         var tab = fixture.OpenGeckoTab(Shop + "/login");
