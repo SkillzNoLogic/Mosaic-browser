@@ -51,7 +51,7 @@ public sealed class SystemEndToEndTests(ITestOutputHelper output) : IDisposable
         pipe.Write(bytes);
         pipe.Flush();
         using var reader = new StreamReader(pipe, Encoding.UTF8);
-        var reply = reader.ReadLineAsync().AsTask();
+        var reply = reader.ReadLineAsync();
         if (!reply.Wait(timeout)) throw new TimeoutException("No reply to " + line);
         return reply.Result ?? throw new IOException("The pipe closed without a reply.");
     }
