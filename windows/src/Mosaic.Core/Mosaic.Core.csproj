@@ -17,5 +17,8 @@
     <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.5.1.1" />
     <PackageReference Include="Microsoft.ClearScript.V8.Native.win-arm64" Version="7.5.1.1" />
     <PackageReference Include="Microsoft.ClearScript.V8.Native.osx-arm64" Version="7.5.1.1" />
+    <!-- platform: Ed25519 verification of Mosaic's signed release zips (same key as macOS).
+         Fully managed (no native code), so identical on win-x64, win-arm64 and the test hosts. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
   </ItemGroup>
 </Project>

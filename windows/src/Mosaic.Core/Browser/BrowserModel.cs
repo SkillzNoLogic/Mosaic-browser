@@ -163,6 +163,7 @@ public sealed partial class BrowserModel : ObservableObject
         // The shield shows the blocker's state.
         Blocker.PropertyChanged += (_, _) => UpdatePresentation();
         Blocker.Start();
+        PlatformAttach();  // platform: before the first tab, which may pick Chromium if Gecko is missing
 
         NewTab();
     }
@@ -373,6 +374,7 @@ public sealed partial class BrowserModel : ObservableObject
 
     public BrowserTab NewTab(string url = "", EngineKind? engine = null, bool select = true)
     {
+        engine ??= PlatformEngineForNewTab(url);  // platform: per-site engine rules
         var tab = new BrowserTab(engine ?? this.engine);
         InsertAfterSelected(tab);
         if (select) Select(tab);
@@ -441,6 +443,7 @@ public sealed partial class BrowserModel : ObservableObject
         if (rules.ResolveAddress(input, searchEngine) is not { } url) return;
         var tab = selectedTab ?? NewTab();
         IsEditingAddress = false;
+        PlatformApplyEngineRule(url, tab);  // platform: per-site engine rules
         Load(url, tab);
         FocusContent();
     }
@@ -659,6 +662,7 @@ public sealed partial class BrowserModel : ObservableObject
             Notice = ChromiumUnavailableReason;
             return;
         }
+        if (PlatformBeginSafeSwitch(kind)) return;  // platform: keeps the page until the other engine has loaded it
         SetEnginePreference(kind, remember: true);
         if (selectedTab is not { } tab || tab.Engine == kind) return;
 
