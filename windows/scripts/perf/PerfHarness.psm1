@@ -510,7 +510,8 @@ function Measure-PerfMemorySettled {
 }
 
 function Measure-PerfCpu {
-    # CPU used by the run's processes over $Seconds, as a percentage of one core and of the machine.
+    # CPU used by the run's processes over $Seconds, as a percentage of one core (total and per
+    # group) and of the machine.
     param([Parameter(Mandatory = $true)] $Launch, [int]$Seconds = 30)
     Initialize-PerfNative
     $before = @{}
@@ -522,23 +523,41 @@ function Measure-PerfCpu {
     Start-Sleep -Seconds $Seconds
     $used = 0L
     $count = 0
+    $byGroup = @{ mosaic = 0L; webview2 = 0L; gecko = 0L; other = 0L }
+    $busiest = @()
     foreach ($entry in @(Get-PerfTree $Launch)) {
         $sample = [MosaicPerf.Native]::Sample($entry.Id, $false)
         if (-not $sample) { continue }
         $count++
         $key = "$($entry.Id):$($sample.CreationFileTime)"
-        if ($before.ContainsKey($key)) { $used += $sample.CpuTicks - $before[$key] }
-        else { $used += $sample.CpuTicks }   # started during the interval
+        $delta = $sample.CpuTicks
+        if ($before.ContainsKey($key)) { $delta = $sample.CpuTicks - $before[$key] }   # else: started during the interval
+        $used += $delta
+        $byGroup[$entry.Group] += $delta
+        $busiest += [pscustomobject]@{ id = $entry.Id; name = $entry.Name; group = $entry.Group; cpuMs = [Math]::Round($delta / 1e4, 1) }
     }
     $elapsed = [MosaicPerf.Native]::NowFileTime() - $start
     $oneCore = 100.0 * $used / $elapsed
+    $groups = [ordered]@{}
+    foreach ($name in @('mosaic', 'webview2', 'gecko', 'other')) { $groups[$name] = [Math]::Round(100.0 * $byGroup[$name] / $elapsed, 2) }
     [ordered]@{
         seconds          = [Math]::Round($elapsed / 1e7, 1)
         cpuMs            = [Math]::Round($used / 1e4, 1)
         percentOfOneCore = [Math]::Round($oneCore, 2)
         percentOfMachine = [Math]::Round($oneCore / [Environment]::ProcessorCount, 2)
+        groups           = $groups
         processes        = $count
+        busiest          = @($busiest | Sort-Object cpuMs -Descending | Select-Object -First 5)
     }
+}
+
+function Test-PerfPageLoaded {
+    # True when dump shows at least $Count test pages, every one loaded with its title.
+    param($State, [Parameter(Mandatory = $true)] [string]$Base, [int]$Count = 1)
+    $pages = @(@(Get-MosaicProperty $State 'tabs') | Where-Object { [string](Get-MosaicProperty $_ 'url') -like "$Base/page/*" })
+    $pending = @($pages | Where-Object {
+            (Get-MosaicProperty $_ 'loading') -ne $false -or [string](Get-MosaicProperty $_ 'title') -notlike 'Mosaic Perf Page*' })
+    $pages.Count -ge $Count -and $pending.Count -eq 0
 }
 
 function Stop-PerfMosaic {
@@ -594,5 +613,5 @@ Export-ModuleMember -Function Initialize-PerfNative, Write-PerfText, ConvertTo-P
     Get-NativeArchitecture, Get-PeMachine, Get-WebView2Version, Get-PerfMachineInfo, Get-PerfAppInfo,
     Start-PerfPageServer, Get-PerfPageUrl, Stop-PerfPageServer, Start-PerfMosaic, Get-PerfSinceStart, Wait-PerfWindow,
     Read-PerfTrace, Get-PerfMark, Wait-PerfMark, Wait-PerfAutomation, Invoke-PerfCommand, Get-PerfState,
-    Wait-PerfState, Get-PerfTree, Measure-PerfMemory, Measure-PerfMemorySettled, Measure-PerfCpu, Stop-PerfMosaic,
+    Wait-PerfState, Get-PerfTree, Measure-PerfMemory, Measure-PerfMemorySettled, Measure-PerfCpu, Test-PerfPageLoaded, Stop-PerfMosaic,
     Remove-PerfData

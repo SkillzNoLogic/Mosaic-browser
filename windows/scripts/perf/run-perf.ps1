@@ -123,7 +123,7 @@ $results = [ordered]@{
     runs       = @()
     notes      = @()
 }
-$script:Runs = New-Object System.Collections.ArrayList
+$script:AllRuns = New-Object System.Collections.ArrayList
 $script:AutomationMissing = $false
 $script:FailuresInARow = 0
 $runStarted = Get-Date
@@ -176,17 +176,37 @@ function Invoke-StartupLaunch {
         if (-not $automation) { Add-Note 'The automation pipe did not answer; only window and trace times are measured.' }
 
         # The first page: the address given on the command line if Mosaic opens it, otherwise
-        # asked for over automation as soon as it can be.
+        # asked for over automation as soon as it can be. It counts as loaded when the trace
+        # has firstNavigationCompleted or, for a build without those marks, when dump shows the
+        # page loaded (timed from outside, polled every 100 ms).
         $wait = 2
         if ($automation) { $wait = 3 }
+        $navigateSentMs = $null
+        $externalLoadedMs = $null
         if (Wait-PerfMark $launch @('firstNavigationStarted') $wait) { $source = 'commandLine' }
+        elseif ($automation -and (Test-PerfPageLoaded (Get-PerfState $launch) $server.Base 1)) { $source = 'commandLine' }
         elseif ($automation) {
+            $navigateSentMs = Get-PerfSinceStart $launch
             Invoke-PerfCommand -Do 'navigate' -Value $pageUrl | Out-Null
             $source = 'automation'
         }
         $run['firstPageSource'] = $source
-        if ($source -and -not (Wait-PerfMark $launch @('firstNavigationCompleted') 90)) {
-            Add-Note "The first page did not finish loading within 90 s ($Name $Iteration)."
+        if ($source) {
+            $deadline = (Get-Date).AddSeconds(90)
+            $done = $false
+            while (-not $done) {
+                if ($null -ne (Get-PerfMark (Read-PerfTrace $launch.TraceFile) 'firstNavigationCompleted')) { $done = $true; break }
+                if ($automation -and (Test-PerfPageLoaded (Get-PerfState $launch) $server.Base 1)) {
+                    $externalLoadedMs = Get-PerfSinceStart $launch
+                    # A build with StartupTrace marks it a moment later; use the mark when it comes.
+                    Wait-PerfMark $launch @('firstNavigationCompleted') 2 | Out-Null
+                    $done = $true
+                    break
+                }
+                if ((Get-Date) -ge $deadline) { break }
+                Start-Sleep -Milliseconds 100
+            }
+            if (-not $done) { Add-Note "The first page did not finish loading within 90 s ($Name $Iteration)." }
         }
         # Marks that land a moment later (engines finishing their start).
         if ($automation) { Wait-PerfMark $launch @('geckoReady') 3 | Out-Null }
@@ -204,7 +224,14 @@ function Invoke-StartupLaunch {
         if ($marks.Contains('firstNavigationStarted')) { $started = $marks['firstNavigationStarted'] }
         if ($marks.Contains('firstNavigationCompleted')) { $completed = $marks['firstNavigationCompleted'] }
         if ($null -ne $completed -and $null -ne $started) { $run['pageLoadMs'] = [Math]::Round($completed - $started, 1) }
-        if ($source -eq 'commandLine' -and $null -ne $completed) { $run['firstPageMs'] = $completed }
+        elseif ($null -ne $externalLoadedMs -and $null -ne $navigateSentMs) {
+            $run['pageLoadMs'] = [Math]::Round($externalLoadedMs - $navigateSentMs, 1)
+            $run['pageLoadMeasured'] = 'outside'
+        }
+        if ($source -eq 'commandLine') {
+            if ($null -ne $completed) { $run['firstPageMs'] = $completed }
+            elseif ($null -ne $externalLoadedMs) { $run['firstPageMs'] = [Math]::Round($externalLoadedMs, 1); $run['firstPageMeasured'] = 'outside' }
+        }
     }
     finally {
         $stop = Stop-PerfMosaic $launch
@@ -220,7 +247,7 @@ function Invoke-StartupLaunch {
     if ($run.Contains('firstPageMs')) { $line += ", first page $($run['firstPageMs']) ms" }
     if ($run.Contains('pageLoadMs')) { $line += " (load $($run['pageLoadMs']) ms, $source)" }
     Write-Host $line
-    [void]$script:Runs.Add($run)
+    [void]$script:AllRuns.Add($run)
     Start-Sleep -Seconds 2   # let the engines' last writes and exits finish
 }
 
@@ -236,7 +263,7 @@ function Invoke-Launch {
         $script:FailuresInARow++
         $message = $_.Exception.Message
         Write-Host "    $Name #$Iteration FAILED: $message"
-        [void]$script:Runs.Add([ordered]@{ kind = 'failed'; scenario = $Name; iteration = $Iteration; error = $message })
+        [void]$script:AllRuns.Add([ordered]@{ kind = 'failed'; scenario = $Name; iteration = $Iteration; error = $message })
         Add-Note "Launches failed: $message"
         if ($script:FailuresInARow -ge 3) { throw "Three launches in a row failed; the last one: $message" }
     }
@@ -284,7 +311,7 @@ try {
             for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-Launch 'warm' $i { Invoke-StartupLaunch -Name 'warm' -Iteration $i -DataDirectory $seed } }
             Remove-PerfData $seed
         }
-        $chromiumUsable = @($script:Runs | Where-Object { $_['automation'] }).Count -gt 0 -and $results.machine.webView2
+        $chromiumUsable = @($script:AllRuns | Where-Object { $_['automation'] }).Count -gt 0 -and $results.machine.webView2
         if ($WarmIterations -gt 0 -and $chromiumUsable) {
             $seed = New-SeedData -Name 'seed-chromium' -Engine 'chromium'
             for ($i = 1; $i -le $WarmIterations; $i++) { Invoke-Launch 'warmChromium' $i { Invoke-StartupLaunch -Name 'warmChromium' -Iteration $i -DataDirectory $seed } }
@@ -325,14 +352,7 @@ try {
                     Invoke-PerfCommand -Do 'engine' -Value $engine | Out-Null
                     Invoke-PerfCommand -Do 'navigate' -Value $pageUrl | Out-Null
                     $base = $server.Base
-                    $loaded = {
-                        param($s, [int]$Count)
-                        $pages = @(@(Get-MosaicProperty $s 'tabs') | Where-Object { [string](Get-MosaicProperty $_ 'url') -like "$base/page/*" })
-                        $pending = @($pages | Where-Object {
-                                (Get-MosaicProperty $_ 'loading') -ne $false -or [string](Get-MosaicProperty $_ 'title') -notlike 'Mosaic Perf Page*' })
-                        $pages.Count -ge $Count -and $pending.Count -eq 0
-                    }
-                    Wait-PerfState $launch "the first page to load in $engine" { param($s) & $loaded $s 1 } | Out-Null
+                    Wait-PerfState $launch "the first page to load in $engine" { param($s) Test-PerfPageLoaded $s $base 1 } | Out-Null
                     Start-Sleep -Seconds $SettleSeconds
                     $run['oneTab'] = Measure-PerfMemorySettled $launch
                     $run['appReported'] = Get-MosaicProperty (Get-PerfState $launch) 'performance'
@@ -341,7 +361,7 @@ try {
                     for ($tab = 2; $tab -le $Tabs; $tab++) {
                         Invoke-PerfCommand -Do 'newTab' -Value (Get-PerfPageUrl $server $tab) | Out-Null
                     }
-                    Wait-PerfState $launch "$Tabs pages to load in $engine" { param($s) & $loaded $s $Tabs } -TimeoutSeconds 180 | Out-Null
+                    Wait-PerfState $launch "$Tabs pages to load in $engine" { param($s) Test-PerfPageLoaded $s $base $Tabs } -TimeoutSeconds 180 | Out-Null
                     Start-Sleep -Seconds $SettleSeconds
                     $run['tabs'] = Measure-PerfMemorySettled $launch
 
@@ -361,7 +381,7 @@ try {
                         $run['leftovers'] = $stop.leftovers
                         Add-Note "Processes were left running after Mosaic quit: $($stop.leftovers -join ', ')"
                     }
-                    [void]$script:Runs.Add($run)
+                    [void]$script:AllRuns.Add($run)
                     Remove-PerfData $directory
                 }
                 $line = "    $engine #$i"
@@ -392,25 +412,25 @@ function Add-Metric {
     if ($null -ne $stats) { $metrics[$Name] = $stats }
 }
 
-$startupRuns = @($script:Runs | Where-Object { $_['kind'] -eq 'startup' })
+$startupRuns = @($script:AllRuns | Where-Object { $_['kind'] -eq 'startup' })
 foreach ($name in @('firstRun', 'cold', 'warm', 'warmChromium')) {
-    $runs = @($startupRuns | Where-Object { $_['scenario'] -eq $name })
-    if ($runs.Count -eq 0) { continue }
+    $scenarioRuns = @($startupRuns | Where-Object { $_['scenario'] -eq $name })
+    if ($scenarioRuns.Count -eq 0) { continue }
     foreach ($field in @('windowShownMs', 'firstPageMs', 'pageLoadMs', 'exitMs')) {
-        Add-Metric "startup.$name.$field" @($runs | ForEach-Object { if ($_.Contains($field)) { $_[$field] } })
+        Add-Metric "startup.$name.$field" @($scenarioRuns | ForEach-Object { if ($_.Contains($field)) { $_[$field] } })
     }
-    $markNames = @($runs | ForEach-Object { @($_['marks'].Keys) } | Select-Object -Unique)
+    $markNames = @($scenarioRuns | ForEach-Object { @($_['marks'].Keys) } | Select-Object -Unique)
     foreach ($mark in $markNames) {
-        Add-Metric "startup.$name.mark.$mark" @($runs | ForEach-Object { if ($_['marks'].Contains($mark)) { $_['marks'][$mark] } })
+        Add-Metric "startup.$name.mark.$mark" @($scenarioRuns | ForEach-Object { if ($_['marks'].Contains($mark)) { $_['marks'][$mark] } })
     }
 }
 
-$memoryRuns = @($script:Runs | Where-Object { $_['kind'] -eq 'memory' })
+$memoryRuns = @($script:AllRuns | Where-Object { $_['kind'] -eq 'memory' })
 foreach ($engine in @('gecko', 'chromium', 'noAutomation')) {
-    $runs = @($memoryRuns | Where-Object { $_['scenario'] -eq $engine })
-    if ($runs.Count -eq 0) { continue }
+    $scenarioRuns = @($memoryRuns | Where-Object { $_['scenario'] -eq $engine })
+    if ($scenarioRuns.Count -eq 0) { continue }
     foreach ($phase in @('oneTab', 'tabs', 'asleep')) {
-        $measured = @($runs | Where-Object { $_.Contains($phase) })
+        $measured = @($scenarioRuns | Where-Object { $_.Contains($phase) })
         if ($measured.Count -eq 0) { continue }
         $phaseName = $phase
         if ($phase -eq 'tabs') { $phaseName = "tabs$Tabs" }
@@ -420,14 +440,17 @@ foreach ($engine in @('gecko', 'chromium', 'noAutomation')) {
         }
         Add-Metric "memory.$engine.$phaseName.processes" @($measured | ForEach-Object { $_[$phase].groups.total.processes })
     }
-    Add-Metric "memory.$engine.perTabMB" @($runs | Where-Object { $_.Contains('tabs') -and $_.Contains('oneTab') } | ForEach-Object {
+    Add-Metric "memory.$engine.perTabMB" @($scenarioRuns | Where-Object { $_.Contains('tabs') -and $_.Contains('oneTab') } | ForEach-Object {
             ($_['tabs'].groups.total.privateWorkingSetMB - $_['oneTab'].groups.total.privateWorkingSetMB) / ($Tabs - 1) })
-    Add-Metric "memory.$engine.sleepSavedMB" @($runs | Where-Object { $_.Contains('tabs') -and $_.Contains('asleep') } | ForEach-Object {
+    Add-Metric "memory.$engine.sleepSavedMB" @($scenarioRuns | Where-Object { $_.Contains('tabs') -and $_.Contains('asleep') } | ForEach-Object {
             $_['tabs'].groups.total.privateWorkingSetMB - $_['asleep'].groups.total.privateWorkingSetMB })
-    Add-Metric "cpu.$engine.idle.percentOfOneCore" @($runs | Where-Object { $_.Contains('idleCpu') } | ForEach-Object { $_['idleCpu'].percentOfOneCore })
+    Add-Metric "cpu.$engine.idle.percentOfOneCore" @($scenarioRuns | Where-Object { $_.Contains('idleCpu') } | ForEach-Object { $_['idleCpu'].percentOfOneCore })
+    foreach ($group in @('mosaic', 'webview2', 'gecko', 'other')) {
+        Add-Metric "cpu.$engine.idle.$group.percentOfOneCore" @($scenarioRuns | Where-Object { $_.Contains('idleCpu') } | ForEach-Object { $_['idleCpu'].groups[$group] })
+    }
 }
 
-$results.runs = @($script:Runs)
+$results.runs = @($script:AllRuns)
 $results.notes = @($script:Notes)
 $results['finishedUtc'] = [DateTime]::UtcNow.ToString('o')
 if ($failure) { $results['error'] = $failure.Exception.Message }
