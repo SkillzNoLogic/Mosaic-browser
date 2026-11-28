@@ -7,18 +7,30 @@ namespace Mosaic.Core.Tests.Shell;
 
 public sealed class ShellAutomationTests
 {
-    private static async Task<JsonObject> Run(Automation automation, string command, string value = "")
+    // The commands and dump fields are called directly: registering them in the process-wide
+    // AutomationRegistry would add keys to other areas' dump tests.
+    private sealed class ShellDriver(BrowserModel model)
     {
-        var line = new JsonObject { ["do"] = command, ["value"] = value }.ToJsonString();
-        return JsonNode.Parse((await automation.HandleAsync(line)).Json)!.AsObject();
+        public BrowserModel Model => model;
+
+        public JsonObject DumpState() => new()
+        {
+            ["mosaic"] = model.Mosaics.ActivePreset.Raw(),
+            ["layout"] = JsonNode.Parse(model.Mosaics.EffectiveLayout.JsonText(pretty: false)),
+            ["settingsCategory"] = model.SettingsPage?.Id() ?? "",
+            ["sidebarVisible"] = model.IsSidebarVisible,
+            ["shell"] = ShellAutomation.State(model),
+        };
     }
 
-    private static (BrowserFixture Fixture, Automation Automation) Make()
+    private static Task<JsonObject> Run(ShellDriver driver, string command, string value = "") => Task.FromResult(
+        JsonNode.Parse((ShellAutomation.Handle(driver.Model, command, value) ?? AutomationRegistry.Error("unknown")).Json)!.AsObject());
+
+    private static (BrowserFixture Fixture, ShellDriver Automation) Make()
     {
-        ShellAutomation.Register();
         var fixture = new BrowserFixture();
         fixture.Model.ShellInMemory = true;
-        return (fixture, new Automation(fixture.Model, _ => Task.CompletedTask));
+        return (fixture, new ShellDriver(fixture.Model));
     }
 
     [Fact]
