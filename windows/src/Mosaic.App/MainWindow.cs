@@ -100,6 +100,8 @@ public sealed class MainWindow : Window
         // Shortcuts work whatever the shell: this sees key presses before any control, including
         // the accelerator keys WebView2 passes on while a Chromium page has focus.
         root.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(Root_PreviewKeyDown), handledEventsToo: true);
+        // Keys WebView2 passes on from a Chromium page may arrive as a bubbling KeyDown only.
+        root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler(Root_KeyDown), handledEventsToo: true);
         root.Children.Add(CreateShell());
         Content = root;
 
@@ -424,8 +426,24 @@ public sealed class MainWindow : Window
     /// Mosaic's shortcuts, from Mosaic's own controls and (forwarded by WebView2) from Chromium
     /// pages. Gecko reports its own through the agent.
     /// </summary>
-    private void Root_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    private void Root_PreviewKeyDown(object sender, KeyRoutedEventArgs e) => HandleKey(e, "preview");
+
+    private void Root_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // Seen by the preview already, unless it came from a place the preview does not see.
+        if (e.Handled || ReferenceEquals(lastKeyEvent, e)) return;
+        HandleKey(e, "keydown");
+    }
+
+    private KeyRoutedEventArgs? lastKeyEvent;
+
+    /// <summary>The last key press the window saw, for diagnostics (automation <c>dump</c>).</summary>
+    public string LastKey { get; private set; } = "";
+
+    private void HandleKey(KeyRoutedEventArgs e, string route)
+    {
+        lastKeyEvent = e;
+        LastKey = $"{e.Key} via {route} from {e.OriginalSource?.GetType().Name ?? "?"}";
         if (e.KeyStatus.WasKeyDown) return; // auto-repeat
         static bool Down(VirtualKey key) =>
             InputKeyboardSource.GetKeyStateForCurrentThread(key).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);

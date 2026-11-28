@@ -109,6 +109,10 @@ internal static class WindowAutomation
             ["pageCovers"] = covers,
             ["shell"] = FeatureMounts.Shell is null ? "basic" : "feature",
             ["internalPage"] = area.InternalPageHost ?? "",
+            ["lastKey"] = w.LastKey,
+            ["focusedElement"] = w.Content?.XamlRoot is { } xamlRoot
+                ? Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xamlRoot)?.GetType().Name ?? ""
+                : "",
             // Diagnostics: how the windows Gecko's page depends on are made (WS_EX_* bits).
             ["topLevelExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(w.Handle, Hosting.NativeMethods.GWL_EXSTYLE):X}",
             ["containerExStyle"] = $"0x{(long)Hosting.NativeMethods.GetWindowLongPtrW(area.Gecko.ContainerWindow, Hosting.NativeMethods.GWL_EXSTYLE):X}",
