@@ -17,5 +17,9 @@
     <PackageReference Include="Microsoft.ClearScript.V8.Native.win-x64" Version="7.5.1.1" />
     <PackageReference Include="Microsoft.ClearScript.V8.Native.win-arm64" Version="7.5.1.1" />
     <PackageReference Include="Microsoft.ClearScript.V8.Native.osx-arm64" Version="7.5.1.1" />
+    <!-- library: SQLite for bookmarks, history, reading list and search engines (Library.sqlite,
+         same schema as macOS). Its SQLitePCLRaw.bundle_e_sqlite3 dependency ships the native
+         e_sqlite3 for win-x64 and win-arm64 (and osx-arm64/linux, where the tests run). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
   </ItemGroup>
 </Project>

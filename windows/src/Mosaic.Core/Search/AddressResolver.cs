@@ -22,6 +22,7 @@ public static class AddressResolver
     [
         "http", "https", "file", "about", "data", "blob", "view-source",
         "chrome", "chrome-extension", "moz-extension", "ftp", "mailto",
+        "mosaic",  // Mosaic's own pages (mosaic://bookmarks, mosaic://history…), as on macOS
     ]);
 
     /// <summary>Resolves address bar input to the URL to load.</summary>

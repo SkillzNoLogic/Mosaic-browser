@@ -43,10 +43,10 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [~] Sleeping tabs with exceptions and memory pressure; Tabs & Workspaces and Performance settings — policy, Chromium unload, Gecko `discardTab` (with close fallback), audio/download/pinned exemptions and Windows memory pressure (`CreateMemoryResourceNotification`/`GlobalMemoryStatusEx`) unit-tested; settings pages registered in `FeatureMounts.SettingsPages`; not yet seen on CI
 
 ## library — bookmarks, history, search
-- [ ] Bookmarks (folders, tags, bar, manager, search); import/export Netscape HTML and Chrome JSON
-- [ ] History (searchable, delete by visit/site/range) in both engines
-- [ ] Reading list
-- [ ] Custom search engines with keywords; search suggestions (off by default); Search settings
+- [~] Bookmarks (folders, tags, bar, manager, search); import/export Netscape HTML and Chrome JSON — store, folders/tags/search, Netscape HTML and Chrome JSON import + export with round-trip tests: unit (macOS, and Windows x64 CI run 46136209134: SQLite e_sqlite3 native loads; win-arm64 native verified in the publish output, not run). Bar, star, manager page, editor flyout (covers Gecko), Ctrl+D / Ctrl+Shift+O / Ctrl+Shift+B: compiled only — waiting for winui M1 + shell to show them on CI
+- [~] History (searchable, delete by visit/site/range) in both engines — one visit per navigation from every tab (Gecko and Chromium, selected or background), typed visits, error pages and private tabs excluded, flush on quit: unit (BrowserModel with fake engines). History page and Ctrl+H: compiled only
+- [~] Reading list — store and model: unit; page compiled only
+- [~] Custom search engines with keywords; search suggestions (off by default); Search settings — `w term` / `@ddg term` in Navigate, custom default engine restored, remote suggestions only when switched on and never for private tabs (fake HTTP): unit. Search settings page: compiled only
 
 ## engine — page features
 - [ ] Find in page; per-site zoom; print and save as PDF; developer tools (both engines)

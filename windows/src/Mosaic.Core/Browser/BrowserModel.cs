@@ -456,6 +456,7 @@ public sealed partial class BrowserModel : ObservableObject
 
     private void TabChanged(BrowserTab tab)
     {
+        LibraryTabChanged(tab);  // library: history from every tab, both engines (HistoryRecorder)
         if (!ReferenceEquals(tab, selectedTab)) return;
         if (!IsEditingAddress) AddressText = tab.Url;
         UpdatePresentation();
@@ -466,12 +467,14 @@ public sealed partial class BrowserModel : ObservableObject
     /// <summary>Handles whatever was submitted in the address bar or the start page.</summary>
     public void Navigate(string input)
     {
+        input = LibraryResolveKeyword(input);  // library: search keywords ("w swift" → Wikipedia)
         var trimmed = input.Trim();
         if ((InternalPageHost(trimmed) is not null ? trimmed : rules.ResolveAddress(input, searchEngine)) is not { } url) return;
         var tab = selectedTab ?? NewTab();
         IsEditingAddress = false;
         OfferSwitchIfAlreadyOpen(tab, url);  // tabs: duplicate-tab detection
         Load(url, tab);
+        LibraryNoteTyped(tab);  // library: typed visits rank higher
         FocusContent();
     }
 
@@ -923,6 +926,7 @@ public sealed partial class BrowserModel : ObservableObject
     /// <summary>Keyboard shortcuts pressed inside Gecko arrive here as snapshot events.</summary>
     private void Handle(string eventType)
     {
+        if (LibraryHandleGeckoEvent(eventType)) return;  // library: Ctrl+D, Ctrl+H, Ctrl+Shift+O/B pressed in a Gecko page
         switch (eventType)
         {
             case "focusAddress":
@@ -1132,6 +1136,7 @@ public sealed partial class BrowserModel : ObservableObject
         if (isShutDown) return;
         isShutDown = true;
         FinishTabs();  // tabs: final session save, clean-exit marker
+        LibraryShutdown();  // library: record visits still waiting for their title
         foreach (var tab in Tabs)
         {
             if (tab.Chromium is not { } browser) continue;
