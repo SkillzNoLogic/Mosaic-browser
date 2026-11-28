@@ -40,6 +40,9 @@ internal sealed class PageOverlayView : Grid
     private readonly Popup centre = NewPopup();
     private readonly StackPanel trailingStack = new() { Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };
     private Border? findCard;
+    private PermissionPrompt? shownPrompt;
+    private PageDialog? shownDialog;
+    private bool rebuildPrompt = true;
     private TextBox? findBox;
     private TextBlock? findStatus;
     private ToggleButton? matchCase;
@@ -70,6 +73,9 @@ internal sealed class PageOverlayView : Grid
         Unloaded += (_, _) =>
         {
             loaded = false;
+            shownPrompt = null;
+            shownDialog = null;
+            rebuildPrompt = true;
             leading.IsOpen = trailing.IsOpen = centre.IsOpen = false;
             FeatureMounts.CoverPage(CoverId, false);
         };
@@ -85,7 +91,11 @@ internal sealed class PageOverlayView : Grid
     {
         switch (change.PropertyName)
         {
-            case nameof(PageFeatures.CurrentPrompt) or nameof(PageFeatures.CurrentPopupNotice)
+            case nameof(PageFeatures.CurrentPrompt):
+                rebuildPrompt = true;
+                Rebuild();
+                break;
+            case nameof(PageFeatures.CurrentPopupNotice)
                 or nameof(PageFeatures.CurrentDialog) or nameof(PageFeatures.ShowsFindBar):
                 Rebuild();
                 break;
@@ -114,8 +124,19 @@ internal sealed class PageOverlayView : Grid
     private void Rebuild()
     {
         if (!loaded) return;
-        leading.Child = pages.CurrentPrompt is { } prompt ? PromptCard(prompt) : null;
-        centre.Child = pages.CurrentDialog is { } dialog ? DialogCard(dialog) : null;
+        // A prompt is redrawn whenever it is announced (a merged request changes its text); a
+        // dialog only when it is another one, so a half-typed answer survives.
+        if (rebuildPrompt || !ReferenceEquals(shownPrompt, pages.CurrentPrompt))
+        {
+            shownPrompt = pages.CurrentPrompt;
+            leading.Child = shownPrompt is { } prompt ? PromptCard(prompt) : null;
+        }
+        rebuildPrompt = false;
+        if (!ReferenceEquals(shownDialog, pages.CurrentDialog))
+        {
+            shownDialog = pages.CurrentDialog;
+            centre.Child = shownDialog is { } dialog ? DialogCard(dialog) : null;
+        }
 
         // The find card is kept while the bar is open, so typing in it is never interrupted.
         var wanted = new List<UIElement>();
