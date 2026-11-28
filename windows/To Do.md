@@ -55,13 +55,15 @@ Legend: `[ ]` open · `[~]` partly done (what is missing is stated) · `[x]` don
 - [ ] Pop-up blocking with a notice; JavaScript dialogs; context menus; file pickers
 
 ## downloads
-- [ ] Download manager for both engines: progress, pause/resume/cancel/retry, history, search
-- [ ] Download folder, ask where to save, organisation rules
-- [ ] Mark of the Web (Zone.Identifier) on every file; dangerous and misleading file warnings
-- [ ] Toast notification and taskbar progress
-- [ ] Free Download Manager hand-off on Windows (off / ask / always)
-- [ ] Downloads settings
-
+Run 46136495669 = Windows CI x64, unit-test job (`tests/Mosaic.Core.Tests/Downloads`, 84 tests, all passing there and on macOS).
+App-side items are compiled and wired through `FeatureMounts`, but cannot run until winui's M1 is in win-next;
+`DownloadsEndToEndTests` (real app via the automation pipe, throttled local server) is written and switched off until then.
+- [~] Download manager for both engines: progress, pause/resume/cancel/retry, history, search — Core manager unit-tested with fake WebView2 operations and a fake agent; **Gecko verified on CI** (run 46136495669, `GeckoDownloadIntegrationTests`: real Firefox + shared agent, throttled server, start → pause → resume with a `Range` request → complete, a page's attachment adopted, history written in the macOS format). Missing: WebView2 (`WebView2Downloads`) and the `mosaic://downloads` page on CI, waiting on M1
+- [~] Download folder, ask where to save, organisation rules — unit (Known Folder Downloads default, rules, Save As question answered by `downloadPromptSave`, Gecko files moved into their folder); system save dialog (FileSavePicker + InitializeWithWindow) never run: needs a human
+- [~] Mark of the Web (Zone.Identifier) on every file; dangerous and misleading file warnings — **CI**: `ZoneId=3` + `HostUrl`/`ReferrerUrl` written to the ADS and read back (`MarkOfTheWebTests`), and on Gecko downloads (run 46136495669); Windows dangerous types, double/padded extensions and RTL override unit-tested. Missing: Chromium files on CI (M1)
+- [~] Toast notification and taskbar progress — implemented behind one call site (`DownloadSystemHooks`: Windows App SDK app notifications, ITaskbarList3) ready to switch to the system area's `UserNotifications`/`TaskbarProgress`; never run; a real toast needs a signed-in desktop (human)
+- [~] Free Download Manager hand-off on Windows (off / ask / always) — detection (native-messaging manifest `org.freedownloadmanager.fdm5.cnh`, Inno uninstall key, `Softdeluxe\Free Download Manager` folders) and the `wenativehost.exe` handshake/`create_downloads` protocol unit-tested against a fake helper over pipes, on CI too; fallback `fdm.exe <url>`; policy off/ask/always + size threshold unit-tested. Never run against a real FDM (needs a PC with FDM installed)
+- [~] Downloads settings — page written (all macOS settings, Windows wording), settings persisted and unit-tested; not yet seen on CI (M1)
 ## privacy
 - [ ] Private tabs (in-memory profile; nothing on disk)
 - [ ] Blocker: cosmetic filtering, My filters with validation, optional lists, per-page dashboard

@@ -8,11 +8,18 @@ namespace Mosaic.App.Features.Downloads;
 /// Notifications and taskbar progress for downloads.
 /// </summary>
 /// <remarks>
-/// TODO(system): once <c>Features/System</c> provides <c>Notifications</c> and the taskbar helper in
-/// win-next, replace the bodies of <see cref="ShowNotification"/> and <see cref="ShowTaskbarProgress"/>
-/// with calls to them; nothing else in the downloads area talks to these APIs. Until then:
-/// app notifications through the Windows App SDK (registered here, lazily, only when a
-/// notification is first needed) and <c>ITaskbarList3</c>.
+/// TODO(system): when the system area's work (origin/win2/system) is in win-next, replace the
+/// bodies with its API and delete the rest of this file (its own AppNotificationManager
+/// registration must then go, so there is only one per process):
+/// <code>
+/// ShowNotification: UserNotifications.Post(new NotificationRequest("downloads", title, body)
+///     { Arguments = new Dictionary&lt;string, string&gt; { ["download"] = id.ToString() }, Tag = id.ToString() });
+///     and in DownloadsMounts: UserNotifications.Activated += a =&gt; { if (a.Area == "downloads") … open the page };
+/// ShowTaskbarProgress: activeCount == 0 ? TaskbarProgress.Clear("downloads")
+///     : TaskbarProgress.Set("downloads", progress is null ? Indeterminate : Normal, progress ?? 0);
+/// </code>
+/// Nothing else in the downloads area talks to these APIs. Until then: app notifications through
+/// the Windows App SDK (registered lazily, when a notification is first needed) and ITaskbarList3.
 /// </remarks>
 internal static class DownloadSystemHooks
 {
