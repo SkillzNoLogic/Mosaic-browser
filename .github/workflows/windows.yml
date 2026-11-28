@@ -37,8 +37,10 @@ env:
   DOTNET_NOLOGO: '1'
 
 jobs:
-  build:
-    name: Build, test, publish
+  # Unit tests run beside the build, so a failing test does not keep the packages from being
+  # smoke-tested (and the other way round).
+  test:
+    name: Build and unit-test
     # A pull request from one of the branches that are built on push would otherwise be
     # built twice for every commit.
     if: >-
@@ -85,7 +87,7 @@ jobs:
           $firefox = Join-Path $env:ProgramFiles 'Mozilla Firefox\firefox.exe'
           if (Test-Path -LiteralPath $firefox) {
             "MOSAIC_GECKO_EXE=$firefox" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Host "Gecko integration tests will use $firefox"
+            Write-Host "Gecko integration tests will use $firefox ($((Get-Item -LiteralPath $firefox).VersionInfo.ProductVersion))"
           } else {
             Write-Host "::warning::No Firefox on this runner; the Gecko integration tests will not run."
           }
@@ -109,7 +111,45 @@ jobs:
           Write-Host '--- with a window (as Mosaic runs it) ---'
           .\windows\scripts\diagnose-gecko.ps1 -Seconds 20
 
+  build:
+    name: Publish win-x64 and win-arm64
+    # A pull request from one of the branches that are built on push would otherwise be
+    # built twice for every commit.
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.pull_request.head.repo.full_name != github.repository
+      || !contains(fromJSON('["main", "windows"]'), github.head_ref)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Node.js (for esbuild, which bundles the content blocker)
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/Directory.Build.props') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Build the content blocker
+        # uBlock Origin's engine bundled from its pinned, checksum-verified source, and today's
+        # snapshot of the filter lists: what the package ships and the engine tests run.
+        run: .\windows\scripts\bootstrap.ps1 -BlockerOnly
+
       - name: Publish win-x64 and win-arm64
+        # Self-contained: .NET and the Windows App SDK runtime ship inside each package.
         run: .\windows\scripts\build.ps1 -Runtime win-x64, win-arm64 -Zip -SkipTests
 
       - name: Upload the x64 package

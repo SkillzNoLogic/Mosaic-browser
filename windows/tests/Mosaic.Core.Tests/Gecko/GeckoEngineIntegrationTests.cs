@@ -300,8 +300,15 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
                 altL: press("l", { shortcut: true, alt: true }),
                 otherShortcut: press("8", { shortcut: true }),
               };
+              // Who could have stopped a key press: every keydown listener on the way (for the
+              // failure message).
+              const listeners = [win, win.document, root].flatMap(target =>
+                Services.els.getListenerInfoFor(target)
+                  .filter(info => info.type === "keydown")
+                  .map(info => `${target === win ? "window" : target === root ? "root" : "document"}` +
+                               `${info.capturing ? " (capture)" : ""}: ${(() => { try { return String(info.toSource()); } catch (e) { return "(native)"; } })().slice(0, 160)}`));
               return JSON.stringify({ intercepted, tabsOpened: win.gBrowser.tabs.length - before,
-                                      windows: [...Services.wm.getEnumerator("navigator:browser")].length });
+                                      windows: [...Services.wm.getEnumerator("navigator:browser")].length, listeners });
             })()
             """))!.GetValue<string>())!;
 
@@ -309,7 +316,8 @@ public sealed class GeckoEngineIntegrationTests : IDisposable
         // Mosaic's shortcuts, and Gecko's whole-window ones, never reach Gecko's own handling.
         Assert.All(["l", "t", "n", "w", "E", "closeWindow", "privateWindow"], key => Assert.True(intercepted[key], key));
         // Everything else is left to Gecko and the page.
-        Assert.All(["plainL", "altL", "otherShortcut"], key => Assert.False(intercepted[key], key));
+        var listeners = string.Join("\n", pressed["listeners"]!.AsArray().Select(listener => (string?)listener));
+        Assert.All(["plainL", "altL", "otherShortcut"], key => Assert.False(intercepted[key], $"{key} was intercepted; keydown listeners:\n{listeners}"));
         Assert.Equal(0, pressed["tabsOpened"]!.GetValue<int>());
         Assert.Equal(1, pressed["windows"]!.GetValue<int>());
 
