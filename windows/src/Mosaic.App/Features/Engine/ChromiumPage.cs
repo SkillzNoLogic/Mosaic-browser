@@ -109,7 +109,8 @@ internal sealed class ChromiumPage : IChromiumPage
 
     public void SetZoom(double factor)
     {
-        if (Math.Abs(factor - zoom) < 0.0001 && zoomScriptId is not null) return;
+        // Nothing to do at 100 % until a zoom has been applied.
+        if (Math.Abs(factor - zoom) < 0.0001 && (zoomScriptId is not null || PageZoom.IsDefault(factor))) return;
         zoom = factor;
         if (Ready) _ = ApplyZoomAsync();
     }

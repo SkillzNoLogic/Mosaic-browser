@@ -31,6 +31,7 @@ public sealed partial class PageFeatures
         if (request.AutomaticDecision(Permissions) is { } decision)
         {
             Respond(token, decision == SitePermissionDecision.Allow ? PermissionResponse.Allow : PermissionResponse.Deny, null, request.Site);
+            if (decision == SitePermissionDecision.Allow && ReferenceEquals(tab, SelectedTab)) ExplainWindowsBlock(request.Kinds);
             return;
         }
         // WebView2 asks for the camera and the microphone of one getUserMedia call separately;
@@ -97,14 +98,21 @@ public sealed partial class PageFeatures
         {
             Respond(token, response, decision is { } chosen ? (chosen, remembered) : null, prompt.Request.Site);
         }
-        if (decision == SitePermissionDecision.Allow && prompt.BlockedByWindows.Count > 0)
-        {
-            // The site may use it as far as Mosaic is concerned; say plainly who still refuses.
-            var nouns = string.Join(" and ", prompt.BlockedByWindows.Select(WindowsPrivacy.Noun));
-            model.Notice = $"Allowed, but Windows is blocking the {nouns}. See Settings › Privacy & security.";
-        }
+        if (decision == SitePermissionDecision.Allow) ExplainWindowsBlock(prompt.Request.Kinds);
         UpdateOverlays();
         if (prompt.TabId == SelectedTab?.Id) model.FocusContent();
+    }
+
+    /// <summary>
+    /// A site may use a device as far as Mosaic is concerned, but Windows' privacy settings refuse
+    /// it: say plainly who still refuses (the page only sees an error).
+    /// </summary>
+    private void ExplainWindowsBlock(IReadOnlyList<PermissionKind> kinds)
+    {
+        var blocked = kinds.Select(WindowsPrivacy.CapabilityFor).OfType<WindowsCapability>().Distinct()
+            .Where(capability => WindowsPrivacy.Explanation(capability, options.WindowsAccess(capability)) is not null)
+            .Select(WindowsPrivacy.Noun).ToList();
+        if (blocked.Count > 0) model.Notice = $"Allowed, but Windows is blocking the {string.Join(" and ", blocked)}. See Settings › Privacy & security.";
     }
 
     /// <summary>Opens the Windows Settings page for the first device Windows blocks for this prompt.</summary>
