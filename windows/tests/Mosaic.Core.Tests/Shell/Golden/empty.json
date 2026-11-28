@@ -1,0 +1,108 @@
+{
+  "addressBar" : "omnibox",
+  "appearance" : {
+    "accent" : "#1A73E8",
+    "background" : {
+      "color" : "#F2F2F7",
+      "gradient" : {
+        "angle" : 135,
+        "centerX" : 0.5,
+        "centerY" : 0.5,
+        "kind" : "linear",
+        "noise" : 0,
+        "opacity" : 1,
+        "raw" : false,
+        "sharpness" : 2.2,
+        "sources" : [
+
+        ],
+        "stops" : [
+
+        ]
+      },
+      "kind" : "system"
+    },
+    "colorScheme" : "system",
+    "contentCornerRadius" : 0,
+    "contentInset" : 0,
+    "cornerRadius" : 8,
+    "density" : "regular",
+    "glow" : false,
+    "material" : "solid",
+    "newTabBackground" : {
+      "custom" : {
+        "color" : "#F2F2F7",
+        "gradient" : {
+          "angle" : 135,
+          "centerX" : 0.5,
+          "centerY" : 0.5,
+          "kind" : "mesh",
+          "noise" : 0,
+          "opacity" : 1,
+          "raw" : false,
+          "sharpness" : 2.2,
+          "sources" : [
+            {
+              "color" : "#FF7E5F",
+              "id" : "sunset-0",
+              "spread" : 1,
+              "x" : 0.05,
+              "y" : 0.1
+            },
+            {
+              "color" : "#FEB47B",
+              "id" : "sunset-1",
+              "spread" : 1,
+              "x" : 0.95,
+              "y" : 0.15
+            },
+            {
+              "color" : "#6A3093",
+              "id" : "sunset-2",
+              "spread" : 1,
+              "x" : 0.5,
+              "y" : 0.95
+            }
+          ],
+          "stops" : [
+
+          ]
+        },
+        "kind" : "gradient"
+      },
+      "mode" : "plain"
+    },
+    "toolbarSurface" : true,
+    "workspaceBackgrounds" : {
+
+    }
+  },
+  "bookmarksBar" : true,
+  "name" : "Chrome",
+  "preset" : "chrome",
+  "regions" : {
+    "titleBar" : [
+      "tabStrip",
+      "newTab",
+      "flexibleSpace"
+    ],
+    "toolbar" : [
+      "back",
+      "forward",
+      "reload",
+      "home",
+      "addressField",
+      "bookmarkStar",
+      "engineSwitch",
+      "blocker",
+      "extensions",
+      "downloads",
+      "menu"
+    ]
+  },
+  "schemaVersion" : 1,
+  "sidebar" : "collapsible",
+  "sidebarWidth" : 260,
+  "tabPlacement" : "top",
+  "tabStyle" : "chrome"
+}
